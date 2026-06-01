@@ -6,6 +6,9 @@ from .logger import get_logger
 
 log = get_logger("connection")
 
+if cfg.host != "127.0.0.1":
+    log.warning("OpenD host is not localhost (%s) — connection is unencrypted", cfg.host)
+
 
 @contextmanager
 def quote_context():

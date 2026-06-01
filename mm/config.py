@@ -38,6 +38,12 @@ class Config:
     }
 
     trade_password_md5: str = _get("TRADE_PASSWORD_MD5", "")
+    # "strict" = BB touch + KDJ cross + bonus>=min_signal_score (production default)
+    # "permissive" = BB touch only + bonus>=1 (use to validate order execution flow)
+    strategy_mode: str = _get("STRATEGY_MODE", "strict")
+    # How many prior bars bb_touch can have fired before a kdj_cross counts as entry.
+    # 1 = same-bar only (current). Higher values are research-only until sweep confirms improvement.
+    bb_touch_lookback: int = int(_get("BB_TOUCH_LOOKBACK", "1"))
 
     discord_webhook_url: str = _get("DISCORD_WEBHOOK_URL", "")
 

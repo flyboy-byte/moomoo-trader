@@ -126,8 +126,10 @@ def _position_file(symbol: str) -> Path:
 def _save_position(pos: PaperPosition) -> None:
     d = asdict(pos)
     d["entry_time"] = str(pos.entry_time)
-    _position_file(pos.symbol).write_text(json.dumps(d))
-    log.info("Position state saved to disk: %s", _position_file(pos.symbol))
+    path = _position_file(pos.symbol)
+    path.write_text(json.dumps(d))
+    path.chmod(0o600)
+    log.info("Position state saved to disk: %s", path)
 
 
 def _load_position(symbol: str) -> PaperPosition | None:
@@ -307,8 +309,12 @@ def run(symbol: str | None = None) -> None:
                     acc_id = _get_simulate_acc_id(tctx)
 
                 if position is None:
-                    core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
-                    bonus_met = bonus >= cfg.min_signal_score
+                    if cfg.strategy_mode == "permissive":
+                        core_met = bool(last["sig_bb_touch"])
+                        bonus_met = bonus >= 1
+                    else:
+                        core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
+                        bonus_met = bonus >= cfg.min_signal_score
 
                     if core_met and bonus_met:
                         if not daily.can_open():
@@ -496,8 +502,12 @@ def _eval_symbol(symbol: str, tctx, acc_id: int,
     position = positions[symbol]
 
     if position is None:
-        core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
-        bonus_met = bonus >= cfg.min_signal_score
+        if cfg.strategy_mode == "permissive":
+            core_met = bool(last["sig_bb_touch"])
+            bonus_met = bonus >= 1
+        else:
+            core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
+            bonus_met = bonus >= cfg.min_signal_score
 
         if core_met and bonus_met:
             if not daily.can_open():

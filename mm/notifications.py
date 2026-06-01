@@ -11,6 +11,11 @@ log = get_logger("notifications")
 def _post(payload: dict) -> None:
     if not cfg.discord_webhook_url:
         return
+    from urllib.parse import urlparse
+    parsed = urlparse(cfg.discord_webhook_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        log.warning("Invalid DISCORD_WEBHOOK_URL (must be https) — skipping notification")
+        return
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         cfg.discord_webhook_url,

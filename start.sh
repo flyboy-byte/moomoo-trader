@@ -25,7 +25,7 @@ done
 
 # Warn if MAX_POSITION_DOLLARS is too low to trade
 MAX_POS=$(grep -E '^MAX_POSITION_DOLLARS=' .env 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
-if [ -n "$MAX_POS" ] && awk "BEGIN{exit !($MAX_POS < 200)}"; then
+if [[ "$MAX_POS" =~ ^[0-9]+\.?[0-9]*$ ]] && awk "BEGIN{exit !($MAX_POS < 200)}"; then
     echo ""
     echo "WARNING: MAX_POSITION_DOLLARS=$MAX_POS is too low to buy any share of SPY/QQQ/IWM."
     echo "         Edit .env and raise it (IWM ~\$220, SPY ~\$560) before trades will fire."

@@ -10,6 +10,7 @@ Kill switch: create STOP_TRADING.txt in the project root to pause immediately.
 Remove the file to resume. Ctrl-C to exit cleanly.
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,15 @@ from mm.config import cfg
 from mm.health import run_health_check
 from mm.paper import run, run_multi
 
+_SYMBOL_RE = re.compile(r'^[A-Z]{1,2}\.[A-Z0-9]+$')
+
+
+def _validate_symbols(symbols: list[str]) -> None:
+    for sym in symbols:
+        if not _SYMBOL_RE.match(sym):
+            print(f"ERROR: Invalid symbol format '{sym}' — expected e.g. US.SPY, US.IWM")
+            sys.exit(1)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run paper-trading loop")
@@ -26,6 +36,12 @@ def main() -> None:
     parser.add_argument("--symbols", default=None,
                         help="Comma-separated symbols (e.g. US.SPY,US.QQQ,US.IWM)")
     args = parser.parse_args()
+
+    if args.symbol:
+        _validate_symbols([args.symbol])
+    elif args.symbols:
+        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        _validate_symbols(symbols)
 
     if not run_health_check():
         print("OpenD health check failed — aborting")
