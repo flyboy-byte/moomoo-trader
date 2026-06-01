@@ -315,16 +315,17 @@ def run(symbol: str | None = None) -> None:
                             elog.risk_block("daily_limit_reached",
                                             trades=daily.trades, pnl=daily.pnl)
                         else:
-                            qty = calc_qty(close)
+                            qty = calc_qty(close, symbol)
+                            cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
                             if qty == 0:
                                 log.warning(
                                     "RISK BLOCK: one share of %s (%.2f) exceeds "
-                                    "MAX_POSITION_DOLLARS (%.2f) — skipping",
-                                    symbol, close, cfg.max_position_dollars,
+                                    "position cap (%.2f) — skipping",
+                                    symbol, close, cap,
                                 )
                                 elog.risk_block("price_exceeds_max_position",
                                                 price=close,
-                                                max_dollars=cfg.max_position_dollars)
+                                                max_dollars=cap)
                             else:
                                 stop = close - cfg.atr_stop_mult * float(last["atr"])
                                 elog.order_attempt("BUY", qty, close)
@@ -502,12 +503,13 @@ def _eval_symbol(symbol: str, tctx, acc_id: int,
             if not daily.can_open():
                 elog.risk_block("daily_limit_reached", trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = calc_qty(close)
+                qty = calc_qty(close, symbol)
+                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
                 if qty == 0:
-                    log.warning("RISK BLOCK %s: price %.2f exceeds MAX_POSITION_DOLLARS %.2f",
-                                symbol, close, cfg.max_position_dollars)
+                    log.warning("RISK BLOCK %s: price %.2f exceeds position cap %.2f",
+                                symbol, close, cap)
                     elog.risk_block("price_exceeds_max_position", price=close,
-                                    max_dollars=cfg.max_position_dollars)
+                                    max_dollars=cap)
                 else:
                     stop = close - cfg.atr_stop_mult * float(last["atr"])
                     elog.order_attempt("BUY", qty, close)

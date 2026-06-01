@@ -29,6 +29,13 @@ class Config:
     max_trades_per_day: int = int(_get("MAX_TRADES_PER_DAY", "3"))
     max_daily_loss: float = float(_get("MAX_DAILY_LOSS", "5"))
     max_position_dollars: float = float(_get("MAX_POSITION_DOLLARS", "50"))
+    # Per-symbol overrides: "US.IWM:300,US.SPY:600" → {"US.IWM": 300.0, "US.SPY": 600.0}
+    # Falls back to max_position_dollars for symbols not listed.
+    symbol_size_overrides: dict[str, float] = {
+        s.split(":")[0].strip(): float(s.split(":")[1].strip())
+        for s in _get("SYMBOL_SIZE_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
 
     discord_webhook_url: str = _get("DISCORD_WEBHOOK_URL", "")
 

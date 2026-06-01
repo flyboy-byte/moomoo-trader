@@ -35,11 +35,15 @@ def trading_allowed() -> bool:
     return True
 
 
-def calc_qty(price: float) -> int:
-    """Return share count within MAX_POSITION_DOLLARS. Returns 0 if one share exceeds the cap."""
+def calc_qty(price: float, symbol: str | None = None) -> int:
+    """Return share count within position dollar cap. Returns 0 if one share exceeds the cap.
+
+    Uses SYMBOL_SIZE_OVERRIDES for the given symbol if set, else MAX_POSITION_DOLLARS.
+    """
     if price <= 0:
         return 0
-    return math.floor(cfg.max_position_dollars / price)
+    cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars) if symbol else cfg.max_position_dollars
+    return math.floor(cap / price)
 
 
 @dataclass

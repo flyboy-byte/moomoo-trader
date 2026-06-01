@@ -61,6 +61,23 @@ class TestCalcQty:
         risk = _reload_risk(monkeypatch, {"MAX_POSITION_DOLLARS": "50"})
         assert risk.calc_qty(16.0) == 3  # 50/16 = 3.125 → floor 3
 
+    def test_symbol_override_used_when_set(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {
+            "MAX_POSITION_DOLLARS": "50",
+            "SYMBOL_SIZE_OVERRIDES": "US.IWM:300",
+        })
+        assert risk.calc_qty(100.0, "US.IWM") == 3   # 300/100 = 3
+        assert risk.calc_qty(100.0, "US.SPY") == 0   # 50/100 = 0 (falls back to default)
+        assert risk.calc_qty(100.0) == 0              # no symbol → default cap
+
+    def test_symbol_override_allows_trade_blocked_by_default(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {
+            "MAX_POSITION_DOLLARS": "50",
+            "SYMBOL_SIZE_OVERRIDES": "US.IWM:220",
+        })
+        assert risk.calc_qty(210.0, "US.IWM") == 1   # 220/210 = 1
+        assert risk.calc_qty(210.0) == 0              # 50/210 = 0
+
 
 # ---------------------------------------------------------------------------
 # DailyTracker — trade count limit
