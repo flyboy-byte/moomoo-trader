@@ -1,8 +1,8 @@
 # moomoo-trader
 
-Python research and paper-trading platform built on the [Moomoo API](https://openapi.moomoo.com/moomoo-api-doc/). Implements a BB + KDJ mean-reversion strategy with a signal confluence engine, backtesting framework, walk-forward validation, and a live paper-trading loop.
+Python research and paper-trading platform built on the [Moomoo API](https://openapi.moomoo.com/moomoo-api-doc/). Implements a BB + KDJ mean-reversion strategy with a signal confluence engine, full backtesting framework, walk-forward validation, and a live paper-trading loop with terminal dashboard.
 
-> **No live orders are placed.** All trading uses Moomoo's simulated/paper environment (`TRD_ENV=SIMULATE`).
+> **No live orders are placed.** All trading runs through Moomoo's simulated paper environment (`TRD_ENV=SIMULATE`).
 
 ---
 
@@ -19,28 +19,40 @@ pip install -r requirements.txt
 
 ---
 
-## Setup
+## Quick start
 
 ```bash
 cp .env.example .env
-# Edit .env — at minimum set MAX_POSITION_DOLLARS to at least one share's price
+# Edit .env: set MAX_POSITION_DOLLARS to at least one share's price (IWM ~$220, SPY ~$560)
+# Optionally set DISCORD_WEBHOOK_URL for trade alerts
+
+./start.sh               # starts OpenD service + paper runner, warns on bad config
+./stop.sh                # stops paper runner (OpenD stays up)
+
+python scripts/dashboard.py    # open live terminal dashboard in a second window
 ```
 
-Key config variables:
+`start.sh` checks that the OpenD port is alive before starting the runner and warns if `MAX_POSITION_DOLLARS` is too low to place any trade.
+
+---
+
+## Configuration
+
+Key `.env` variables:
 
 | Variable | Default | Description |
 |---|---|---|
 | `TRD_ENV` | `SIMULATE` | Never change — all orders are paper |
 | `LIVE_TRADING_ENABLED` | `false` | Hard kill switch checked before every order |
-| `SYMBOLS` | `US.SPY` | Comma-separated symbols for paper runner |
+| `SYMBOLS` | `US.SPY` | Comma-separated symbols for the paper runner |
 | `CANDLE_KTYPE` | `K_5M` | Candle interval |
-| `MAX_POSITION_DOLLARS` | `50` | Max notional per trade — raise to at least one share's price |
+| `MAX_POSITION_DOLLARS` | `50` | Max notional per trade — **raise this before trading** |
 | `MAX_TRADES_PER_DAY` | `3` | Daily trade count limit |
 | `MAX_DAILY_LOSS` | `5` | Daily loss limit in dollars |
 | `ATR_STOP_MULT` | `1.0` | Stop = entry − N × ATR(14) |
 | `MIN_SIGNAL_SCORE` | `2` | Bonus confirmation signals required (0–3) |
-| `EXIT_ON_KDJ_DEATH` | `false` | Re-enable KDJ death cross exit (research: hurts results) |
-| `DISCORD_WEBHOOK_URL` | _(empty)_ | Optional trade alerts |
+| `EXIT_ON_KDJ_DEATH` | `false` | Re-enable KDJ death cross exit (research shows it hurts) |
+| `DISCORD_WEBHOOK_URL` | _(empty)_ | Optional trade alerts via Discord |
 
 ---
 
@@ -50,51 +62,49 @@ Key config variables:
 
 | | Condition |
 |---|---|
-| **Entry** | `close ≤ BB lower(20,2)` **AND** KDJ(9,3) golden cross **AND** bonus score ≥ `MIN_SIGNAL_SCORE` |
+| **Entry** | `close ≤ BB lower(20,2)` AND KDJ(9,3) golden cross AND bonus score ≥ `MIN_SIGNAL_SCORE` |
 | **Exit — target** | `close ≥ BB middle` |
 | **Exit — stop** | `close < entry_price − ATR_STOP_MULT × ATR(14)` |
 
 ### Signal confluence engine
 
-The core entry (BB touch + KDJ golden cross) is always required. Three independent bonus signals add confirmation:
+The core gate (BB touch + KDJ golden cross) is always required. Three independent bonus signals provide confirmation:
 
-| Signal | Condition | Fire rate |
+| Signal | Condition | Fire rate on valid entries |
 |---|---|---|
-| `rsi_oversold` | RSI(14) < 35 | 97% of valid entries |
-| `volume_spike` | volume > 1.5× 20-bar MA | 88% of valid entries |
-| `ranging` | ADX(14) < 25 | 33% of valid entries |
+| `rsi_oversold` | RSI(14) < 35 | 97% |
+| `volume_spike` | volume > 1.5× 20-bar MA | 88% |
+| `ranging` | ADX(14) < 25 | 33% |
 
-`MIN_SIGNAL_SCORE=2` requires 2 of 3 bonus signals to also fire. This is the validated default.
+`MIN_SIGNAL_SCORE=2` requires 2 of 3 bonus signals. This is the validated optimum — it filters noise while keeping 60 of 77 trades and flipping the exit split to target-dominant.
 
 ---
 
 ## Research findings
 
-Results on 199k 5-min candles, SPY + QQQ + IWM, 2022–2025. Sample sizes are small (60–77 trades over 3.5 years) — treat as directional, not definitive. All findings below survive until forward paper testing shows otherwise.
+All results on 199k 5-min candles, SPY + QQQ + IWM, 2022–2025. Sample sizes are small (60–77 trades over 3.5 years) — treat as directional, not definitive.
 
-### Signal confluence (60 trades at MIN_SIGNAL_SCORE=2)
+### Signal confluence (SPY+QQQ+IWM combined)
 
 | Score threshold | Trades | Win% | Total PnL | Profit factor | Exit split |
 |---|---|---|---|---|---|
 | 0 — BB+KDJ only | 77 | 48.1% | +$15.49 | 1.474 | 52% stop / 48% target |
-| 1 — need 1 bonus | 74 | 50.0% | +$17.56 | 1.573 | 50% / 50% |
-| **2 — need 2 bonus *(default)*** | **60** | **51.7%** | **+$19.12** | **1.843** | **48% stop / 52% target** |
+| 1 — 1 bonus required | 74 | 50.0% | +$17.56 | 1.573 | 50% / 50% |
+| **2 — 2 bonus required *(default)*** | **60** | **51.7%** | **+$19.12** | **1.843** | **48% stop / 52% target** |
 | 3 — all 3 bonus | 11 | — | — | — | too few trades |
 
-Score=2 flips exit split to target-dominant, indicating better signal quality.
+### Multi-symbol breakdown (score ≥ 2)
 
-### Multi-symbol validation
+| Symbol | Trades | Win% | Total PnL | Stop rate | Avg hold |
+|---|---|---|---|---|---|
+| SPY | 22 | 50.0% | +$7.81 | 50% | 309 min |
+| QQQ | 17 | 41.2% | +$2.98 | 58% | 507 min |
+| **IWM** | **21** | **61.9%** | **+$8.33** | **38%** | **132 min** |
+| **Combined** | **60** | **51.7%** | **+$19.12** | **48%** | — |
 
-| Symbol | Trades (score≥2) | Win% | Total PnL |
-|---|---|---|---|
-| SPY | 22 | 50.0% | +$7.81 |
-| QQQ | 17 | 41.2% | +$2.98 |
-| **IWM** | **21** | **61.9%** | **+$8.33** |
-| **Combined** | **60** | **51.7%** | **+$19.12** |
+IWM dominates: lowest stop rate, fastest reversals. Not explained by volatility — IWM's BB+KDJ signal is simply more predictive on this strategy.
 
-IWM outperforms significantly: 38% stop rate (vs 50–58% for SPY/QQQ) and faster mean-reversion (132 min avg hold vs 309/507 min).
-
-### ATR stop multiplier sweep (77 trades, SPY+QQQ+IWM, 90-day walk-forward windows)
+### ATR stop multiplier sweep (77 trades, 90-day walk-forward windows)
 
 | ATR mult | Win% | Total PnL | Profit factor | Consistency |
 |---|---|---|---|---|
@@ -105,25 +115,13 @@ IWM outperforms significantly: 38% stop rate (vs 50–58% for SPY/QQQ) and faste
 | 1.5 | 54.5% | +$11.60 | 1.287 | 21/39 = 54% |
 | 2.0 | 54.5% | +$5.10 | 1.109 | 19/39 = 49% |
 
-ATR=1.0 has the best profit factor with near-best consistency.
+ATR=1.0 has the best profit factor and near-best walk-forward consistency.
 
-### KDJ death cross exit
+### Other findings
 
-Disabling it flips SPY PnL from −$0.83 → +$2.34. The death cross was cutting winning mean-reversion trades before they reached the BB middle. Disabled by default.
-
-### Timeframe comparison
-
-| Timeframe | Trades | Win% | Total PnL | Stop rate |
-|---|---|---|---|---|
-| **K_5M *(default)*** | **77** | **48.1%** | **+$15.49** | **52%** |
-| K_15M | 27 | 40.7% | +$5.61 | 59% |
-| K_60M | 5 | 80.0% | +$16.76 | 20% |
-
-K_5M is best. K_15M produces more stop-outs, not fewer. K_60M has too few signals to be actionable.
-
-### Regime filter sweep (ADX vs BB width alternatives)
-
-7 regime filter variants tested via `scripts/sweep_signals.py`. ADX ranging (ADX < 25) confirmed optimal for combined portfolio: +$19.12 PnL, PF=1.843. BB contracted/expanding filters do not improve results — entries occur during band expansion, not contraction.
+- **KDJ death cross exit disabled** — re-enabling it flips SPY PnL from +$2.34 → −$0.83. It cuts winning mean-reversion trades before they recover to BB middle.
+- **K_5M is the right timeframe** — K_15M produces *more* stop-outs (59% vs 52%), not fewer. K_60M has 5 trades in 3.5 years; not actionable.
+- **ADX ranging confirmed optimal** — 7 alternative regime filters tested (BB contracted/expanding variants). ADX < 25 is best for combined portfolio. BB contracted rarely co-occurs with entries (entries happen during band expansion, not contraction).
 
 ---
 
@@ -131,67 +129,92 @@ K_5M is best. K_15M produces more stop-outs, not fewer. K_60M has too few signal
 
 All scripts run from the project root with the venv active.
 
+### Start / stop the full stack
+
+```bash
+./start.sh    # start OpenD + paper runner (checks port, warns on bad config)
+./stop.sh     # stop paper runner (OpenD stays up)
+```
+
+### Dashboard
+
+```bash
+python scripts/dashboard.py                    # monitor today's live session
+python scripts/dashboard.py --date 2026-06-02  # review a past session
+```
+
+Four tabs: **Overview** (positions per symbol, daily P&L, loss bar, config), **Trades** (entry/exit/P&L per trade), **Signals** (entries, blocks, skips), **Log** (raw JSONL stream). Auto-refreshes every 5s. `r` to refresh, `q` to quit. No OpenD connection needed.
+
+### Paper runner (manual)
+
+```bash
+python scripts/run_paper.py                          # uses SYMBOLS from .env
+python scripts/run_paper.py --symbol US.IWM
+python scripts/run_paper.py --symbols US.SPY,US.QQQ,US.IWM
+```
+
+- Polls OpenD every 60 seconds on closed candles only
+- Position size: `floor(MAX_POSITION_DOLLARS / price)` — blocks if price exceeds cap
+- Resets daily limits at midnight
+- Kill switch: `touch STOP_TRADING.txt` pauses without stopping the process
+- Position persists to disk — restarts safely recover open state
+- Events logged to `logs/paper_{symbol}_{date}.jsonl`
+
 ### Health check
+
 ```bash
 python scripts/health_check.py
 ```
 
 ### Fetch historical candles
+
 ```bash
 python scripts/fetch_candles.py --start 2022-01-01 --end 2025-05-30
 python scripts/fetch_candles.py --symbol US.IWM --ktype K_5M
 ```
 
-### Backtest
+### Backtest and research
+
 ```bash
 python scripts/run_backtest.py --latest
 python scripts/walk_forward.py --latest --window 90
-```
-
-### Research and parameter sweeps
-```bash
 python scripts/research.py --latest --exits --walk-forward
-python scripts/sweep.py --latest --entry strict --window 90
-python scripts/multi_backtest.py --sweep                       # all K_5M CSVs in logs/
-python scripts/sweep_signals.py --latest                       # regime filter comparison
+python scripts/sweep.py --latest --window 90
+python scripts/sweep_signals.py --latest              # regime filter comparison
+python scripts/multi_backtest.py --sweep              # all K_5M CSVs in logs/
 ```
 
-### Paper trading
-```bash
-python scripts/run_paper.py                                    # uses SYMBOLS from .env
-python scripts/run_paper.py --symbol US.IWM
-python scripts/run_paper.py --symbols US.SPY,US.QQQ,US.IWM
-```
+### Validate pipeline
 
-### Dashboard
-
-Live terminal UI — run alongside the paper runner:
-```bash
-python scripts/dashboard.py              # today's session
-python scripts/dashboard.py --date 2026-06-02   # review a past session
-```
-
-Four tabs: **Overview** (positions + daily stats + config), **Trades** (P&L per trade), **Signals** (entries, blocks, skips), **Log** (raw JSONL event stream). Auto-refreshes every 5 seconds. Press `r` to refresh manually, `q` to quit. Reads `logs/paper_*.jsonl` — no OpenD connection needed.
-
-- Polls OpenD every 60 seconds on **closed candles only**
-- Position size: `floor(MAX_POSITION_DOLLARS / price)` — returns 0 and blocks if price exceeds cap
-- Resets daily limits at midnight
-- Kill switch: create `STOP_TRADING.txt` in project root to pause without stopping the process
-- Position persists to disk — restarts safely recover open positions
-- All events logged to `logs/paper_{symbol}_{date}.jsonl`
-
-### Validate paper runner vs backtester
-
-Run a simulation on historical data (no market hours needed):
+Simulate the paper runner on historical data (no market hours needed):
 ```bash
 python scripts/simulate_paper.py logs/US_IWM_K_5M_2026-05-31.csv \
     --start 2024-01-01 --end 2025-05-30 --compare
 ```
 
-Or compare a live paper session against the backtester:
+Compare a live session against the backtester:
 ```bash
 python scripts/compare_paper_vs_backtest.py logs/paper_US_IWM_2026-06-02.jsonl
 ```
+
+---
+
+## Running as a service
+
+The paper runner can run as a systemd user service (alongside OpenD):
+
+```bash
+# Check status
+systemctl --user status moomoo-paper.service
+
+# View logs
+journalctl --user -u moomoo-paper.service -f
+
+# Enable auto-start on login (optional)
+systemctl --user enable moomoo-paper.service
+```
+
+Service file at `~/.config/systemd/user/moomoo-paper.service`. Restarts automatically on failure with a 30s delay.
 
 ---
 
@@ -205,7 +228,7 @@ mm/
   health.py           socket + live quote health check
   data.py             historical candle fetcher with pagination
   indicators.py       BB(20,2), ATR(14), KDJ(9,3), RSI(14), ADX(14), BB width percentile
-  signals.py          signal scoring engine (5 signals, core gate + bonus)
+  signals.py          signal scoring engine (core gate + 3 bonus signals)
   strategy.py         entry/exit state machine, Trade/Signal types
   backtest.py         backtester, walk-forward, print_summary
   research.py         entry/exit variants, parameter sweeps, signal filter sweep
@@ -227,6 +250,7 @@ scripts/
   run_paper.py                  start the paper-trading loop
   dashboard.py                  live terminal dashboard (4-tab Textual TUI)
 
+start.sh / stop.sh              start/stop the full stack
 logs/                           CSV candle data and JSONL event logs (gitignored)
 tests/                          87 tests: risk, indicators/signals, strategy
 ```
@@ -236,7 +260,7 @@ tests/                          87 tests: risk, indicators/signals, strategy
 ## Safety
 
 - `TRD_ENV=SIMULATE` — all orders target Moomoo's paper account, never live
-- `LIVE_TRADING_ENABLED=false` is checked in code before every order
+- `LIVE_TRADING_ENABLED=false` is checked in code before every order attempt
 - `STOP_TRADING.txt` in project root pauses the loop without killing the process
 - `live_trade_runner.py.DISABLED` is intentionally never executed
 - No secrets in code — all config via `.env` (gitignored)
@@ -249,4 +273,4 @@ tests/                          87 tests: risk, indicators/signals, strategy
 python -m pytest tests/ -q    # 87 tests
 ```
 
-Covers: position sizing safety, daily limit guards, kill switch, indicator formulas, signal scoring, KDJ cross detection, strategy entry/exit state machine, integration against real CSV data.
+Covers: position sizing safety, daily limit guards, kill switch behavior, indicator formulas, signal scoring, KDJ cross detection, strategy entry/exit state machine, integration against real CSV data.

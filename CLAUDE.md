@@ -17,8 +17,8 @@ Build a practical Python project for AI-assisted stock strategy research and Moo
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
 Current build state (as of 2026-05-31):
-Core complete. Signal engine, safety tests, JSONL export, position persistence, simulation validation all done.
-Terminal dashboard added (scripts/dashboard.py) — live Textual TUI for monitoring paper sessions.
+All core infrastructure complete. Strategy, backtesting, research sweeps, paper runner, pipeline validation, dashboard, and systemd service all done.
+Stack is runnable end-to-end via ./start.sh. Only blocker for live paper session: raise MAX_POSITION_DOLLARS in .env.
 
 Package layout:
   mm/config.py         — .env loading, cfg singleton (all config lives here)
@@ -48,6 +48,8 @@ Scripts (all run from project root with venv active):
   python scripts/compare_paper_vs_backtest.py [paper_jsonl] [--candle-csv CSV]
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
+  ./start.sh                                                                   # start OpenD + paper runner
+  ./stop.sh                                                                    # stop paper runner
 
 Safety rules (never violate):
 - TRD_ENV=SIMULATE always. Never change to REAL.
