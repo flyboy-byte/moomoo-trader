@@ -1,4 +1,5 @@
 import socket
+import time
 from moomoo import RET_OK
 
 from .config import cfg
@@ -34,10 +35,14 @@ def check_quote(symbol: str = "US.AAPL") -> bool:
         return False
 
 
-def run_health_check() -> bool:
-    ok = check_socket() and check_quote()
-    if ok:
-        log.info("Health check passed")
-    else:
-        log.error("Health check FAILED")
-    return ok
+def run_health_check(retries: int = 6, delay: float = 10.0) -> bool:
+    """Run health check with retries to handle OpenD login flapping on startup."""
+    for attempt in range(1, retries + 1):
+        if check_socket() and check_quote():
+            log.info("Health check passed")
+            return True
+        if attempt < retries:
+            log.warning("Health check failed (attempt %d/%d) — retrying in %.0fs", attempt, retries, delay)
+            time.sleep(delay)
+    log.error("Health check FAILED after %d attempts", retries)
+    return False

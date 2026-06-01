@@ -37,6 +37,8 @@ class Config:
         if ":" in s and s.strip()
     }
 
+    trade_password_md5: str = _get("TRADE_PASSWORD_MD5", "")
+
     discord_webhook_url: str = _get("DISCORD_WEBHOOK_URL", "")
 
     # Research finding: KDJ death cross exit cuts winning mean-reversion trades early.
