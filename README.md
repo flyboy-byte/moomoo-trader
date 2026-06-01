@@ -163,6 +163,16 @@ python scripts/run_paper.py --symbol US.IWM
 python scripts/run_paper.py --symbols US.SPY,US.QQQ,US.IWM
 ```
 
+### Dashboard
+
+Live terminal UI — run alongside the paper runner:
+```bash
+python scripts/dashboard.py              # today's session
+python scripts/dashboard.py --date 2026-06-02   # review a past session
+```
+
+Four tabs: **Overview** (positions + daily stats + config), **Trades** (P&L per trade), **Signals** (entries, blocks, skips), **Log** (raw JSONL event stream). Auto-refreshes every 5 seconds. Press `r` to refresh manually, `q` to quit. Reads `logs/paper_*.jsonl` — no OpenD connection needed.
+
 - Polls OpenD every 60 seconds on **closed candles only**
 - Position size: `floor(MAX_POSITION_DOLLARS / price)` — returns 0 and blocks if price exceeds cap
 - Resets daily limits at midnight
@@ -215,6 +225,7 @@ scripts/
   simulate_paper.py             replay historical CSV through paper-trading logic
   compare_paper_vs_backtest.py  validate paper runner signal engine vs backtester
   run_paper.py                  start the paper-trading loop
+  dashboard.py                  live terminal dashboard (4-tab Textual TUI)
 
 logs/                           CSV candle data and JSONL event logs (gitignored)
 tests/                          87 tests: risk, indicators/signals, strategy

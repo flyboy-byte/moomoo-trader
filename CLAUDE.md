@@ -18,6 +18,7 @@ Intended for GitHub publication. Keep it clean, readable, and extensible but not
 
 Current build state (as of 2026-05-31):
 Core complete. Signal engine, safety tests, JSONL export, position persistence, simulation validation all done.
+Terminal dashboard added (scripts/dashboard.py) — live Textual TUI for monitoring paper sessions.
 
 Package layout:
   mm/config.py         — .env loading, cfg singleton (all config lives here)
@@ -45,6 +46,8 @@ Scripts (all run from project root with venv active):
   python scripts/simulate_paper.py [csv] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--compare]
   python scripts/run_paper.py [--symbol US.SPY]
   python scripts/compare_paper_vs_backtest.py [paper_jsonl] [--candle-csv CSV]
+  python scripts/dashboard.py                                                  # live TUI dashboard
+  python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
 
 Safety rules (never violate):
 - TRD_ENV=SIMULATE always. Never change to REAL.
