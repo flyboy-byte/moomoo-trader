@@ -26,14 +26,17 @@ def market_open() -> bool:
 
 
 def seconds_until_open() -> float:
-    """Return seconds until next market open (9:25 ET for a 5-min warm-up buffer)."""
+    """Return seconds until next market open (2 min early warm-up buffer)."""
     now = datetime.now(_ET)
-    candidate = now.replace(hour=9, minute=25, second=0, microsecond=0)
-    if now >= candidate:
+    if market_open():
+        return 0.0
+    candidate = now.replace(hour=9, minute=28, second=0, microsecond=0)
+    # Only advance to tomorrow if the market has already opened today
+    if now >= now.replace(hour=9, minute=30, second=0, microsecond=0):
         candidate += timedelta(days=1)
     while candidate.weekday() >= 5:
         candidate += timedelta(days=1)
-    return max(0.0, (candidate - now).total_seconds())
+    return max(60.0, (candidate - now).total_seconds())
 
 
 def kill_switch_active() -> bool:

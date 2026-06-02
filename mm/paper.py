@@ -236,10 +236,14 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
 
     last_bar_ts = df.iloc[-1]["time_key"]
     now = datetime.now()
+    age_min = (now - pd.Timestamp(last_bar_ts)).total_seconds() / 60
     log.info(
-        "Candle check: last_bar_ts=%s  eval_time=%s  — dropping last bar (may be forming)",
-        last_bar_ts, now.strftime("%Y-%m-%d %H:%M:%S"),
+        "Candle check: last_bar_ts=%s  eval_time=%s  age=%.0fmin — dropping last bar (may be forming)",
+        last_bar_ts, now.strftime("%Y-%m-%d %H:%M:%S"), age_min,
     )
+    if age_min > 30:
+        log.warning("Stale candles (%.0f min old) — skipping eval", age_min)
+        return pd.DataFrame()
     return df.iloc[:-1].reset_index(drop=True)
 
 
