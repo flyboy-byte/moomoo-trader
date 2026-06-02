@@ -118,7 +118,7 @@ def _render(summary: SessionSummary, evals: list[dict]) -> str:
         for tr in ct:
             et = tr.entry_time[11:16] if tr.entry_time else "?"
             xt = tr.exit_time[11:16] if tr.exit_time else "?"
-            icon = "✓" if tr.exit_reason == "target" else "✗"
+            icon = "✓" if "TARGET" in tr.exit_reason.upper() or tr.exit_reason == "target" else "✗"
             col = _pnl_color(tr.pnl)
             rows += f"""<tr>
               <td>{tr.symbol}</td><td>{et}</td><td>{xt}</td>
