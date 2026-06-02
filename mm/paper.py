@@ -30,7 +30,7 @@ from moomoo import (
 from .config import cfg
 from .data import fetch_candles
 from .notifications import notify, notify_entry, notify_exit
-from .risk import trading_allowed, calc_qty, DailyTracker
+from .risk import trading_allowed, calc_qty, DailyTracker, market_open, seconds_until_open
 from .signals import snapshot as signal_snapshot
 from .strategy import compute_signals
 from .logger import get_logger
@@ -272,6 +272,12 @@ def run(symbol: str | None = None) -> None:
     while True:
         now = datetime.now()
 
+        if not market_open():
+            secs = seconds_until_open()
+            log.info("Market closed — sleeping %.0f min until near open", secs / 60)
+            time.sleep(max(secs, POLL_SECONDS))
+            continue
+
         if not trading_allowed():
             log.info("[%s] Trading blocked — waiting", now.strftime("%H:%M:%S"))
             time.sleep(POLL_SECONDS)
@@ -442,6 +448,12 @@ def run_multi(symbols: list[str] | None = None) -> None:
             elogs[sym].info(f"recovered_position entry={pos.entry_price} stop={pos.stop_price} qty={pos.qty}")
 
     while True:
+        if not market_open():
+            secs = seconds_until_open()
+            log.info("Market closed — sleeping %.0f min until near open", secs / 60)
+            time.sleep(max(secs, POLL_SECONDS))
+            continue
+
         if not trading_allowed():
             log.info("Trading blocked — waiting")
             time.sleep(POLL_SECONDS)

@@ -1,8 +1,9 @@
 """Safety checks run before any order is placed."""
 import math
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from .config import cfg
 from .logger import get_logger
@@ -10,6 +11,29 @@ from .logger import get_logger
 log = get_logger("risk")
 
 _KILL_SWITCH = Path(__file__).parent.parent / "STOP_TRADING.txt"
+_ET = ZoneInfo("America/New_York")
+_OPEN = (9, 30)
+_CLOSE = (16, 0)
+
+
+def market_open() -> bool:
+    """Return True if US equity market is currently open (Mon-Fri 9:30-16:00 ET)."""
+    now = datetime.now(_ET)
+    if now.weekday() >= 5:
+        return False
+    t = (now.hour, now.minute)
+    return _OPEN <= t < _CLOSE
+
+
+def seconds_until_open() -> float:
+    """Return seconds until next market open (9:25 ET for a 5-min warm-up buffer)."""
+    now = datetime.now(_ET)
+    candidate = now.replace(hour=9, minute=25, second=0, microsecond=0)
+    if now >= candidate:
+        candidate += timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return max(0.0, (candidate - now).total_seconds())
 
 
 def kill_switch_active() -> bool:
