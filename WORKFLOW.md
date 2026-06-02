@@ -113,6 +113,35 @@ journalctl --user -u moomoo-paper.service -f
 
 ---
 
+## VPS — OpenD SMS Verification (when Moomoo requires it)
+
+Happens when OpenD restarts after repeated failed logins or Moomoo flags the IP.
+Telnet into OpenD and complete verification via SMS:
+
+```bash
+ssh ubuntu@51.81.80.126
+telnet 127.0.0.1 22222
+```
+
+In the telnet session:
+```
+relogin
+```
+
+Moomoo sends an SMS to your phone. Enter the code:
+```
+input_phone_verify_code -code=XXXXXX
+```
+
+You should see `Login successful` with your account quota. Paper runner reconnects automatically within 60s.
+
+**If phone verify says "not available during current period"** — try `req_pic_verify_code` instead.
+It downloads a CAPTCHA image to `/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png`.
+Copy it locally: `scp ubuntu@51.81.80.126:/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png ~/Desktop/captcha.png`
+Then: `input_pic_verify_code -code=XXXXXX`
+
+---
+
 ## VPS — Daily Operations
 
 ```bash
