@@ -6,3 +6,5 @@ __pycache__/
 STOP_TRADING.txt
 *.db
 *.sqlite
+extra-context/
+resume.txt
