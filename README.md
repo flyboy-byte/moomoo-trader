@@ -1,20 +1,72 @@
 # moomoo-trader
 
-Python research and paper-trading platform built on the [Moomoo API](https://openapi.moomoo.com/moomoo-api-doc/). Implements a BB + KDJ mean-reversion strategy with a signal confluence engine, full backtesting framework, walk-forward validation, and a live paper-trading loop with terminal dashboard.
+Python research and paper-trading platform built on the [Moomoo API](https://openapi.moomoo.com/moomoo-api-doc/). Implements a BB + KDJ mean-reversion strategy with a signal confluence engine, full backtesting framework, walk-forward validation, and a live paper-trading loop with both a terminal dashboard and a web dashboard.
 
 > **No live orders are placed.** All trading runs through Moomoo's simulated paper environment (`TRD_ENV=SIMULATE`).
 
 ---
 
-## Requirements
+## What this is
 
-- Moomoo desktop app installed with OpenD running (`127.0.0.1:11111` by default)
+A complete AI-assisted stock strategy research and paper-trading platform. The core loop:
+
+1. **Research** — sweep strategy parameters against 3+ years of historical candle data across SPY, QQQ, and IWM
+2. **Validate** — walk-forward backtesting and pipeline simulation to confirm signal engine correctness
+3. **Run** — live paper-trading loop that evaluates closed 5-min candles and places SIMULATE orders via Moomoo's API
+4. **Monitor** — terminal TUI or web dashboard showing positions, signals, and daily P&L in real time
+
+The strategy (BB + KDJ mean reversion) has been systematically researched and optimized across 77 trades and 3.5 years of data. See the Research Findings section for full results.
+
+---
+
+## Prerequisites
+
+- A [Moomoo](https://www.moomoo.com) account (free to create, paper trading is free)
+- OpenD installed and running — download from [Moomoo's developer page](https://openapi.moomoo.com/moomoo-api-doc/). Runs at `127.0.0.1:11111` by default
 - Python 3.12+
 
+---
+
+## Clone and run
+
 ```bash
+git clone https://github.com/flyboy-byte/moomoo-trader.git
+cd moomoo-trader
+
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+cp .env.example .env
+# Edit .env — key settings:
+#   SYMBOLS=US.IWM                  (or US.SPY, US.QQQ)
+#   MAX_POSITION_DOLLARS=300        (must cover at least one share)
+#   STRATEGY_MODE=strict            (strict = full signal gate, permissive = looser entry)
+```
+
+Run the health check to confirm OpenD is reachable:
+```bash
+python scripts/health_check.py
+```
+
+Fetch historical candles to use for backtesting:
+```bash
+python scripts/fetch_candles.py --symbol US.IWM --start 2022-01-01 --end 2025-12-31
+python scripts/fetch_candles.py --symbol US.SPY --start 2022-01-01 --end 2025-12-31
+python scripts/fetch_candles.py --symbol US.QQQ --start 2022-01-01 --end 2025-12-31
+```
+
+Run a backtest:
+```bash
+python scripts/run_backtest.py --latest
+```
+
+Start paper trading:
+```bash
+./start.sh
+python scripts/dashboard.py        # terminal dashboard (second window)
+# or
+python scripts/web_dashboard.py    # web dashboard at http://localhost:8080
 ```
 
 ---
@@ -136,14 +188,21 @@ All scripts run from the project root with the venv active.
 ./stop.sh     # stop paper runner (OpenD stays up)
 ```
 
-### Dashboard
+### Dashboards
 
+**Terminal (Textual TUI):**
 ```bash
 python scripts/dashboard.py                    # monitor today's live session
 python scripts/dashboard.py --date 2026-06-02  # review a past session
 ```
-
 Four tabs: **Overview** (positions per symbol, daily P&L, loss bar, config), **Trades** (entry/exit/P&L per trade), **Signals** (entries, blocks, skips), **Log** (raw JSONL stream). Auto-refreshes every 5s. `r` to refresh, `q` to quit. No OpenD connection needed.
+
+**Web dashboard:**
+```bash
+python scripts/web_dashboard.py                # serves at http://localhost:8080
+python scripts/web_dashboard.py --date 2026-06-02  # review past session
+```
+Auto-refreshing browser page showing runner status, signal feed (last 20 bars), open positions, trades, and daily P&L. Accessible from any device on the network. Useful for monitoring a remote VPS runner.
 
 ### Paper runner (manual)
 
@@ -249,6 +308,7 @@ scripts/
   compare_paper_vs_backtest.py  validate paper runner signal engine vs backtester
   run_paper.py                  start the paper-trading loop
   dashboard.py                  live terminal dashboard (4-tab Textual TUI)
+  web_dashboard.py              Flask web dashboard at :8080 (auto-refreshing)
 
 start.sh / stop.sh              start/stop the full stack
 logs/                           CSV candle data and JSONL event logs (gitignored)
