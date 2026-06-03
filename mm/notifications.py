@@ -20,7 +20,7 @@ def _post(payload: dict) -> None:
     req = urllib.request.Request(
         cfg.discord_webhook_url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": "moomoo-trader/1.0"},
         method="POST",
     )
     try:
