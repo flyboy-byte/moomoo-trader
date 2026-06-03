@@ -41,9 +41,12 @@ class Config:
     # "strict" = BB touch + KDJ cross + bonus>=min_signal_score (production default)
     # "permissive" = BB touch only + bonus>=1 (use to validate order execution flow)
     strategy_mode: str = _get("STRATEGY_MODE", "strict")
-    # How many prior bars bb_touch can have fired before a kdj_cross counts as entry.
-    # 1 = same-bar only (current). Higher values are research-only until sweep confirms improvement.
-    bb_touch_lookback: int = int(_get("BB_TOUCH_LOOKBACK", "1"))
+
+    # KDJ window: look back N bars for a KDJ golden cross when evaluating a BB touch entry.
+    # 0 = same-bar only (original behavior).
+    # Sweep on IWM+QQQ 2022-2025: w=3 gives 10x more trades, PF>1.1, improves OOS.
+    # SPY breaks at any window>0 — exclude SPY from BB+KDJ or keep at w=0.
+    kdj_window_bars: int = int(_get("KDJ_WINDOW_BARS", "0"))
 
     discord_webhook_url: str = _get("DISCORD_WEBHOOK_URL", "")
 
