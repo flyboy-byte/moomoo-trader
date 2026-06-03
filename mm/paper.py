@@ -4,11 +4,18 @@ Paper-trading loop.
 Polls OpenD every 60 seconds, evaluates the last N closed 5-min candles through
 the full signal engine, and places simulated orders via OpenSecTradeContext.
 
+Supports multiple simultaneous strategies on the same symbols. Each (symbol, strategy)
+pair has independent position state and P&L tracking. Candles are fetched once per
+symbol per poll and shared across all active strategies.
+
+Active strategies are controlled by STRATEGIES in .env (comma-separated list of
+"bb_kdj" and/or "vwap"). Defaults to STRATEGY_TYPE for backward compatibility.
+
 Kill switch: create STOP_TRADING.txt in the project root to pause without killing
 the process. Remove the file to resume.
 
 Structured event log: every signal check, risk block, order attempt, fill, and exit
-is written to logs/paper_YYYY-MM-DD.jsonl. Separate from backtest logs.
+is written to logs/paper_SYMBOL_YYYY-MM-DD.jsonl with a strategy tag on each event.
 """
 import json
 import time
@@ -29,10 +36,14 @@ from moomoo import (
 
 from .config import cfg
 from .data import fetch_candles
+from .indicators import add_all
 from .notifications import notify, notify_entry, notify_exit
+from .orb_strategy import _build_opening_ranges, ORB_MINUTES, ORB_TARGET_MULT, ORB_VOL_MULT
 from .risk import trading_allowed, calc_qty, DailyTracker, market_open, seconds_until_open
 from .signals import snapshot as signal_snapshot
 from .strategy import compute_signals
+from .vwap_signals import snapshot_vwap
+from .vwap_strategy import compute_vwap_signals, VWAPSignal
 from .logger import get_logger
 
 log = get_logger("paper")
@@ -48,7 +59,11 @@ BACKOFF_SECONDS = 300  # 5 min after repeated failures
 # ---------------------------------------------------------------------------
 
 class PaperEventLog:
-    """Appends structured JSON events to logs/paper_YYYY-MM-DD.jsonl."""
+    """Appends structured JSON events to logs/paper_SYMBOL_YYYY-MM-DD.jsonl.
+
+    Each event includes a strategy tag so multi-strategy runs are distinguishable.
+    One file per symbol per day — all strategies for that symbol share the file.
+    """
 
     def __init__(self, symbol: str) -> None:
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -58,46 +73,52 @@ class PaperEventLog:
         self._path = path
         self._sym = symbol
 
-    def _write(self, event: str, **fields) -> None:
-        record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event, **fields}
+    def _write(self, event: str, strategy: str = "", **fields) -> None:
+        record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event,
+                  "strategy": strategy, **fields}
         with open(self._path, "a") as f:
             f.write(json.dumps(record) + "\n")
 
     def bar_eval(self, candle_ts, eval_ts: datetime, accepted: bool, close: float,
-                 score: int, bonus: int, signals: dict) -> None:
+                 score: int, bonus: int, signals: dict, strategy: str = "") -> None:
         age_s = int((eval_ts - pd.Timestamp(candle_ts)).total_seconds())
-        self._write("bar_eval", candle_ts=str(candle_ts), eval_ts=eval_ts.isoformat(),
-                    candle_age_s=age_s, accepted=accepted, close=round(close, 4),
-                    signal_score=score, bonus_score=bonus, signals=signals)
+        self._write("bar_eval", strategy=strategy, candle_ts=str(candle_ts),
+                    eval_ts=eval_ts.isoformat(), candle_age_s=age_s, accepted=accepted,
+                    close=round(close, 4), signal_score=score, bonus_score=bonus,
+                    signals=signals)
 
-    def signal_skip(self, reason: str, score: int, bonus: int, min_score: int) -> None:
-        self._write("signal_skip", reason=reason, score=score,
+    def signal_skip(self, reason: str, score: int, bonus: int, min_score: int,
+                    strategy: str = "") -> None:
+        self._write("signal_skip", strategy=strategy, reason=reason, score=score,
                     bonus_score=bonus, min_score=min_score)
 
-    def risk_block(self, reason: str, **details) -> None:
-        self._write("risk_block", reason=reason, **details)
+    def risk_block(self, reason: str, strategy: str = "", **details) -> None:
+        self._write("risk_block", strategy=strategy, reason=reason, **details)
 
-    def order_attempt(self, side: str, qty: int, price: float) -> None:
-        self._write("order_attempt", side=side, symbol=self._sym,
+    def order_attempt(self, side: str, qty: int, price: float, strategy: str = "") -> None:
+        self._write("order_attempt", strategy=strategy, side=side, symbol=self._sym,
                     qty=qty, price=round(price, 4))
 
-    def order_result(self, side: str, success: bool, order_id: str = "", error: str = "") -> None:
-        self._write("order_result", side=side, success=success,
+    def order_result(self, side: str, success: bool, order_id: str = "",
+                     error: str = "", strategy: str = "") -> None:
+        self._write("order_result", strategy=strategy, side=side, success=success,
                     order_id=order_id, error=error)
 
-    def position_open(self, entry: float, stop: float, qty: int) -> None:
-        self._write("position_open", symbol=self._sym,
+    def position_open(self, entry: float, stop: float, qty: int,
+                      strategy: str = "") -> None:
+        self._write("position_open", strategy=strategy, symbol=self._sym,
                     entry=round(entry, 4), stop=round(stop, 4), qty=qty)
 
-    def position_close(self, exit_price: float, reason: str, pnl: float) -> None:
-        self._write("position_close", symbol=self._sym,
+    def position_close(self, exit_price: float, reason: str, pnl: float,
+                       strategy: str = "") -> None:
+        self._write("position_close", strategy=strategy, symbol=self._sym,
                     exit=round(exit_price, 4), reason=reason, pnl=round(pnl, 4))
 
-    def error(self, message: str) -> None:
-        self._write("error", message=message)
+    def error(self, message: str, strategy: str = "") -> None:
+        self._write("error", strategy=strategy, message=message)
 
-    def info(self, message: str) -> None:
-        self._write("info", message=message)
+    def info(self, message: str, strategy: str = "") -> None:
+        self._write("info", strategy=strategy, message=message)
 
 
 # ---------------------------------------------------------------------------
@@ -107,55 +128,60 @@ class PaperEventLog:
 @dataclass
 class PaperPosition:
     symbol: str
+    strategy: str
     entry_time: datetime
     entry_price: float
     stop_price: float
     qty: int
     order_id: str = ""
+    target_price: float = 0.0  # fixed target for ORB; 0 = not used (bb_kdj/vwap use dynamic targets)
 
 
 # ---------------------------------------------------------------------------
-# Position state persistence
+# Position state persistence — keyed by (symbol, strategy)
 # ---------------------------------------------------------------------------
 
-def _position_file(symbol: str) -> Path:
+def _position_file(symbol: str, strategy: str) -> Path:
     sym_safe = symbol.replace(".", "_")
-    return cfg.logs_dir / f"paper_{sym_safe}_position.json"
+    return cfg.logs_dir / f"paper_{sym_safe}_{strategy}_position.json"
 
 
 def _save_position(pos: PaperPosition) -> None:
     d = asdict(pos)
     d["entry_time"] = str(pos.entry_time)
-    path = _position_file(pos.symbol)
+    path = _position_file(pos.symbol, pos.strategy)
     path.write_text(json.dumps(d))
     path.chmod(0o600)
-    log.info("Position state saved to disk: %s", path)
+    log.info("Position state saved: %s/%s", pos.symbol, pos.strategy)
 
 
-def _load_position(symbol: str) -> PaperPosition | None:
-    path = _position_file(symbol)
+def _load_position(symbol: str, strategy: str) -> PaperPosition | None:
+    path = _position_file(symbol, strategy)
     if not path.exists():
         return None
     try:
         d = json.loads(path.read_text())
         pos = PaperPosition(
             symbol=d["symbol"],
+            strategy=d.get("strategy", strategy),
             entry_time=datetime.fromisoformat(d["entry_time"]),
             entry_price=d["entry_price"],
             stop_price=d["stop_price"],
             qty=d["qty"],
             order_id=d.get("order_id", ""),
+            target_price=d.get("target_price", 0.0),
         )
-        log.warning("Recovered open position from disk: entry=%.4f stop=%.4f qty=%d",
-                    pos.entry_price, pos.stop_price, pos.qty)
+        log.warning("Recovered open position [%s/%s]: entry=%.4f stop=%.4f qty=%d",
+                    symbol, strategy, pos.entry_price, pos.stop_price, pos.qty)
         return pos
     except Exception as e:
-        log.error("Failed to load position state: %s — starting fresh", e)
+        log.error("Failed to load position state [%s/%s]: %s — starting fresh",
+                  symbol, strategy, e)
         return None
 
 
-def _clear_position(symbol: str) -> None:
-    path = _position_file(symbol)
+def _clear_position(symbol: str, strategy: str) -> None:
+    path = _position_file(symbol, strategy)
     if path.exists():
         path.unlink()
 
@@ -226,7 +252,6 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
 
     The Moomoo API can return the currently forming candle as the last row.
     We always discard it to guarantee we only evaluate closed bars.
-    Logs the dropped candle's timestamp vs current wall time for auditing.
     """
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -250,208 +275,320 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
 
 
 # ---------------------------------------------------------------------------
-# Main loop
+# Per-strategy evaluation — called once per (symbol, strategy) per poll
 # ---------------------------------------------------------------------------
 
-def run(symbol: str | None = None) -> None:
-    symbol = symbol or cfg.symbol
+def _eval_bb_kdj(
+    symbol: str, df_signals: pd.DataFrame, tctx, acc_id: int,
+    position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+) -> PaperPosition | None:
+    """Evaluate BB+KDJ strategy for one symbol on a pre-annotated DataFrame."""
+    last = df_signals.iloc[-1]
+    candle_ts = last["time_key"]
+    close = float(last["close"])
+    now = datetime.now()
 
-    if cfg.trd_env != "SIMULATE":
-        log.error("TRD_ENV is '%s' — paper runner requires SIMULATE. Aborting.", cfg.trd_env)
-        return
+    sig = signal_snapshot(last)
+    bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
+    log.info("%-8s [bb_kdj] BAR %s  close=%.4f  score=%d/5  bonus=%d/3  %s",
+             symbol, candle_ts, close, sig.score, bonus, sig)
+    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
+                  close=close, score=sig.score, bonus=bonus,
+                  signals=sig.details, strategy="bb_kdj")
 
-    log.info("Paper runner starting: symbol=%s ktype=%s min_signal_score=%d",
-             symbol, cfg.candle_ktype, cfg.min_signal_score)
-    notify(f"[PAPER] Runner started: {symbol}")
-
-    elog = PaperEventLog(symbol)
-    elog.info(f"runner_start symbol={symbol} ktype={cfg.candle_ktype} min_signal_score={cfg.min_signal_score}")
-
-    position: PaperPosition | None = _load_position(symbol)
-    if position:
-        elog.info(f"recovered_position entry={position.entry_price} stop={position.stop_price} qty={position.qty}")
-
-    acc_id: int | None = None
-    daily = DailyTracker()
-    consecutive_errors = 0
-
-    while True:
-        now = datetime.now()
-
-        if not market_open():
-            secs = seconds_until_open()
-            log.info("Market closed — sleeping %.0f min until near open", secs / 60)
-            time.sleep(max(secs, POLL_SECONDS))
-            continue
-
-        if not trading_allowed():
-            log.info("[%s] Trading blocked — waiting", now.strftime("%H:%M:%S"))
-            time.sleep(POLL_SECONDS)
-            continue
-
-        try:
-            df = _latest_closed_candles(symbol)
-            if len(df) < 20:
-                log.warning("Not enough candles (%d) — waiting", len(df))
-                time.sleep(POLL_SECONDS)
-                continue
-
-            # Run full indicator + signal engine pipeline (adds bonus_score)
-            df = compute_signals(df)
-            last = df.iloc[-1]
-
-            candle_ts = last["time_key"]
-            close = float(last["close"])
-            sig = signal_snapshot(last)
-            bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
-
-            log.info(
-                "BAR %s  close=%.4f  score=%d/5  bonus=%d/%d  %s",
-                candle_ts, close, sig.score, bonus, 3, sig,
-            )
-
-            elog.bar_eval(
-                candle_ts=candle_ts, eval_ts=now, accepted=True,
-                close=close, score=sig.score, bonus=bonus,
-                signals=sig.details,
-            )
-
-            with trade_context() as tctx:
-                if acc_id is None:
-                    acc_id = _get_simulate_acc_id(tctx)
-
-                if position is None:
-                    if cfg.strategy_mode == "permissive":
-                        core_met = bool(last["sig_bb_touch"])
-                        bonus_met = bonus >= 1
-                    else:
-                        core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
-                        bonus_met = bonus >= cfg.min_signal_score
-
-                    if core_met and bonus_met:
-                        if not daily.can_open():
-                            elog.risk_block("daily_limit_reached",
-                                            trades=daily.trades, pnl=daily.pnl)
-                        else:
-                            qty = calc_qty(close, symbol)
-                            cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                            if qty == 0:
-                                log.warning(
-                                    "RISK BLOCK: one share of %s (%.2f) exceeds "
-                                    "position cap (%.2f) — skipping",
-                                    symbol, close, cap,
-                                )
-                                elog.risk_block("price_exceeds_max_position",
-                                                price=close,
-                                                max_dollars=cap)
-                            else:
-                                stop = close - cfg.atr_stop_mult * float(last["atr"])
-                                elog.order_attempt("BUY", qty, close)
-                                order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                                elog.order_result("BUY", success=bool(order_id),
-                                                  order_id=order_id)
-                                if order_id:
-                                    position = PaperPosition(
-                                        symbol=symbol,
-                                        entry_time=candle_ts,
-                                        entry_price=close,
-                                        stop_price=stop,
-                                        qty=qty,
-                                        order_id=order_id,
-                                    )
-                                    _save_position(position)
-                                    elog.position_open(close, stop, qty)
-                                    notify_entry(symbol, close, stop)
-                                    log.info(
-                                        "POSITION OPEN  entry=%.4f stop=%.4f qty=%d "
-                                        "notional=%.2f order_id=%s",
-                                        close, stop, qty, qty * close, order_id,
-                                    )
-                    elif core_met:
-                        log.info("Signal skip: core met but bonus=%d < %d", bonus, cfg.min_signal_score)
-                        elog.signal_skip("bonus_below_threshold",
-                                         score=sig.score, bonus=bonus,
-                                         min_score=cfg.min_signal_score)
-
-                else:
-                    exit_reason: str | None = None
-                    if close >= float(last["bb_middle"]):
-                        exit_reason = "TARGET_BB_MIDDLE"
-                    elif cfg.exit_on_kdj_death and bool(last["kdj_death_cross"]):
-                        exit_reason = "KDJ_DEATH_CROSS"
-                    elif close < position.stop_price:
-                        exit_reason = "STOP_LOSS"
-
-                    if exit_reason:
-                        pnl_per_share = close - position.entry_price
-                        pnl_total = pnl_per_share * position.qty
-                        elog.order_attempt("SELL", position.qty, close)
-                        order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
-                        elog.order_result("SELL", success=bool(order_id), order_id=order_id)
-                        daily.record_trade(pnl_total)
-                        _clear_position(symbol)
-                        elog.position_close(close, exit_reason, pnl_total)
-                        notify_exit(symbol, close, exit_reason, pnl_total)
-                        log.info(
-                            "POSITION CLOSED  exit=%.4f qty=%d pnl/share=%+.4f "
-                            "pnl_total=%+.4f reason=%s",
-                            close, position.qty, pnl_per_share, pnl_total, exit_reason,
-                        )
-                        position = None
-
-        except KeyboardInterrupt:
-            log.info("Paper runner stopped by user")
-            elog.info("runner_stop reason=keyboard_interrupt")
-            notify(f"[PAPER] Runner stopped: {symbol}")
-            break
-        except Exception as e:
-            consecutive_errors += 1
-            log.error("Loop error #%d: %s", consecutive_errors, e, exc_info=True)
-            elog.error(str(e))
-            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                wait = BACKOFF_SECONDS
-                log.warning("%d consecutive errors — backing off %ds", consecutive_errors, wait)
-                notify(f"[PAPER] {consecutive_errors} consecutive errors, backing off {wait}s")
-                time.sleep(wait)
-                consecutive_errors = 0
-                continue
+    if position is None:
+        if cfg.strategy_mode == "permissive":
+            core_met = bool(last["sig_bb_touch"])
+            bonus_met = bonus >= 1
         else:
-            consecutive_errors = 0
+            core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
+            bonus_met = bonus >= cfg.min_signal_score
 
-        time.sleep(POLL_SECONDS)  # single-symbol loop end
+        if core_met and bonus_met:
+            if not daily.can_open():
+                elog.risk_block("daily_limit_reached", strategy="bb_kdj",
+                                trades=daily.trades, pnl=daily.pnl)
+            else:
+                qty = calc_qty(close, symbol)
+                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
+                if qty == 0:
+                    log.warning("RISK BLOCK [bb_kdj] %s: price %.2f exceeds cap %.2f",
+                                symbol, close, cap)
+                    elog.risk_block("price_exceeds_max_position", strategy="bb_kdj",
+                                    price=close, max_dollars=cap)
+                else:
+                    stop = close - cfg.atr_stop_mult * float(last["atr"])
+                    elog.order_attempt("BUY", qty, close, strategy="bb_kdj")
+                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                    elog.order_result("BUY", success=bool(order_id),
+                                      order_id=order_id, strategy="bb_kdj")
+                    if order_id:
+                        position = PaperPosition(
+                            symbol=symbol, strategy="bb_kdj",
+                            entry_time=candle_ts, entry_price=close,
+                            stop_price=stop, qty=qty, order_id=order_id,
+                        )
+                        _save_position(position)
+                        elog.position_open(close, stop, qty, strategy="bb_kdj")
+                        notify_entry(symbol, close, stop)
+                        log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%d",
+                                 symbol, close, stop, qty)
+        elif core_met:
+            log.info("%-8s [bb_kdj] SKIP  bonus=%d < %d", symbol, bonus, cfg.min_signal_score)
+            elog.signal_skip("bonus_below_threshold", score=sig.score,
+                             bonus=bonus, min_score=cfg.min_signal_score, strategy="bb_kdj")
+    else:
+        exit_reason: str | None = None
+        if close >= float(last["bb_middle"]):
+            exit_reason = "TARGET_BB_MIDDLE"
+        elif cfg.exit_on_kdj_death and bool(last["kdj_death_cross"]):
+            exit_reason = "KDJ_DEATH_CROSS"
+        elif close < position.stop_price:
+            exit_reason = "STOP_LOSS"
+
+        if exit_reason:
+            pnl_per_share = close - position.entry_price
+            pnl_total = pnl_per_share * position.qty
+            elog.order_attempt("SELL", position.qty, close, strategy="bb_kdj")
+            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
+            elog.order_result("SELL", success=bool(order_id),
+                              order_id=order_id, strategy="bb_kdj")
+            daily.record_trade(pnl_total)
+            _clear_position(symbol, "bb_kdj")
+            elog.position_close(close, exit_reason, pnl_total, strategy="bb_kdj")
+            notify_exit(symbol, close, exit_reason, pnl_total)
+            log.info("%-8s [bb_kdj] CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                     symbol, close, pnl_total, exit_reason)
+            position = None
+
+    return position
+
+
+def _eval_vwap(
+    symbol: str, df_signals: pd.DataFrame, tctx, acc_id: int,
+    position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+) -> PaperPosition | None:
+    """Evaluate VWAP strategy for one symbol on a pre-annotated DataFrame."""
+    last = df_signals.iloc[-1]
+    candle_ts = last["time_key"]
+    close = float(last["close"])
+    now = datetime.now()
+
+    vsig = snapshot_vwap(last)
+    log.info("%-8s [vwap]   BAR %s  close=%.4f  vwap=%.4f  dist=%.2fATR  entry=%s",
+             symbol, candle_ts, close, vsig.vwap, vsig.distance_atr, vsig.entry_ready)
+    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
+                  close=close, score=int(vsig.entry_ready), bonus=0,
+                  signals=vsig.details, strategy="vwap")
+
+    if position is None:
+        entry_ok = (bool(last.get("vwap_entry", False)) and
+                    float(last.get("session_return", 0)) > -0.015)
+        if entry_ok:
+            if not daily.can_open():
+                elog.risk_block("daily_limit_reached", strategy="vwap",
+                                trades=daily.trades, pnl=daily.pnl)
+            else:
+                qty = calc_qty(close, symbol)
+                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
+                if qty == 0:
+                    log.warning("RISK BLOCK [vwap] %s: price %.2f exceeds cap %.2f",
+                                symbol, close, cap)
+                    elog.risk_block("price_exceeds_max_position", strategy="vwap",
+                                    price=close, max_dollars=cap)
+                else:
+                    stop = close - cfg.vwap_stop_mult * float(last["atr"])
+                    elog.order_attempt("BUY", qty, close, strategy="vwap")
+                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                    elog.order_result("BUY", success=bool(order_id),
+                                      order_id=order_id, strategy="vwap")
+                    if order_id:
+                        position = PaperPosition(
+                            symbol=symbol, strategy="vwap",
+                            entry_time=candle_ts, entry_price=close,
+                            stop_price=stop, qty=qty, order_id=order_id,
+                        )
+                        _save_position(position)
+                        elog.position_open(close, stop, qty, strategy="vwap")
+                        notify_entry(symbol, close, stop)
+                        log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%d",
+                                 symbol, close, stop, qty)
+    else:
+        from datetime import time as dtime
+        exit_reason: str | None = None
+        bar_time = pd.Timestamp(candle_ts).time()
+        if bar_time >= dtime(15, 45):
+            exit_reason = "TIME_STOP"
+        elif close >= float(last["vwap"]):
+            exit_reason = "VWAP_TARGET"
+        elif close < position.stop_price:
+            exit_reason = "VWAP_STOP"
+
+        if exit_reason:
+            pnl_per_share = close - position.entry_price
+            pnl_total = pnl_per_share * position.qty
+            elog.order_attempt("SELL", position.qty, close, strategy="vwap")
+            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
+            elog.order_result("SELL", success=bool(order_id),
+                              order_id=order_id, strategy="vwap")
+            daily.record_trade(pnl_total)
+            _clear_position(symbol, "vwap")
+            elog.position_close(close, exit_reason, pnl_total, strategy="vwap")
+            notify_exit(symbol, close, exit_reason, pnl_total)
+            log.info("%-8s [vwap]   CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                     symbol, close, pnl_total, exit_reason)
+            position = None
+
+    return position
+
+
+def _eval_orb(
+    symbol: str, df_raw: pd.DataFrame, tctx, acc_id: int,
+    position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+) -> PaperPosition | None:
+    """Evaluate ORB strategy (long-only) for one symbol.
+
+    Short entries are skipped in the live runner — they require TrdSide.SELL_SHORT
+    with margin handling not yet wired up. Backtest PnL includes shorts; live will be
+    long-only. Net effect: roughly half the trade frequency of the backtest.
+    """
+    from datetime import time as dtime
+
+    df = add_all(df_raw.copy())
+    last = df.iloc[-1]
+    candle_ts = last["time_key"]
+    close = float(last["close"])
+    bar_time = pd.Timestamp(candle_ts)
+    bar_date = bar_time.date()
+    bar_clock = bar_time.time()
+    now = datetime.now()
+    is_time_stop = bar_clock >= dtime(15, 45)
+
+    ranges = _build_opening_ranges(df)
+    or_info = ranges.get(bar_date)
+    or_valid = or_info is not None and or_info["valid"]
+
+    signals_dict = {
+        "or_valid": or_valid,
+        "or_high": round(or_info["high"], 4) if or_info else None,
+        "or_low": round(or_info["low"], 4) if or_info else None,
+        "above_or_high": bool(close > or_info["high"]) if or_info else False,
+    }
+    log.info("%-8s [orb]    BAR %s  close=%.4f  or_valid=%s", symbol, candle_ts, close, or_valid)
+    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
+                  close=close, score=int(or_valid), bonus=0,
+                  signals=signals_dict, strategy="orb")
+
+    if position is not None:
+        exit_reason: str | None = None
+        if is_time_stop:
+            exit_reason = "TIME_STOP"
+        elif position.target_price > 0 and close >= position.target_price:
+            exit_reason = "TARGET"
+        elif close <= position.stop_price:
+            exit_reason = "STOP"
+
+        if exit_reason:
+            pnl_per_share = close - position.entry_price
+            pnl_total = pnl_per_share * position.qty
+            elog.order_attempt("SELL", position.qty, close, strategy="orb")
+            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
+            elog.order_result("SELL", success=bool(order_id),
+                              order_id=order_id, strategy="orb")
+            daily.record_trade(pnl_total)
+            _clear_position(symbol, "orb")
+            elog.position_close(close, exit_reason, pnl_total, strategy="orb")
+            notify_exit(symbol, close, exit_reason, pnl_total)
+            log.info("%-8s [orb]    CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                     symbol, close, pnl_total, exit_reason)
+            position = None
+
+    elif or_valid and not is_time_stop:
+        or_high = or_info["high"]
+        or_low = or_info["low"]
+        or_range = or_high - or_low
+        cutoff = dtime(9, 30 + ORB_MINUTES) if 30 + ORB_MINUTES < 60 else \
+                 dtime(10, (30 + ORB_MINUTES) % 60)
+        vol_ok = float(last.get("volume", 0)) > ORB_VOL_MULT * float(last.get("volume_ma", 1))
+
+        if bar_clock >= cutoff and close > or_high and vol_ok:
+            if not daily.can_open():
+                elog.risk_block("daily_limit_reached", strategy="orb",
+                                trades=daily.trades, pnl=daily.pnl)
+            else:
+                qty = calc_qty(close, symbol)
+                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
+                if qty == 0:
+                    log.warning("RISK BLOCK [orb] %s: price %.2f exceeds cap %.2f",
+                                symbol, close, cap)
+                    elog.risk_block("price_exceeds_max_position", strategy="orb",
+                                    price=close, max_dollars=cap)
+                else:
+                    stop = or_low
+                    target = close + ORB_TARGET_MULT * or_range
+                    elog.order_attempt("BUY", qty, close, strategy="orb")
+                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                    elog.order_result("BUY", success=bool(order_id),
+                                      order_id=order_id, strategy="orb")
+                    if order_id:
+                        position = PaperPosition(
+                            symbol=symbol, strategy="orb",
+                            entry_time=candle_ts, entry_price=close,
+                            stop_price=stop, target_price=target,
+                            qty=qty, order_id=order_id,
+                        )
+                        _save_position(position)
+                        elog.position_open(close, stop, qty, strategy="orb")
+                        notify_entry(symbol, close, stop)
+                        log.info("%-8s [orb]    OPEN  entry=%.4f stop=%.4f target=%.4f qty=%d",
+                                 symbol, close, stop, target, qty)
+
+    return position
 
 
 # ---------------------------------------------------------------------------
-# Multi-symbol loop
+# Multi-symbol loop — fetches candles once, runs all active strategies
 # ---------------------------------------------------------------------------
 
 def run_multi(symbols: list[str] | None = None) -> None:
-    """Run the paper loop across multiple symbols sequentially each poll cycle.
+    """Run the paper loop across multiple symbols and strategies each poll cycle.
 
-    Shares one DailyTracker (total trades/loss across all symbols).
-    Each symbol has its own position state and event log.
+    Candles are fetched once per symbol. All active strategies evaluate the same
+    bar. Each (symbol, strategy) pair has independent position state.
+
+    Active strategies: cfg.active_strategies (from STRATEGIES env var).
+    Shared DailyTracker: combined daily loss/trade limit across all strategies.
     """
     symbols = symbols or cfg.symbols
+    strategies = cfg.active_strategies
 
     if cfg.trd_env != "SIMULATE":
         log.error("TRD_ENV is '%s' — paper runner requires SIMULATE. Aborting.", cfg.trd_env)
         return
 
-    log.info("Multi-symbol paper runner: %s  ktype=%s  min_signal_score=%d",
-             symbols, cfg.candle_ktype, cfg.min_signal_score)
-    notify(f"[PAPER] Multi runner started: {', '.join(symbols)}")
+    log.info("Multi runner: symbols=%s  strategies=%s  ktype=%s  min_signal_score=%d",
+             symbols, strategies, cfg.candle_ktype, cfg.min_signal_score)
+    notify(f"[PAPER] Multi runner started: {', '.join(symbols)} | {', '.join(strategies)}")
 
-    positions: dict[str, PaperPosition | None] = {
-        sym: _load_position(sym) for sym in symbols
+    # positions[(symbol, strategy)] = PaperPosition | None
+    positions: dict[tuple[str, str], PaperPosition | None] = {
+        (sym, strat): _load_position(sym, strat)
+        for sym in symbols
+        for strat in strategies
     }
+    # One event log per symbol (all strategies share the file, tagged per event)
     elogs: dict[str, PaperEventLog] = {sym: PaperEventLog(sym) for sym in symbols}
+
     acc_id: int | None = None
     daily = DailyTracker()
     consecutive_errors = 0
 
-    for sym, pos in positions.items():
+    for (sym, strat), pos in positions.items():
         if pos:
-            elogs[sym].info(f"recovered_position entry={pos.entry_price} stop={pos.stop_price} qty={pos.qty}")
+            elogs[sym].info(
+                f"recovered_position entry={pos.entry_price} stop={pos.stop_price} qty={pos.qty}",
+                strategy=strat,
+            )
 
     while True:
         if not market_open():
@@ -470,7 +607,9 @@ def run_multi(symbols: list[str] | None = None) -> None:
                 if acc_id is None:
                     acc_id = _get_simulate_acc_id(tctx)
                 for symbol in symbols:
-                    _eval_symbol(symbol, tctx, acc_id, positions, elogs, daily)
+                    _eval_symbol_all_strategies(
+                        symbol, strategies, tctx, acc_id, positions, elogs, daily,
+                    )
 
         except KeyboardInterrupt:
             log.info("Multi runner stopped by user")
@@ -493,89 +632,56 @@ def run_multi(symbols: list[str] | None = None) -> None:
         time.sleep(POLL_SECONDS)
 
 
-def _eval_symbol(symbol: str, tctx, acc_id: int,
-                 positions: dict, elogs: dict, daily: DailyTracker) -> None:
-    """Evaluate one symbol within the multi-symbol loop."""
+def _eval_symbol_all_strategies(
+    symbol: str,
+    strategies: list[str],
+    tctx,
+    acc_id: int,
+    positions: dict[tuple[str, str], PaperPosition | None],
+    elogs: dict[str, PaperEventLog],
+    daily: DailyTracker,
+) -> None:
+    """Fetch candles once for symbol, then evaluate each active strategy."""
     elog = elogs[symbol]
-    now = datetime.now()
 
-    df = _latest_closed_candles(symbol)
-    if len(df) < 20:
-        log.warning("%s: not enough candles (%d)", symbol, len(df))
+    df_raw = _latest_closed_candles(symbol)
+    if len(df_raw) < 20:
+        log.warning("%s: not enough candles (%d)", symbol, len(df_raw))
         return
 
-    df = compute_signals(df)
-    last = df.iloc[-1]
+    # Annotate once per strategy type needed (avoid double compute_signals)
+    df_bb: pd.DataFrame | None = None
+    df_vwap: pd.DataFrame | None = None
 
-    candle_ts = last["time_key"]
-    close = float(last["close"])
-    sig = signal_snapshot(last)
-    bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
-
-    log.info("%-8s  BAR %s  close=%.4f  score=%d/5  bonus=%d/3  %s",
-             symbol, candle_ts, close, sig.score, bonus, sig)
-    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
-                  close=close, score=sig.score, bonus=bonus, signals=sig.details)
-
-    position = positions[symbol]
-
-    if position is None:
-        if cfg.strategy_mode == "permissive":
-            core_met = bool(last["sig_bb_touch"])
-            bonus_met = bonus >= 1
+    for strat in strategies:
+        if strat == "bb_kdj":
+            if df_bb is None:
+                df_bb = compute_signals(df_raw)
+            positions[(symbol, strat)] = _eval_bb_kdj(
+                symbol, df_bb, tctx, acc_id,
+                positions[(symbol, strat)], elog, daily,
+            )
+        elif strat == "vwap":
+            if df_vwap is None:
+                df_vwap = compute_vwap_signals(df_raw)
+            positions[(symbol, strat)] = _eval_vwap(
+                symbol, df_vwap, tctx, acc_id,
+                positions[(symbol, strat)], elog, daily,
+            )
+        elif strat == "orb":
+            positions[(symbol, strat)] = _eval_orb(
+                symbol, df_raw, tctx, acc_id,
+                positions[(symbol, strat)], elog, daily,
+            )
         else:
-            core_met = bool(last["sig_bb_touch"]) and bool(last["sig_kdj_cross"])
-            bonus_met = bonus >= cfg.min_signal_score
+            log.warning("Unknown strategy '%s' — skipping", strat)
 
-        if core_met and bonus_met:
-            if not daily.can_open():
-                elog.risk_block("daily_limit_reached", trades=daily.trades, pnl=daily.pnl)
-            else:
-                qty = calc_qty(close, symbol)
-                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                if qty == 0:
-                    log.warning("RISK BLOCK %s: price %.2f exceeds position cap %.2f",
-                                symbol, close, cap)
-                    elog.risk_block("price_exceeds_max_position", price=close,
-                                    max_dollars=cap)
-                else:
-                    stop = close - cfg.atr_stop_mult * float(last["atr"])
-                    elog.order_attempt("BUY", qty, close)
-                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                    elog.order_result("BUY", success=bool(order_id), order_id=order_id)
-                    if order_id:
-                        pos = PaperPosition(symbol=symbol, entry_time=candle_ts,
-                                            entry_price=close, stop_price=stop,
-                                            qty=qty, order_id=order_id)
-                        positions[symbol] = pos
-                        _save_position(pos)
-                        elog.position_open(close, stop, qty)
-                        notify_entry(symbol, close, stop)
-                        log.info("%-8s  OPEN  entry=%.4f stop=%.4f qty=%d",
-                                 symbol, close, stop, qty)
-        elif core_met:
-            log.info("%-8s  SKIP  bonus=%d < %d", symbol, bonus, cfg.min_signal_score)
-            elog.signal_skip("bonus_below_threshold", score=sig.score,
-                             bonus=bonus, min_score=cfg.min_signal_score)
-    else:
-        exit_reason: str | None = None
-        if close >= float(last["bb_middle"]):
-            exit_reason = "TARGET_BB_MIDDLE"
-        elif cfg.exit_on_kdj_death and bool(last["kdj_death_cross"]):
-            exit_reason = "KDJ_DEATH_CROSS"
-        elif close < position.stop_price:
-            exit_reason = "STOP_LOSS"
 
-        if exit_reason:
-            pnl_per_share = close - position.entry_price
-            pnl_total = pnl_per_share * position.qty
-            elog.order_attempt("SELL", position.qty, close)
-            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
-            elog.order_result("SELL", success=bool(order_id), order_id=order_id)
-            daily.record_trade(pnl_total)
-            _clear_position(symbol)
-            positions[symbol] = None
-            elog.position_close(close, exit_reason, pnl_total)
-            notify_exit(symbol, close, exit_reason, pnl_total)
-            log.info("%-8s  CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, close, pnl_total, exit_reason)
+# ---------------------------------------------------------------------------
+# Single-symbol entry point (backward compat)
+# ---------------------------------------------------------------------------
+
+def run(symbol: str | None = None) -> None:
+    """Single-symbol paper runner. Wraps run_multi for backward compatibility."""
+    symbol = symbol or cfg.symbol
+    run_multi(symbols=[symbol])

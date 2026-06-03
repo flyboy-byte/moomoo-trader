@@ -61,6 +61,28 @@ class Config:
     # 0 = original BB+KDJ only.  2 = 51.7% win, PF=1.843, 60 trades (default).
     min_signal_score: int = int(_get("MIN_SIGNAL_SCORE", "2"))
 
+    # Strategy selector: "bb_kdj" = original mean reversion, "vwap" = VWAP scalp day trader
+    strategy_type: str = _get("STRATEGY_TYPE", "bb_kdj")
+    # Multi-strategy: comma-separated list of active strategies. Defaults to strategy_type.
+    # Example: STRATEGIES=bb_kdj,vwap  runs both simultaneously on the same symbols.
+    active_strategies: list[str] = [
+        s.strip() for s in _get("STRATEGIES", _get("STRATEGY_TYPE", "bb_kdj")).split(",")
+        if s.strip()
+    ]
+
+    # VWAP strategy parameters
+    vwap_band_mult: float = float(_get("VWAP_BAND_MULT", "0.5"))
+    vwap_stop_mult: float = float(_get("VWAP_STOP_MULT", "0.75"))
+
+    # ORB strategy parameters
+    # orb_minutes: opening range window in minutes (15 or 30). 15 min optimal per sweep.
+    orb_minutes: int = int(_get("ORB_MINUTES", "15"))
+    # orb_target_mult: target = mult × OR range height. 1.5 optimal per sweep (PF=1.215).
+    orb_target_mult: float = float(_get("ORB_TARGET_MULT", "1.5"))
+    orb_vol_mult: float = float(_get("ORB_VOL_MULT", "1.2"))
+    orb_min_range_pct: float = float(_get("ORB_MIN_RANGE_PCT", "0.001"))
+    orb_max_range_pct: float = float(_get("ORB_MAX_RANGE_PCT", "0.008"))
+
     logs_dir: Path = Path(__file__).parent.parent / "logs"
 
 

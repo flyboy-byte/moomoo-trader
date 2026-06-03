@@ -87,6 +87,26 @@ def bb_width_percentile(df: pd.DataFrame, window: int = BB_PERCENTILE_WINDOW) ->
     return df
 
 
+def vwap(df: pd.DataFrame) -> pd.DataFrame:
+    """Add session-aware VWAP.
+
+    VWAP = cumsum(typical_price * volume) / cumsum(volume), reset each trading day.
+    Requires time_key column with datetime values. If absent, vwap column is NaN.
+    Adds: vwap
+    """
+    df = df.copy()
+    if "time_key" not in df.columns:
+        df["vwap"] = float("nan")
+        return df
+    typical = (df["high"] + df["low"] + df["close"]) / 3
+    pv = typical * df["volume"]
+    dates = pd.to_datetime(df["time_key"]).dt.date
+    cum_pv = pv.groupby(dates).cumsum()
+    cum_vol = df["volume"].groupby(dates).cumsum()
+    df["vwap"] = cum_pv / cum_vol.replace(0, float("nan"))
+    return df
+
+
 def add_all(df: pd.DataFrame) -> pd.DataFrame:
     """Add all indicators used by the signal engine."""
     df = bollinger_bands(df)
@@ -98,4 +118,5 @@ def add_all(df: pd.DataFrame) -> pd.DataFrame:
     df = rsi(df)
     df = adx(df)
     df["volume_ma"] = df["volume"].rolling(20).mean()
+    df = vwap(df)
     return df
