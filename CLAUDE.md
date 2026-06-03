@@ -16,22 +16,29 @@ Goal:
 Build a practical Python project for AI-assisted stock strategy research and Moomoo paper trading.
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
-Current build state (as of 2026-05-31):
-All core infrastructure complete. Strategy, backtesting, research sweeps, paper runner, pipeline validation, dashboard, and systemd service all done.
-Stack is runnable end-to-end via ./start.sh. Only blocker for live paper session: raise MAX_POSITION_DOLLARS in .env.
+Current build state (as of 2026-06-03):
+All core infrastructure complete. Multi-strategy paper runner live on VPS (bb_kdj + orb + vwap_pb on SPY/QQQ/IWM).
+Stack is runnable end-to-end via ./start.sh. Paper runner is running but no trades have fired yet — market conditions
+haven't triggered entry signals. Awaiting first live trade for compare_paper_vs_backtest.py validation.
 
 Package layout:
   mm/config.py         — .env loading, cfg singleton (all config lives here)
-  mm/logger.py         — file + console logging
+  mm/logger.py         — file + console logging (TimedRotatingFileHandler, midnight rotation, 30-day retention)
   mm/connection.py     — quote_context() context manager for OpenD
   mm/health.py         — run_health_check() (socket + quote ping)
   mm/data.py           — fetch_candles(), fetch_and_save()
-  mm/indicators.py     — bollinger_bands(), atr(), kdj(), add_all()
-  mm/strategy.py       — run_signals(), Trade, Signal (entry/exit logic)
+  mm/indicators.py     — bollinger_bands(), atr(), kdj(), rsi(), adx(), vwap(), ema(), add_all()
+  mm/signals.py        — score_df(), snapshot() — BB+KDJ signal scoring
+  mm/strategy.py       — compute_signals(), run_signals(), Trade, Signal
   mm/backtest.py       — run_backtest(), walk_forward(), print_summary()
   mm/research.py       — compare_variants(), sweep_parameters(), analyze_stop_exits(), sweep_signal_filter()
   mm/risk.py           — trading_allowed(), calc_qty(), DailyTracker
-  mm/paper.py          — paper trading loop with SIMULATE orders
+  mm/paper.py          — multi-strategy paper trading loop (bb_kdj, orb, vwap_pb, vwap)
+  mm/orb_strategy.py   — ORB backtest engine, _build_opening_ranges() (supports per-symbol orb_minutes)
+  mm/vwap_pullback.py  — VWAP Pullback (flush-and-reclaim) backtest engine
+  mm/vwap_strategy.py  — VWAP crossover strategy (deprecated, PF≈1.0)
+  mm/vwap_signals.py   — VWAP signal scoring (used by vwap crossover strategy)
+  mm/ema_momentum.py   — EMA5/EMA20 momentum breakout backtest engine (research only, not deployed)
   mm/notifications.py  — Discord webhook (no-ops if URL not set)
 
 Scripts (all run from project root with venv active):
@@ -46,10 +53,13 @@ Scripts (all run from project root with venv active):
   python scripts/simulate_paper.py [csv] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--compare]
   python scripts/run_paper.py [--symbol US.SPY]
   python scripts/compare_paper_vs_backtest.py [paper_jsonl] [--candle-csv CSV]
+  python scripts/backtest_vwap_pb.py [csvs...] [--latest] [--all] [--sweep]
+  python scripts/backtest_ema_momentum.py [csvs...] [--latest] [--all] [--sweep] [--entry cross|pullback]
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
   ./start.sh                                                                   # start OpenD + paper runner
   ./stop.sh                                                                    # stop paper runner
+  ./sync_logs.sh                                                               # rsync VPS logs → local logs/
 
 Safety rules (never violate):
 - TRD_ENV=SIMULATE always. Never change to REAL.
@@ -108,7 +118,7 @@ Historical data on disk:
   logs/US_IWM_K_60M_2026-05-31.csv — 5,967 candles, 2022-01-03 to 2025-05-30
 
 Tests:
-  python -m pytest tests/           — 87 tests: risk (22), indicators/signals (47), strategy (18)
+  python -m pytest tests/           — 89 tests: risk (22), indicators/signals (47), strategy (18), orb (2)
   python -m pytest tests/ -q        — quiet mode
 
 Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
@@ -137,16 +147,63 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
    (MAX_POSITION_DOLLARS=50 is too low for any of SPY/QQQ/IWM single shares).
    Raise MAX_POSITION_DOLLARS to ≥ price of one share before live paper trading.
 
+10. VWAP Pullback (flush-and-reclaim) strategy (2026-06): implemented and deployed.
+    Entry: 5-min candle wicks below VWAP (low < vwap) but closes above it.
+    Filter: session VWAP cross count ≤ 1 (no-chop filter — critical for edge).
+            quiet bar (volume < volume_ma), no entry before 9:45.
+    Exit: close < vwap (level lost), ATR stop, 15:45 time stop.
+    Sweep on SPY+QQQ 2022-2025 (IWM excluded — fails OOS):
+    - SPY: PF=1.655 OOS (train 2022-23, test 2024-25)
+    - QQQ: PF=1.072 OOS
+    - IWM: negative OOS — excluded via VWAP_PB_SYMBOLS=US.SPY,US.QQQ in config
+    Optimal: stop_mult=1.0, max_crosses=1. Deployed to VPS.
+
+11. ORB per-symbol window (2026-06): bug fix + per-symbol override implemented.
+    IWM ORB: 15-min OR → PF=1.017. 30-min OR → PF=1.217. Override via ORB_MINUTES_OVERRIDES.
+    Bug fixed: _build_opening_ranges() was always using global ORB_MINUTES constant even when
+    per-symbol override was set. OR range (and thus stops/targets) was computed from wrong window.
+    Fixed: _build_opening_ranges() now accepts orb_minutes parameter; paper runner passes
+    cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes) per symbol.
+
+12. KDJ_WINDOW_BARS (2026-06): lookahead window for KDJ cross vs BB touch timing mismatch.
+    w=0 (same-bar only): ~1 trade/month per symbol. w=3 (KDJ cross within 3 prior bars): 10x
+    more signals, OOS PF>1.1 on IWM+QQQ. SPY fails at any w>0 — keep SPY at w=0 or exclude.
+    Both backtester (strategy.py) and paper runner (paper.py) use same rolling window logic.
+    Deployed: KDJ_WINDOW_BARS=3 on VPS.
+
+13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
+    Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5
+    while EMA5>EMA20), with ADX filter [20/25/30] and ATR target [0.5/1.0/1.5/2.0×].
+    Cross entry: uniformly negative across all 36 parameter combos × 3 symbols (PF 0.3–0.93).
+    Pullback entry: stop_mult parameter inert (EMA20_BREAK always triggers before ATR stop —
+    stop parameter does nothing). ADX=25 performs worse than both ADX=20 and ADX=30 on all
+    3 symbols simultaneously — suspicious sample artifact. ADX=20 shows weak positive PF
+    (1.06–1.20) but without a functioning stop parameter the risk management is broken.
+    Verdict: do not deploy. Code in mm/ema_momentum.py for reference.
+
 IWM outperformance root cause: lower stop rate (38% vs 50-58% for SPY/QQQ) and faster
   reversals (132 min avg hold vs 309/507). Not about volatility ratios — those are equal
   across symbols. IWM's BB+KDJ signal is simply more predictive.
 
+VPS deployment (as of 2026-06-03):
+  STRATEGIES=bb_kdj,orb,vwap_pb
+  SYMBOLS=US.IWM,US.SPY,US.QQQ
+  KDJ_WINDOW_BARS=3
+  ORB_MINUTES=15, ORB_MINUTES_OVERRIDES=US.IWM:30
+  VWAP_PB_SYMBOLS=US.SPY,US.QQQ  (IWM excluded)
+  MAX_POSITION_DOLLARS=900
+  Services: moomoo-paper.service + moomoo-dashboard.service (Restart=always)
+  Sync logs: ./sync_logs.sh (rsync VPS → local)
+
 What to build next (in priority order):
-1. Raise MAX_POSITION_DOLLARS to a real value (e.g. $300 for IWM, $600 for SPY) and run the
-   paper runner live during market hours to collect real JSONL, then compare_paper_vs_backtest.py
-2. Consider IWM-only or IWM-weighted portfolio given its edge (61.9% win at score>=2, 38% stops)
-3. Terminal dashboard — real-time view of paper positions and daily P&L (rich library)
-4. README.md for GitHub — strategy summary, architecture, how to run, research findings
+1. Wait for first live trades — no trades have fired yet (choppy market, VWAP crosses=6-9).
+   Once trades appear: run compare_paper_vs_backtest.py to validate signal engines agree.
+2. Fetch fresh historical data (candles end 2025-05-30):
+   python scripts/fetch_candles.py --symbol US.SPY --start 2025-05-31 --end 2026-06-03
+   (repeat for QQQ and IWM) — requires OpenD live connection.
+3. EMA momentum stop fix: if revisiting, fix stop to be ATR-only (not min(ema20, atr)).
+   Investigate ADX=25 anomaly before considering deployment.
+4. README.md for GitHub — strategy summary, architecture, how to run, research findings.
 
 Do not ask before every small change. Make reasonable implementation decisions.
 After changes, explain what was built, how to run it, and what remains.

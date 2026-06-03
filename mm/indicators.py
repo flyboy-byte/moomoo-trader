@@ -107,6 +107,14 @@ def vwap(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def ema(df: pd.DataFrame, fast: int = 5, slow: int = 20) -> pd.DataFrame:
+    """Add ema{fast} and ema{slow} columns using standard exponential moving averages."""
+    df = df.copy()
+    df[f"ema{fast}"] = df["close"].ewm(span=fast, adjust=False).mean()
+    df[f"ema{slow}"] = df["close"].ewm(span=slow, adjust=False).mean()
+    return df
+
+
 def add_all(df: pd.DataFrame) -> pd.DataFrame:
     """Add all indicators used by the signal engine."""
     df = bollinger_bands(df)
@@ -119,4 +127,5 @@ def add_all(df: pd.DataFrame) -> pd.DataFrame:
     df = adx(df)
     df["volume_ma"] = df["volume"].rolling(20).mean()
     df = vwap(df)
+    df = ema(df)
     return df

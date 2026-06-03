@@ -39,7 +39,7 @@ from .config import cfg
 from .data import fetch_candles
 from .indicators import add_all
 from .notifications import notify, notify_entry, notify_exit
-from .orb_strategy import _build_opening_ranges, ORB_MINUTES, ORB_TARGET_MULT, ORB_VOL_MULT
+from .orb_strategy import _build_opening_ranges
 from .risk import trading_allowed, calc_qty, DailyTracker, market_open, seconds_until_open
 from .signals import snapshot as signal_snapshot
 from .strategy import compute_signals
@@ -318,11 +318,14 @@ def _eval_bb_kdj(
 
     sig = signal_snapshot(last)
     bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
-    log.info("%-8s [bb_kdj] BAR %s  close=%.4f  score=%d/5  bonus=%d/3  %s",
-             symbol, candle_ts, close, sig.score, bonus, sig)
+    bb_lower = round(float(last["bb_lower"]), 4) if "bb_lower" in last else None
+    bb_middle = round(float(last["bb_middle"]), 4) if "bb_middle" in last else None
+    log.info("%-8s [bb_kdj] BAR %s  close=%.4f  bb_lower=%.4f  score=%d/5  bonus=%d/3  %s",
+             symbol, candle_ts, close, bb_lower or 0, sig.score, bonus, sig)
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=sig.score, bonus=bonus,
-                  signals=sig.details, strategy="bb_kdj")
+                  signals={**sig.details, "bb_lower": bb_lower, "bb_middle": bb_middle},
+                  strategy="bb_kdj")
 
     if position is None:
         if cfg.strategy_mode == "permissive":
@@ -408,8 +411,10 @@ def _eval_vwap(
     now = datetime.now()
 
     vsig = snapshot_vwap(last)
+    atr_val = float(last.get("atr", 1) or 1)
+    dist_atr = (vsig.vwap - close) / atr_val
     log.info("%-8s [vwap]   BAR %s  close=%.4f  vwap=%.4f  dist=%.2fATR  entry=%s",
-             symbol, candle_ts, close, vsig.vwap, vsig.distance_atr, vsig.entry_ready)
+             symbol, candle_ts, close, vsig.vwap, dist_atr, vsig.entry_ready)
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=int(vsig.entry_ready), bonus=0,
                   signals=vsig.details, strategy="vwap")
@@ -505,12 +510,14 @@ def _eval_vwap_pb(
     bar_clock = pd.Timestamp(candle_ts).time()
     is_time_stop = bar_clock >= dtime(15, 45)
 
-    log.info("%-8s [vwap_pb] BAR %s  close=%.4f  vwap=%.4f  crosses=%d",
-             symbol, candle_ts, close, vwap, int(last.get("vwap_cross_count", 0)))
+    wick_below = float(last["low"]) < vwap if "low" in last else False
+    cross_count = int(last.get("vwap_cross_count", 0))
+    log.info("%-8s [vwap_pb] BAR %s  close=%.4f  vwap=%.4f  crosses=%d  wick_below=%s",
+             symbol, candle_ts, close, vwap, cross_count, wick_below)
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=0, bonus=0,
-                  signals={"cross_count": int(last.get("vwap_cross_count", 0)),
-                           "close_above_vwap": close > vwap},
+                  signals={"cross_count": cross_count, "close_above_vwap": close > vwap,
+                           "wick_below": wick_below},
                   strategy="vwap_pb")
 
     if position is not None:
@@ -602,7 +609,8 @@ def _eval_orb(
     now = datetime.now()
     is_time_stop = bar_clock >= dtime(15, 45)
 
-    ranges = _build_opening_ranges(df)
+    orb_mins = cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes)
+    ranges = _build_opening_ranges(df, orb_minutes=orb_mins)
     or_info = ranges.get(bar_date)
     or_valid = or_info is not None and or_info["valid"]
 
@@ -645,12 +653,25 @@ def _eval_orb(
         or_high = or_info["high"]
         or_low = or_info["low"]
         or_range = or_high - or_low
-        orb_mins = cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes)
         cutoff = dtime(9, 30 + orb_mins) if 30 + orb_mins < 60 else \
                  dtime(10, (30 + orb_mins) % 60)
-        vol_ok = float(last.get("volume", 0)) > ORB_VOL_MULT * float(last.get("volume_ma", 1))
+        vol = float(last.get("volume", 0))
+        vol_ma = float(last.get("volume_ma", 1))
+        vol_ok = vol > cfg.orb_vol_mult * vol_ma
 
-        if bar_clock >= cutoff and close > or_high and vol_ok:
+        after_cutoff = bar_clock >= cutoff
+        above_high = close > or_high
+
+        if above_high and after_cutoff and not vol_ok:
+            log.info("%-8s [orb]    SKIP  above_high vol_fail vol=%.0f vol_ma=%.0f ratio=%.2f",
+                     symbol, vol, vol_ma, vol / vol_ma if vol_ma else 0)
+            elog.signal_skip("orb_vol_fail", score=0, bonus=0, min_score=0, strategy="orb")
+        elif above_high and not after_cutoff:
+            log.info("%-8s [orb]    SKIP  above_high before_cutoff bar=%s cutoff=%s",
+                     symbol, bar_clock, cutoff)
+            elog.signal_skip("orb_before_cutoff", score=0, bonus=0, min_score=0, strategy="orb")
+
+        if after_cutoff and above_high and vol_ok:
             if not daily.can_open():
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
@@ -664,7 +685,7 @@ def _eval_orb(
                                     price=close, max_dollars=cap)
                 else:
                     stop = or_low
-                    target = close + ORB_TARGET_MULT * or_range
+                    target = close + cfg.orb_target_mult * or_range
                     elog.order_attempt("BUY", qty, close, strategy="orb")
                     order_id = _place_buy(tctx, acc_id, symbol, close, qty)
                     elog.order_result("BUY", success=bool(order_id),

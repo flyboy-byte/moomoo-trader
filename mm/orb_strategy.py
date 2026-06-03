@@ -64,15 +64,21 @@ class ORBDay:
     entered: bool = False   # one trade per day max
 
 
-def _build_opening_ranges(df: pd.DataFrame) -> dict:
-    """Compute OR high/low for each trading day from the first ORB_MINUTES of bars."""
+def _build_opening_ranges(df: pd.DataFrame, orb_minutes: int | None = None) -> dict:
+    """Compute OR high/low for each trading day from the first orb_minutes of bars.
+
+    orb_minutes defaults to the ORB_MINUTES env var when not supplied. Pass explicitly
+    to support per-symbol overrides in the paper runner.
+    """
+    if orb_minutes is None:
+        orb_minutes = ORB_MINUTES
     ranges: dict = {}
     dates = pd.to_datetime(df["time_key"]).dt.date
 
     for date, group in df.groupby(dates):
         group_times = pd.to_datetime(group["time_key"]).dt.time
-        or_mask = group_times < dtime(9, 30 + ORB_MINUTES) if 30 + ORB_MINUTES < 60 else \
-                  group_times < dtime(10, (30 + ORB_MINUTES) % 60)
+        or_mask = group_times < dtime(9, 30 + orb_minutes) if 30 + orb_minutes < 60 else \
+                  group_times < dtime(10, (30 + orb_minutes) % 60)
         or_bars = group[or_mask]
         if or_bars.empty:
             continue
