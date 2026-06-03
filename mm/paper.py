@@ -475,6 +475,107 @@ def _eval_vwap(
     return position
 
 
+def _eval_vwap_pb(
+    symbol: str, df_signals: pd.DataFrame, tctx, acc_id: int,
+    position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+) -> PaperPosition | None:
+    """Evaluate VWAP Pullback strategy (flush-and-reclaim) for one symbol.
+
+    Entry: candle wicks below VWAP (low < vwap) but closes above it, with
+    session VWAP cross count <= cfg.vwap_pb_max_crosses (no-chop filter).
+    Exit: close < vwap (level lost), ATR stop, or 15:45 time stop.
+    """
+    from .vwap_pullback import _add_session_cross_count
+    from datetime import time as dtime
+
+    # Symbol whitelist check
+    if cfg.vwap_pb_symbols and symbol not in cfg.vwap_pb_symbols:
+        return position
+
+    df = _add_session_cross_count(df_signals)
+    last = df.iloc[-1]
+    candle_ts = last["time_key"]
+    close = float(last["close"])
+    vwap = float(last["vwap"]) if not pd.isna(last.get("vwap")) else None
+    now = datetime.now()
+
+    if vwap is None:
+        return position
+
+    bar_clock = pd.Timestamp(candle_ts).time()
+    is_time_stop = bar_clock >= dtime(15, 45)
+
+    log.info("%-8s [vwap_pb] BAR %s  close=%.4f  vwap=%.4f  crosses=%d",
+             symbol, candle_ts, close, vwap, int(last.get("vwap_cross_count", 0)))
+    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
+                  close=close, score=0, bonus=0,
+                  signals={"cross_count": int(last.get("vwap_cross_count", 0)),
+                           "close_above_vwap": close > vwap},
+                  strategy="vwap_pb")
+
+    if position is not None:
+        exit_reason: str | None = None
+        if is_time_stop:
+            exit_reason = "TIME_STOP"
+        elif close < vwap:
+            exit_reason = "VWAP_LOST"
+        elif close < position.stop_price:
+            exit_reason = "STOP"
+
+        if exit_reason:
+            pnl_per_share = close - position.entry_price
+            pnl_total = pnl_per_share * position.qty
+            elog.order_attempt("SELL", position.qty, close, strategy="vwap_pb")
+            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
+            elog.order_result("SELL", success=bool(order_id),
+                              order_id=order_id, strategy="vwap_pb")
+            daily.record_trade(pnl_total)
+            _clear_position(symbol, "vwap_pb")
+            elog.position_close(close, exit_reason, pnl_total, strategy="vwap_pb")
+            notify_exit(symbol, close, exit_reason, pnl_total)
+            log.info("%-8s [vwap_pb] CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                     symbol, close, pnl_total, exit_reason)
+            position = None
+
+    elif not is_time_stop and bar_clock >= dtime(9, 45):
+        wick_below = float(last["low"]) < vwap
+        close_above = close > vwap
+        no_chop = int(last.get("vwap_cross_count", 0)) <= cfg.vwap_pb_max_crosses
+        quiet_bar = float(last.get("volume", 0)) < float(last.get("volume_ma", float("inf")))
+
+        if wick_below and close_above and no_chop and quiet_bar:
+            if not daily.can_open():
+                elog.risk_block("daily_limit_reached", strategy="vwap_pb",
+                                trades=daily.trades, pnl=daily.pnl)
+            else:
+                qty = calc_qty(close, symbol)
+                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
+                if qty == 0:
+                    log.warning("RISK BLOCK [vwap_pb] %s: price %.2f exceeds cap %.2f",
+                                symbol, close, cap)
+                    elog.risk_block("price_exceeds_max_position", strategy="vwap_pb",
+                                    price=close, max_dollars=cap)
+                else:
+                    stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
+                    elog.order_attempt("BUY", qty, close, strategy="vwap_pb")
+                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                    elog.order_result("BUY", success=bool(order_id),
+                                      order_id=order_id, strategy="vwap_pb")
+                    if order_id:
+                        position = PaperPosition(
+                            symbol=symbol, strategy="vwap_pb",
+                            entry_time=candle_ts, entry_price=close,
+                            stop_price=stop, qty=qty, order_id=order_id,
+                        )
+                        _save_position(position)
+                        elog.position_open(close, stop, qty, strategy="vwap_pb")
+                        notify_entry(symbol, close, stop)
+                        log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%d",
+                                 symbol, close, stop, qty)
+
+    return position
+
+
 def _eval_orb(
     symbol: str, df_raw: pd.DataFrame, tctx, acc_id: int,
     position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
@@ -759,6 +860,13 @@ def _eval_symbol_all_strategies(
                 if orb_traded is not None:
                     orb_traded[symbol] = date.today()
                     _save_orb_traded(symbol, date.today())
+        elif strat == "vwap_pb":
+            if df_bb is None:
+                df_bb = compute_signals(df_raw)
+            positions[(symbol, strat)] = _eval_vwap_pb(
+                symbol, df_bb, tctx, acc_id,
+                positions[(symbol, strat)], elog, daily,
+            )
         else:
             log.warning("Unknown strategy '%s' — skipping", strat)
 

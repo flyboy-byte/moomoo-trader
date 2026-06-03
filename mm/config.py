@@ -73,9 +73,19 @@ class Config:
         if s.strip()
     ]
 
-    # VWAP strategy parameters
+    # VWAP strategy parameters (deprecated crossover strategy)
     vwap_band_mult: float = float(_get("VWAP_BAND_MULT", "0.5"))
     vwap_stop_mult: float = float(_get("VWAP_STOP_MULT", "0.75"))
+
+    # VWAP Pullback strategy parameters
+    # Sweep on SPY+QQQ 2022-2025: max_crosses=1 optimal (strict no-chop filter).
+    # IWM fails OOS — use VWAP_PB_SYMBOLS to restrict to SPY+QQQ.
+    vwap_pb_stop_mult: float = float(_get("VWAP_PB_STOP_MULT", "1.0"))
+    vwap_pb_max_crosses: int = int(_get("VWAP_PB_MAX_CROSSES", "1"))
+    # Comma-separated whitelist. Empty = all active symbols.
+    vwap_pb_symbols: list[str] = [
+        s.strip() for s in _get("VWAP_PB_SYMBOLS", "").split(",") if s.strip()
+    ]
 
     # ORB strategy parameters
     # orb_minutes: opening range window in minutes (15 or 30). Default 15.
