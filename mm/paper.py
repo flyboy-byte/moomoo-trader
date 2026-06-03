@@ -544,8 +544,9 @@ def _eval_orb(
         or_high = or_info["high"]
         or_low = or_info["low"]
         or_range = or_high - or_low
-        cutoff = dtime(9, 30 + ORB_MINUTES) if 30 + ORB_MINUTES < 60 else \
-                 dtime(10, (30 + ORB_MINUTES) % 60)
+        orb_mins = cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes)
+        cutoff = dtime(9, 30 + orb_mins) if 30 + orb_mins < 60 else \
+                 dtime(10, (30 + orb_mins) % 60)
         vol_ok = float(last.get("volume", 0)) > ORB_VOL_MULT * float(last.get("volume_ma", 1))
 
         if bar_clock >= cutoff and close > or_high and vol_ok:

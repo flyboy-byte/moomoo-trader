@@ -78,8 +78,15 @@ class Config:
     vwap_stop_mult: float = float(_get("VWAP_STOP_MULT", "0.75"))
 
     # ORB strategy parameters
-    # orb_minutes: opening range window in minutes (15 or 30). 15 min optimal per sweep.
+    # orb_minutes: opening range window in minutes (15 or 30). Default 15.
+    # Sweep: 15-min optimal for SPY/QQQ; 30-min dramatically better for IWM (PF 1.017→1.217).
     orb_minutes: int = int(_get("ORB_MINUTES", "15"))
+    # Per-symbol overrides: "US.IWM:30,US.QQQ:15" → {"US.IWM": 30, "US.QQQ": 15}
+    orb_minutes_overrides: dict[str, int] = {
+        s.split(":")[0].strip(): int(s.split(":")[1].strip())
+        for s in _get("ORB_MINUTES_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
     # orb_target_mult: target = mult × OR range height. 1.5 optimal per sweep (PF=1.215).
     orb_target_mult: float = float(_get("ORB_TARGET_MULT", "1.5"))
     orb_vol_mult: float = float(_get("ORB_VOL_MULT", "1.2"))
