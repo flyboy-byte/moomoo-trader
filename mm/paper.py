@@ -21,7 +21,7 @@ import json
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -186,6 +186,28 @@ def _clear_position(symbol: str, strategy: str) -> None:
     path = _position_file(symbol, strategy)
     if path.exists():
         path.unlink()
+
+
+def _orb_traded_file(symbol: str) -> Path:
+    return cfg.logs_dir / f"paper_{symbol.replace('.', '_')}_orb_traded.json"
+
+
+def _load_orb_traded(symbols: list[str]) -> dict[str, date]:
+    """Load the last ORB entry date per symbol. Used to enforce one trade per day on restart."""
+    result: dict[str, date] = {}
+    for sym in symbols:
+        path = _orb_traded_file(sym)
+        if path.exists():
+            try:
+                d = json.loads(path.read_text())
+                result[sym] = date.fromisoformat(d["date"])
+            except Exception:
+                pass
+    return result
+
+
+def _save_orb_traded(symbol: str, traded_date: date) -> None:
+    _orb_traded_file(symbol).write_text(json.dumps({"date": str(traded_date)}))
 
 
 # ---------------------------------------------------------------------------
@@ -447,12 +469,16 @@ def _eval_vwap(
 def _eval_orb(
     symbol: str, df_raw: pd.DataFrame, tctx, acc_id: int,
     position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+    already_entered: bool = False,
 ) -> PaperPosition | None:
     """Evaluate ORB strategy (long-only) for one symbol.
 
     Short entries are skipped in the live runner — they require TrdSide.SELL_SHORT
     with margin handling not yet wired up. Backtest PnL includes shorts; live will be
     long-only. Net effect: roughly half the trade frequency of the backtest.
+
+    already_entered: True if ORB already traded today for this symbol. Enforces the
+    one-trade-per-day rule across process restarts (state persisted to disk).
     """
     from datetime import time as dtime
 
@@ -505,7 +531,7 @@ def _eval_orb(
                      symbol, close, pnl_total, exit_reason)
             position = None
 
-    elif or_valid and not is_time_stop:
+    elif or_valid and not is_time_stop and not already_entered:
         or_high = or_info["high"]
         or_low = or_info["low"]
         or_range = or_high - or_low
@@ -548,6 +574,26 @@ def _eval_orb(
     return position
 
 
+def _trigger_eod_summary() -> None:
+    """Load today's JSONL and post EOD summary to Discord (no-op if webhook not set)."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "eod_summary",
+            Path(__file__).parent.parent / "scripts" / "eod_summary.py",
+        )
+        if spec is None or spec.loader is None:
+            return
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        s = mod.load_summary(date.today())
+        log.info("EOD: %d closed trades  pnl=%+.2f", len(s.closed_trades), s.realized_pnl)
+        if cfg.discord_webhook_url:
+            notify(mod.format_discord(s))
+    except Exception as e:
+        log.warning("EOD summary failed: %s", e)
+
+
 # ---------------------------------------------------------------------------
 # Multi-symbol loop — fetches candles once, runs all active strategies
 # ---------------------------------------------------------------------------
@@ -581,9 +627,14 @@ def run_multi(symbols: list[str] | None = None) -> None:
     # One event log per symbol (all strategies share the file, tagged per event)
     elogs: dict[str, PaperEventLog] = {sym: PaperEventLog(sym) for sym in symbols}
 
+    # ORB one-trade-per-day enforcement (persisted across restarts)
+    orb_traded: dict[str, date] = _load_orb_traded(symbols)
+
     acc_id: int | None = None
     daily = DailyTracker()
     consecutive_errors = 0
+    _was_market_open: bool = False
+    _session_day: date = date.today()
 
     for (sym, strat), pos in positions.items():
         if pos:
@@ -593,7 +644,20 @@ def run_multi(symbols: list[str] | None = None) -> None:
             )
 
     while True:
-        if not market_open():
+        _is_market_open = market_open()
+        today = date.today()
+
+        # New calendar day — heartbeat so you know it's alive
+        if today != _session_day:
+            _session_day = today
+            notify(f"[PAPER] New session {today} | {', '.join(symbols)} | {', '.join(strategies)}")
+
+        # Market just closed — post EOD summary
+        if _was_market_open and not _is_market_open:
+            _trigger_eod_summary()
+        _was_market_open = _is_market_open
+
+        if not _is_market_open:
             secs = seconds_until_open()
             log.info("Market closed — sleeping %.0f min until near open", secs / 60)
             time.sleep(max(secs, POLL_SECONDS))
@@ -611,6 +675,7 @@ def run_multi(symbols: list[str] | None = None) -> None:
                 for symbol in symbols:
                     _eval_symbol_all_strategies(
                         symbol, strategies, tctx, acc_id, positions, elogs, daily,
+                        orb_traded=orb_traded,
                     )
 
         except KeyboardInterrupt:
@@ -642,6 +707,7 @@ def _eval_symbol_all_strategies(
     positions: dict[tuple[str, str], PaperPosition | None],
     elogs: dict[str, PaperEventLog],
     daily: DailyTracker,
+    orb_traded: dict[str, date] | None = None,
 ) -> None:
     """Fetch candles once for symbol, then evaluate each active strategy."""
     elog = elogs[symbol]
@@ -671,10 +737,18 @@ def _eval_symbol_all_strategies(
                 positions[(symbol, strat)], elog, daily,
             )
         elif strat == "orb":
+            prev_pos = positions[(symbol, strat)]
+            already_entered = (orb_traded or {}).get(symbol) == date.today()
             positions[(symbol, strat)] = _eval_orb(
                 symbol, df_raw, tctx, acc_id,
-                positions[(symbol, strat)], elog, daily,
+                prev_pos, elog, daily,
+                already_entered=already_entered,
             )
+            # New position just opened — persist the traded date so restarts can't re-enter
+            if prev_pos is None and positions[(symbol, strat)] is not None:
+                if orb_traded is not None:
+                    orb_traded[symbol] = date.today()
+                    _save_orb_traded(symbol, date.today())
         else:
             log.warning("Unknown strategy '%s' — skipping", strat)
 

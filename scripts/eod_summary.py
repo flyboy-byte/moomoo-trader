@@ -136,7 +136,7 @@ def load_summary(session_date: date) -> SessionSummary:
 
     all_events.sort(key=lambda e: e.get("ts", ""))
 
-    pending: dict[str, TradeRecord] = {}
+    pending: dict[tuple[str, str], TradeRecord] = {}
     trades: list[TradeRecord] = []
     last_bonus: dict[str, int] = {}
     risk_blocks = 0
@@ -147,6 +147,7 @@ def load_summary(session_date: date) -> SessionSummary:
     for evt in all_events:
         etype = evt.get("event", "")
         sym = evt.get("symbol") or evt.get("_symbol", "")
+        strat = evt.get("strategy", "")
 
         if etype == "bar_eval":
             bar_evals += 1
@@ -163,7 +164,8 @@ def load_summary(session_date: date) -> SessionSummary:
 
         elif etype == "position_open":
             sym = evt.get("symbol", sym)
-            pending[sym] = TradeRecord(
+            key = (sym, strat)
+            pending[key] = TradeRecord(
                 symbol=sym,
                 entry_time=evt.get("ts", ""),
                 entry_price=evt.get("entry", 0.0),
@@ -174,7 +176,8 @@ def load_summary(session_date: date) -> SessionSummary:
 
         elif etype == "position_close":
             sym = evt.get("symbol", sym)
-            tr = pending.pop(sym, None)
+            key = (sym, strat)
+            tr = pending.pop(key, None)
             if tr:
                 tr.exit_time = evt.get("ts", "")
                 tr.exit_price = evt.get("exit", 0.0)
