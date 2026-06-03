@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # Deploy latest code to VPS and restart all moomoo services.
 # Run from local machine: ./deploy.sh
-# Or run directly on VPS: ssh ubuntu@<host> 'cd ~/moomoo && bash deploy.sh'
 set -euo pipefail
 
 VPS="ubuntu@51.81.80.126"
-REMOTE_DIR="~/moomoo"
 
+echo "=== Pre-deploy checks ==="
+
+# 1. Tests must pass before deploying
+.venv/bin/python -m pytest tests/ -q || { echo "Tests failed — aborting deploy."; exit 1; }
+
+# 2. Warn on uncommitted changes (don't block — you may want to deploy config fixes)
+if ! git diff-index --quiet HEAD --; then
+    echo "WARNING: uncommitted local changes (not deployed — only what's pushed to GitHub)."
+fi
+
+echo ""
 echo "=== Deploying to $VPS ==="
 
 ssh "$VPS" bash <<'REMOTE'
@@ -15,6 +24,9 @@ cd ~/moomoo
 
 echo "--- git pull ---"
 git pull
+
+echo "--- syntax check ---"
+python3 -m compileall -q mm/ scripts/
 
 echo "--- restarting services ---"
 systemctl --user restart moomoo-paper.service

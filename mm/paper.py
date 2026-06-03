@@ -18,6 +18,7 @@ Structured event log: every signal check, risk block, order attempt, fill, and e
 is written to logs/paper_SYMBOL_YYYY-MM-DD.jsonl with a strategy tag on each event.
 """
 import json
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
@@ -78,8 +79,11 @@ class PaperEventLog:
     def _write(self, event: str, strategy: str = "", **fields) -> None:
         record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event,
                   "strategy": strategy, **fields}
-        with open(self._path, "a") as f:
-            f.write(json.dumps(record) + "\n")
+        try:
+            with open(self._path, "a") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception as e:
+            print(f"[JSONL WRITE FAIL] {json.dumps(record)} err={e}", file=sys.stderr)
 
     def bar_eval(self, candle_ts, eval_ts: datetime, accepted: bool, close: float,
                  score: int, bonus: int, signals: dict, strategy: str = "") -> None:

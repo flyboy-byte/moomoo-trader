@@ -1,6 +1,6 @@
 import logging
 import sys
-from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 
 from .config import cfg
 
@@ -19,8 +19,14 @@ def get_logger(name: str) -> logging.Logger:
     sh.setLevel(logging.INFO)
     sh.setFormatter(fmt)
 
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    fh = logging.FileHandler(cfg.logs_dir / f"{name}_{date_str}.log")
+    # Rotate at midnight, keep 30 days. Suffix format produces name.log.YYYY-MM-DD.
+    fh = TimedRotatingFileHandler(
+        filename=cfg.logs_dir / f"{name}.log",
+        when="midnight",
+        interval=1,
+        backupCount=30,
+        encoding="utf-8",
+    )
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(fmt)
 
