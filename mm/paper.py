@@ -66,12 +66,14 @@ class PaperEventLog:
     """
 
     def __init__(self, symbol: str) -> None:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        sym_safe = symbol.replace(".", "_")
-        path = cfg.logs_dir / f"paper_{sym_safe}_{date_str}.jsonl"
         cfg.logs_dir.mkdir(exist_ok=True)
-        self._path = path
+        self._sym_safe = symbol.replace(".", "_")
         self._sym = symbol
+
+    @property
+    def _path(self) -> Path:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return cfg.logs_dir / f"paper_{self._sym_safe}_{date_str}.jsonl"
 
     def _write(self, event: str, strategy: str = "", **fields) -> None:
         record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event,
@@ -268,7 +270,7 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
         "Candle check: last_bar_ts=%s  eval_time=%s  age=%.0fmin — dropping last bar (may be forming)",
         last_bar_ts, now.strftime("%Y-%m-%d %H:%M:%S"), age_min,
     )
-    if age_min > 30:
+    if age_min > 15:
         log.warning("Stale candles (%.0f min old) — skipping eval", age_min)
         return pd.DataFrame()
     return df.iloc[:-1].reset_index(drop=True)
