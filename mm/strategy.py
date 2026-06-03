@@ -61,11 +61,23 @@ def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
     df = add_all(df)
     df = score_df(df)
 
-    # Core mean-reversion gate: price at BB lower AND KDJ momentum turning (validated).
+    # Core mean-reversion gate: price at BB lower AND KDJ momentum turning.
+    # KDJ_WINDOW_BARS: if > 0, accept a KDJ cross from any of the last N bars (not just same-bar).
+    # Sweep on IWM+QQQ 2022-2025 showed w=3 gives 10x more signals while improving OOS PF.
+    if cfg.kdj_window_bars > 0:
+        kdj_in_window = (
+            df["sig_kdj_cross"]
+            .rolling(window=cfg.kdj_window_bars + 1, min_periods=1)
+            .max()
+            .fillna(False)
+            .astype(bool)
+        )
+    else:
+        kdj_in_window = df["sig_kdj_cross"].astype(bool)
+    core_gate = df["sig_bb_touch"] & kdj_in_window
     # bonus_score counts additional independent confirmations (RSI, ADX regime, volume).
     # Entry requires core gate AND bonus_score >= min_signal_score.
     # min_signal_score=0 restores original BB+KDJ-only behaviour.
-    core_gate = df["sig_bb_touch"] & df["sig_kdj_cross"]
     bonus_cols = ["sig_rsi_oversold", "sig_ranging", "sig_volume_spike"]
     df["bonus_score"] = df[bonus_cols].sum(axis=1).astype(int)
     entry_mask = core_gate & (df["bonus_score"] >= cfg.min_signal_score)

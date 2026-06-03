@@ -108,8 +108,6 @@ def run_vwap_signals(
 
             if is_time_stop:
                 exit_sig = VWAPSignal.EXIT_TIME
-            elif row["close"] >= row["vwap"]:
-                exit_sig = VWAPSignal.EXIT_TARGET
             elif row["close"] < position.stop_price:
                 exit_sig = VWAPSignal.EXIT_STOP
 

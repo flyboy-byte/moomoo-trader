@@ -256,11 +256,12 @@ class TestIntegration:
     SPY_CSV = Path("logs/US_SPY_K_5M_2026-05-30.csv")
 
     def test_produces_known_trade_count(self, monkeypatch):
-        """With MIN_SIGNAL_SCORE=0, SPY should produce 29 trades (established baseline)."""
+        """With MIN_SIGNAL_SCORE=0 and KDJ_WINDOW_BARS=0, SPY should produce 29 trades (baseline)."""
         if not self.SPY_CSV.exists():
             pytest.skip("SPY candle CSV not present")
 
         monkeypatch.setenv("MIN_SIGNAL_SCORE", "0")
+        monkeypatch.setenv("KDJ_WINDOW_BARS", "0")
         import mm.config
         importlib.reload(mm.config)
         mm.config.cfg = mm.config.Config()
