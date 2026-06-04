@@ -148,7 +148,7 @@ class PaperPosition:
     entry_time: datetime
     entry_price: float
     stop_price: float
-    qty: int
+    qty: int | float
     order_id: str = ""
     target_price: float = 0.0  # fixed target for ORB; 0 = not used (bb_kdj/vwap use dynamic targets)
     direction: str = "long"    # "long" or "short"
@@ -189,7 +189,7 @@ def _load_position(symbol: str, strategy: str) -> PaperPosition | None:
             target_price=d.get("target_price", 0.0),
             direction=d.get("direction", "long"),
         )
-        log.warning("Recovered open position [%s/%s]: entry=%.4f stop=%.4f qty=%d dir=%s",
+        log.warning("Recovered open position [%s/%s]: entry=%.4f stop=%.4f qty=%s dir=%s",
                     symbol, strategy, pos.entry_price, pos.stop_price, pos.qty, pos.direction)
         return pos
     except Exception as e:
@@ -263,7 +263,7 @@ def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
     )
     if ret == RET_OK:
         order_id = str(data["order_id"].iloc[0])
-        log.info("BUY  %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
+        log.info("BUY  %s qty=%s price=%.4f order_id=%s", symbol, qty, price, order_id)
         return order_id
     log.error("BUY failed: %s", data)
     return ""
@@ -277,7 +277,7 @@ def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
     )
     if ret == RET_OK:
         order_id = str(data["order_id"].iloc[0])
-        log.info("SELL %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
+        log.info("SELL %s qty=%s price=%.4f order_id=%s", symbol, qty, price, order_id)
         return order_id
     log.error("SELL failed: %s", data)
     return ""
@@ -291,7 +291,7 @@ def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
     )
     if ret == RET_OK:
         order_id = str(data["order_id"].iloc[0])
-        log.info("SELL_SHORT %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
+        log.info("SELL_SHORT %s qty=%s price=%.4f order_id=%s", symbol, qty, price, order_id)
         return order_id
     log.error("SELL_SHORT failed: %s", data)
     return ""
@@ -305,7 +305,7 @@ def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
     )
     if ret == RET_OK:
         order_id = str(data["order_id"].iloc[0])
-        log.info("BUY_BACK %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
+        log.info("BUY_BACK %s qty=%s price=%.4f order_id=%s", symbol, qty, price, order_id)
         return order_id
     log.error("BUY_BACK failed: %s", data)
     return ""
@@ -347,26 +347,38 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
 
     The Moomoo API can return the currently forming candle as the last row.
     We always discard it to guarantee we only evaluate closed bars.
+
+    Stale check is applied to the bar AFTER dropping the forming row — i.e. the
+    bar that will actually be evaluated. Checking the forming bar's age is wrong:
+    a same-day partial bar has age ~0 but the second-to-last could be from yesterday.
     """
+    from zoneinfo import ZoneInfo
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     df = fetch_candles(symbol=symbol, ktype=cfg.candle_ktype, start=start, end=end)
     if df.empty:
         return df
 
-    last_bar_ts = df.iloc[-1]["time_key"]
-    now = datetime.now()
-    from zoneinfo import ZoneInfo
+    if len(df) < 2:
+        log.warning("%s: fewer than 2 candles returned — skipping", symbol)
+        return pd.DataFrame()
+
+    # Drop the last (possibly still-forming) bar first
+    df = df.iloc[:-1].reset_index(drop=True)
+
+    # NOW check staleness of the bar we'll actually evaluate
+    last_closed_ts = df.iloc[-1]["time_key"]
     now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
-    age_min = (now_et - pd.Timestamp(last_bar_ts)).total_seconds() / 60
+    age_min = (now_et - pd.Timestamp(last_closed_ts)).total_seconds() / 60
     log.info(
-        "Candle check: last_bar_ts=%s  eval_time=%s  age=%.0fmin — dropping last bar (may be forming)",
-        last_bar_ts, now.strftime("%Y-%m-%d %H:%M:%S"), age_min,
+        "Candle check: last_closed=%s  age=%.0fmin",
+        last_closed_ts, age_min,
     )
     if age_min > 15:
-        log.warning("Stale candles (%.0f min old) — skipping eval", age_min)
+        log.warning("Stale candles: last closed bar %s is %.0f min old — skipping eval",
+                    last_closed_ts, age_min)
         return pd.DataFrame()
-    return df.iloc[:-1].reset_index(drop=True)
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +448,7 @@ def _eval_bb_kdj(
                         _save_position(position)
                         elog.position_open(close, stop, qty, strategy="bb_kdj")
                         notify_entry(symbol, close, stop)
-                        log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%d",
+                        log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%s",
                                  symbol, close, stop, qty)
         elif core_met:
             log.info("%-8s [bb_kdj] SKIP  bonus=%d < %d", symbol, bonus, cfg.min_signal_score)
@@ -522,7 +534,7 @@ def _eval_vwap(
                         _save_position(position)
                         elog.position_open(close, stop, qty, strategy="vwap")
                         notify_entry(symbol, close, stop)
-                        log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%d",
+                        log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%s",
                                  symbol, close, stop, qty)
     else:
         from datetime import time as dtime
@@ -654,7 +666,7 @@ def _eval_vwap_pb(
                         _save_position(position)
                         elog.position_open(close, stop, qty, strategy="vwap_pb")
                         notify_entry(symbol, close, stop)
-                        log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%d",
+                        log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%s",
                                  symbol, close, stop, qty)
 
     return position
@@ -790,7 +802,7 @@ def _eval_orb(
                         _save_position(position)
                         elog.position_open(close, stop, qty, strategy="orb", direction="long")
                         notify_entry(symbol, close, stop)
-                        log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%d",
+                        log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%s",
                                  symbol, close, stop, target, qty)
 
         # --- Short entry ---
@@ -825,8 +837,12 @@ def _eval_orb(
                         _save_position(position)
                         elog.position_open(close, stop, qty, strategy="orb", direction="short")
                         notify_entry(symbol, close, stop)
-                        log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%d",
+                        log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%s",
                                  symbol, close, stop, target, qty)
+        elif below_low and after_cutoff and vol_ok and not cfg.orb_shorts_enabled:
+            elog.signal_skip("orb_shorts_disabled", score=0, bonus=0, min_score=0, strategy="orb")
+        elif below_low and after_cutoff and vol_ok and (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists():
+            elog.signal_skip("orb_shorts_kill_switch", score=0, bonus=0, min_score=0, strategy="orb")
         elif below_low and not after_cutoff:
             elog.signal_skip("orb_before_cutoff", score=0, bonus=0, min_score=0, strategy="orb")
         elif below_low and after_cutoff and not vol_ok:
