@@ -16,10 +16,10 @@ Goal:
 Build a practical Python project for AI-assisted stock strategy research and Moomoo paper trading.
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
-Current build state (as of 2026-06-03):
+Current build state (as of 2026-06-04):
 All core infrastructure complete. Multi-strategy paper runner live on VPS (bb_kdj + orb + vwap_pb on SPY/QQQ/IWM).
-Stack is runnable end-to-end via ./start.sh. Paper runner is running but no trades have fired yet — market conditions
-haven't triggered entry signals. Awaiting first live trade for compare_paper_vs_backtest.py validation.
+First live trades fired 2026-06-04: SPY ORB +$2.92 (TARGET), QQQ ORB +$2.52 (TIME_STOP). Signal engines validated.
+See docs/ARCHITECTURE.md for system map. Run ./scripts/verify.sh for one-command session health check.
 
 Package layout:
   mm/config.py         — .env loading, cfg singleton (all config lives here)
@@ -58,6 +58,8 @@ Scripts (all run from project root with venv active):
   python scripts/sweep_session_filter.py [csvs...] [--all]                    # BB+KDJ entry hour filter sweep
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
+  python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
+  ./scripts/verify.sh [--date YYYY-MM-DD] [--no-sync]                         # pytest + sync + diagnose + compare
   ./start.sh                                                                   # start OpenD + paper runner
   ./stop.sh                                                                    # stop paper runner
   ./sync_logs.sh                                                               # rsync VPS logs → local logs/

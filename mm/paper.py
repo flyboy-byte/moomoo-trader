@@ -112,18 +112,23 @@ class PaperEventLog:
                     order_id=order_id, error=error)
 
     def position_open(self, entry: float, stop: float, qty: int | float,
-                      strategy: str = "", direction: str = "long") -> None:
+                      strategy: str = "", direction: str = "long",
+                      intended_price: float = 0.0) -> None:
+        intended = intended_price if intended_price > 0 else entry
+        slippage_bps = round((entry - intended) / intended * 10000, 1)
         self._write("position_open", strategy=strategy, symbol=self._sym,
                     entry=round(entry, 4), stop=round(stop, 4),
                     qty=round(qty, 6) if isinstance(qty, float) else qty,
-                    direction=direction, vix_at_entry=None)
+                    direction=direction, slippage_bps=slippage_bps, vix_at_entry=None)
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
                        hold_bars: int = 0, strategy: str = "",
-                       direction: str = "long") -> None:
+                       direction: str = "long", intended_price: float = 0.0) -> None:
+        intended = intended_price if intended_price > 0 else exit_price
+        slippage_bps = round((exit_price - intended) / intended * 10000, 1)
         self._write("position_close", strategy=strategy, symbol=self._sym,
                     exit=round(exit_price, 4), reason=reason, pnl=round(pnl, 4),
-                    hold_bars=hold_bars, direction=direction)
+                    hold_bars=hold_bars, direction=direction, slippage_bps=slippage_bps)
 
     def error(self, message: str, strategy: str = "") -> None:
         self._write("error", strategy=strategy, message=message)

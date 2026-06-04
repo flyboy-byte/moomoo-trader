@@ -59,6 +59,12 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost �
 **What it is:** `SYMBOL_SIZE_OVERRIDES=US.IWM:300,US.SPY:600,US.QQQ:500` to allocate more capital to IWM given its superior edge (61.9% win rate, 38% stop rate vs 50-58% for SPY/QQQ).
 **Why it's on hold:** Waiting for first live trades to validate signal engines agree before tuning sizing.
 
+### ATR-Normalized Position Sizing (Backlog, post live-data)
+**What it is:** `share_qty = risk_dollars / (atr * atr_multiplier)`. Sizes every trade to risk the same dollar amount regardless of market volatility.
+**Why it's on hold:** Current `TOTAL_CAPITAL` fractional approach controls dollar exposure per slot, but not volatility-normalized risk. A $100 position on a 1% vol day and a $100 position on a 4% vol day risk 4× different amounts. ATR sizing fixes this.
+**When to build:** After 2+ weeks of live slippage data — need real fill prices to validate that `intended_price` vs `entry_price` differs meaningfully before adding more sizing complexity.
+**Files to touch:** `mm/config.py` (RISK_DOLLARS_PER_TRADE), `mm/risk.py` (calc_qty_atr), `mm/paper.py` (branch on cfg.risk_dollars_per_trade > 0 in each _eval_* entry block).
+
 ### Web Dashboard Market Conditions Card
 **Status: DEPLOYED (2026-06-04).** `scripts/web_dashboard.py` updated.
 **What was built:** A `MARKET CONDITIONS` card injected between TRADES and SIGNAL FEED. Three sub-sections — BB+KDJ, ORB, VWAP PB — show the latest eval per symbol per strategy with entry-readiness status. A RECENT SKIPS section shows the last 12 `signal_skip` events with reason and score. `_render_market_conditions()` reads via two new loaders: `_load_latest_evals_by_symbol()` and `_load_recent_skips()`.
