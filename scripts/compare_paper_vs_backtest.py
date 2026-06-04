@@ -45,30 +45,39 @@ def load_paper_events(path: Path) -> list[dict]:
 
 
 def extract_paper_entries(events: list[dict]) -> list[dict]:
-    """Extract position_open events (entries) from paper log."""
-    return [e for e in events if e["event"] == "position_open"]
+    """Extract bb_kdj position_open events from paper log."""
+    return [e for e in events if e["event"] == "position_open" and e.get("strategy", "bb_kdj") == "bb_kdj"]
 
 
 def extract_paper_exits(events: list[dict]) -> list[dict]:
-    """Extract position_close events (exits) from paper log."""
-    return [e for e in events if e["event"] == "position_close"]
+    """Extract bb_kdj position_close events from paper log."""
+    return [e for e in events if e["event"] == "position_close" and e.get("strategy", "bb_kdj") == "bb_kdj"]
 
 
 def extract_paper_skips(events: list[dict]) -> list[dict]:
-    return [e for e in events if e["event"] == "signal_skip"]
+    return [e for e in events if e["event"] == "signal_skip" and e.get("strategy", "bb_kdj") == "bb_kdj"]
 
 
 def extract_paper_risk_blocks(events: list[dict]) -> list[dict]:
-    return [e for e in events if e["event"] == "risk_block"]
+    return [e for e in events if e["event"] == "risk_block" and e.get("strategy", "bb_kdj") == "bb_kdj"]
 
 
-def extract_date_range(events: list[dict]) -> tuple[str, str]:
-    """Find earliest and latest candle timestamps evaluated."""
-    bar_evals = [e for e in events if e["event"] == "bar_eval"]
+def extract_date_range(events: list[dict], session_date: str = "") -> tuple[str, str]:
+    """Return date range for comparison.
+
+    Uses the session date from the filename as the start to avoid including
+    stale candles from the prior session close. Falls back to candle_ts range
+    if no session date is available.
+    """
+    bar_evals = [e for e in events if e["event"] == "bar_eval" and e.get("strategy") == "bb_kdj"]
     if not bar_evals:
-        return "", ""
+        return session_date, session_date
     timestamps = [e["candle_ts"] for e in bar_evals]
-    return min(timestamps)[:10], max(timestamps)[:10]
+    end_date = max(timestamps)[:10]
+    # Prefer filename-derived session date so stale prior-day candles
+    # don't widen the window and cause false backtest signal matches.
+    start_date = session_date if session_date else min(timestamps)[:10]
+    return start_date, end_date
 
 
 def detect_symbol(path: Path) -> str:
@@ -76,6 +85,20 @@ def detect_symbol(path: Path) -> str:
     parts = path.stem.split("_")
     if len(parts) >= 3:
         return f"{parts[1]}.{parts[2]}"
+    return ""
+
+
+def detect_session_date(path: Path) -> str:
+    """Infer session date from filename: paper_US_SPY_2026-06-01.jsonl → '2026-06-01'"""
+    # Filename ends with _YYYY-MM-DD
+    stem = path.stem
+    if len(stem) >= 10:
+        candidate = stem[-10:]
+        try:
+            datetime.strptime(candidate, "%Y-%m-%d")
+            return candidate
+        except ValueError:
+            pass
     return ""
 
 
@@ -104,7 +127,8 @@ def compare(paper_path: Path, candle_csv: Path | None = None,
         return False
 
     symbol = detect_symbol(paper_path)
-    start_date, end_date = extract_date_range(events)
+    session_date = detect_session_date(paper_path)
+    start_date, end_date = extract_date_range(events, session_date)
     print(f"Symbol: {symbol}  Candle range in log: {start_date} → {end_date}")
 
     if not candle_csv:
