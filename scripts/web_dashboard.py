@@ -381,18 +381,27 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
             xt = tr.exit_time[11:16] if tr.exit_time else "?"
             icon = "✓" if "TARGET" in tr.exit_reason.upper() or tr.exit_reason == "target" else "✗"
             col = _pnl_color(tr.pnl)
+            # Slippage: 0.0 in SIMULATE, non-zero when live
+            slip = tr.exit_slippage_bps
+            slip_col = "#f44336" if slip > 5 else "#ff9800" if slip > 1 else "#555"
+            slip_str = f"{slip:+.1f}" if slip != 0.0 else "—"
+            strat_short = tr.strategy[:3].upper() if tr.strategy else "?"
             rows += f"""<tr>
-              <td>{tr.symbol}</td><td>{et}</td><td>{xt}</td>
+              <td>{tr.symbol.replace("US.", "")} <span style="color:#555;font-size:11px">{strat_short}</span></td>
+              <td>{et}</td><td>{xt}</td>
               <td>${tr.entry_price:.3f}</td><td>${tr.exit_price:.3f}</td>
               <td style="color:{col}"><b>{_fmt_pnl(tr.pnl)}</b></td>
-              <td>{icon} {tr.exit_reason}</td><td>{tr.hold_minutes}m</td>
+              <td>{icon} {tr.exit_reason}</td>
+              <td>{tr.hold_minutes}m</td>
+              <td style="color:{slip_col};font-size:11px" title="exit slippage bps">{slip_str}</td>
             </tr>"""
         trades_html = f"""
         <div class="card">
           <div class="card-title">TRADES</div>
           <table>
             <tr class="th"><th>Symbol</th><th>Entry</th><th>Exit</th>
-            <th>Entry$</th><th>Exit$</th><th>P&L</th><th>Reason</th><th>Hold</th></tr>
+            <th>Entry$</th><th>Exit$</th><th>P&L</th><th>Reason</th>
+            <th>Hold</th><th title="Exit slippage (basis points). — = 0 in SIMULATE.">Slip</th></tr>
             {rows}
           </table>
         </div>"""

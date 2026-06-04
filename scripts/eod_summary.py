@@ -38,6 +38,9 @@ class TradeRecord:
     exit_price: float = 0.0
     exit_reason: str = ""
     pnl: float = 0.0
+    entry_slippage_bps: float = 0.0
+    exit_slippage_bps: float = 0.0
+    strategy: str = ""
 
     @property
     def hold_minutes(self) -> int:
@@ -172,6 +175,8 @@ def load_summary(session_date: date) -> SessionSummary:
                 stop_price=evt.get("stop", 0.0),
                 qty=evt.get("qty", 0),
                 bonus=last_bonus.get(sym, 0),
+                entry_slippage_bps=evt.get("slippage_bps", 0.0),
+                strategy=strat,
             )
 
         elif etype == "position_close":
@@ -183,6 +188,7 @@ def load_summary(session_date: date) -> SessionSummary:
                 tr.exit_price = evt.get("exit", 0.0)
                 tr.exit_reason = evt.get("reason", "")
                 tr.pnl = evt.get("pnl", 0.0)
+                tr.exit_slippage_bps = evt.get("slippage_bps", 0.0)
                 trades.append(tr)
 
     open_at_close = list(pending.values())
