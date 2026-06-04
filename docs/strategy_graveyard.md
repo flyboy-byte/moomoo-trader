@@ -57,7 +57,7 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost â€
 
 ### IWM-Weighted Position Sizing
 **What it is:** `SYMBOL_SIZE_OVERRIDES=US.IWM:300,US.SPY:600,US.QQQ:500` to allocate more capital to IWM given its superior edge (61.9% win rate, 38% stop rate vs 50-58% for SPY/QQQ).
-**Why it's on hold:** Waiting for first live trades to validate signal engines agree before tuning sizing.
+**Why it's on hold:** Signal engines validated (2026-06-04). Parked because ATR-normalized sizing (below) supersedes this â€” symbol-level overrides are a blunt instrument compared to per-trade volatility-adjusted risk. Do ATR sizing first; IWM weighting may naturally fall out of that.
 
 ### ATR-Normalized Position Sizing (Backlog, post live-data)
 **What it is:** `share_qty = risk_dollars / (atr * atr_multiplier)`. Sizes every trade to risk the same dollar amount regardless of market volatility.
