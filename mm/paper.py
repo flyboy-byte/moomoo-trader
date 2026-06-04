@@ -112,10 +112,10 @@ class PaperEventLog:
                     order_id=order_id, error=error)
 
     def position_open(self, entry: float, stop: float, qty: int,
-                      strategy: str = "") -> None:
+                      strategy: str = "", direction: str = "long") -> None:
         self._write("position_open", strategy=strategy, symbol=self._sym,
                     entry=round(entry, 4), stop=round(stop, 4), qty=qty,
-                    vix_at_entry=None)
+                    direction=direction, vix_at_entry=None)
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
                        hold_bars: int = 0, strategy: str = "") -> None:
@@ -750,7 +750,7 @@ def _eval_orb(
                             qty=qty, order_id=order_id,
                         )
                         _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="orb")
+                        elog.position_open(close, stop, qty, strategy="orb", direction="long")
                         notify_entry(symbol, close, stop)
                         log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%d",
                                  symbol, close, stop, target, qty)
@@ -785,7 +785,7 @@ def _eval_orb(
                             qty=qty, order_id=order_id,
                         )
                         _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="orb")
+                        elog.position_open(close, stop, qty, strategy="orb", direction="short")
                         notify_entry(symbol, close, stop)
                         log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%d",
                                  symbol, close, stop, target, qty)
