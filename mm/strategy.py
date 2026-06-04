@@ -88,9 +88,11 @@ def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def run_signals(df: pd.DataFrame) -> pd.DataFrame:
+def run_signals(df: pd.DataFrame, blocked_hours: set[int] | None = None) -> pd.DataFrame:
     """Stateful pass: apply entry/exit logic bar-by-bar and record open signals.
 
+    blocked_hours: set of ET hours (0-23) where new entries are suppressed.
+    Exits always fire regardless of time — only entries are filtered.
     Returns df with 'signal' column updated to reflect exit reasons as well.
     """
     df = compute_signals(df)
@@ -98,7 +100,8 @@ def run_signals(df: pd.DataFrame) -> pd.DataFrame:
 
     for i, row in df.iterrows():
         if position is None:
-            if row["signal"] == Signal.ENTRY:
+            hour = pd.Timestamp(row["time_key"]).hour
+            if row["signal"] == Signal.ENTRY and (not blocked_hours or hour not in blocked_hours):
                 position = Position(
                     entry_idx=i,
                     entry_time=row["time_key"],

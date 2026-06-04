@@ -55,6 +55,7 @@ Scripts (all run from project root with venv active):
   python scripts/compare_paper_vs_backtest.py [paper_jsonl] [--candle-csv CSV]
   python scripts/backtest_vwap_pb.py [csvs...] [--latest] [--all] [--sweep]
   python scripts/backtest_ema_momentum.py [csvs...] [--latest] [--all] [--sweep] [--entry cross|pullback]
+  python scripts/sweep_session_filter.py [csvs...] [--all]                    # BB+KDJ entry hour filter sweep
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
   ./start.sh                                                                   # start OpenD + paper runner
@@ -107,15 +108,16 @@ until forward paper testing shows otherwise:
    - Conclusion: K_5M is the right timeframe. Hypothesis that longer TF reduces stop-out noise is FALSE.
 
 Historical data on disk:
-  logs/US_SPY_K_5M_2026-05-30.csv  — 66,474 candles, 2022-01-01 to 2025-05-30
-  logs/US_QQQ_K_5M_2026-05-31.csv  — 66,474 candles, 2022-01-01 to 2025-05-30
-  logs/US_IWM_K_5M_2026-05-31.csv  — 66,474 candles, 2022-01-01 to 2025-05-30
+  logs/US_SPY_K_5M_combined.csv    — 86,100 candles, 2022-01-03 to 2026-06-03 (primary backtest file)
+  logs/US_QQQ_K_5M_combined.csv    — 86,100 candles, 2022-01-03 to 2026-06-03
+  logs/US_IWM_K_5M_combined.csv    — 86,100 candles, 2022-01-03 to 2026-06-03
   logs/US_SPY_K_15M_2026-05-31.csv — 22,158 candles, 2022-01-03 to 2025-05-30
   logs/US_QQQ_K_15M_2026-05-31.csv — 22,158 candles, 2022-01-03 to 2025-05-30
   logs/US_IWM_K_15M_2026-05-31.csv — 22,158 candles, 2022-01-03 to 2025-05-30
   logs/US_SPY_K_60M_2026-05-31.csv — 5,967 candles, 2022-01-03 to 2025-05-30
   logs/US_QQQ_K_60M_2026-05-31.csv — 5,967 candles, 2022-01-03 to 2025-05-30
   logs/US_IWM_K_60M_2026-05-31.csv — 5,967 candles, 2022-01-03 to 2025-05-30
+  Combined CSVs created by merging old (2022-2025) + fresh fetch (2025-05-31 to 2026-06-03), deduped on time_key.
 
 Tests:
   python -m pytest tests/           — 89 tests: risk (22), indicators/signals (47), strategy (18), orb (2)
@@ -171,6 +173,18 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
     Both backtester (strategy.py) and paper runner (paper.py) use same rolling window logic.
     Deployed: KDJ_WINDOW_BARS=3 on VPS.
 
+14. Session filter sweep (2026-06-03): BB+KDJ intraday hour analysis across 1,108 trading days.
+    Tested 12 blocked-hour combinations via scripts/sweep_session_filter.py on combined CSVs.
+    Key findings (delta vs baseline, all 3 symbols):
+    - Block 10-11: +$3.83 IWM, +$5.31 QQQ, −$0.80 SPY — only universally non-negative filter
+    - Block 14: +$7.26 SPY, +$1.97 IWM, −$2.08 QQQ — symbol-specific, not universal
+    - Block 15-16: −$21.92 IWM, −$21.75 QQQ, −$33.61 SPY — NEVER block the close hours
+    - Block open (9): −$14.57 IWM, −$11.00 SPY — open entries are productive, don't block
+    Decision: NOT implemented. BB+KDJ already has aggressive multi-condition filtering.
+    Adding a time blackout on top further suppresses a low-frequency strategy. Small sample
+    (300 trades/4yr per symbol) makes per-hour improvement unreliable. Session filter code
+    exists in strategy.py (blocked_hours param) and sweep script for future reference.
+
 13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
     Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5
     while EMA5>EMA20), with ADX filter [20/25/30] and ATR target [0.5/1.0/1.5/2.0×].
@@ -198,12 +212,11 @@ VPS deployment (as of 2026-06-03):
 What to build next (in priority order):
 1. Wait for first live trades — no trades have fired yet (choppy market, VWAP crosses=6-9).
    Once trades appear: run compare_paper_vs_backtest.py to validate signal engines agree.
-2. Fetch fresh historical data (candles end 2025-05-30):
-   python scripts/fetch_candles.py --symbol US.SPY --start 2025-05-31 --end 2026-06-03
-   (repeat for QQQ and IWM) — requires OpenD live connection.
+2. VIX daily regime filter — block BB+KDJ entries on high-volatility days (VIX > 25).
+   Approach: download CBOE VIX daily CSV (free), join on date, backtest on combined CSVs.
+   Use yfinance for daily VIX pull at session start. No intraday alignment needed.
 3. EMA momentum stop fix: if revisiting, fix stop to be ATR-only (not min(ema20, atr)).
    Investigate ADX=25 anomaly before considering deployment.
-4. README.md for GitHub — strategy summary, architecture, how to run, research findings.
 
 Do not ask before every small change. Make reasonable implementation decisions.
 After changes, explain what was built, how to run it, and what remains.
