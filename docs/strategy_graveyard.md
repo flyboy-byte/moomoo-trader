@@ -51,10 +51,9 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost �
 **Code:** `scripts/backtest_vix_filter.py` kept for reference. yfinance added to requirements.
 
 ### ORB Short Entries
-**What it is:** ORB currently long-only in the live runner. Short = enter when price breaks below OR low.
-**Why it's on hold:** Margin handling not yet wired up in paper runner. Short requires borrowing logic that adds complexity.
-**Backtest note:** Long/short roughly 50/50 split in historical data, so long-only cuts frequency ~in half.
-**Code:** `orb_strategy.py` handles both directions in backtest. Paper runner (`paper.py`) only executes longs.
+**Status: DEPLOYED (2026-06-04).** `ORB_SHORTS_ENABLED=true` default. Kill switch: `STOP_SHORTS.txt` in project root.
+**What was built:** `_place_short()` (SELL_SHORT), `_place_cover()` (BUY_BACK), `direction` field on `PaperPosition`, direction-aware stop/target/pnl logic, restart recovery fix. 16 tests in `tests/test_orb_shorts.py`.
+**Outstanding:** Live verification that Moomoo paper account accepts `TrdSide.SELL_SHORT` — watch first short signal's `order_result` event in JSONL.
 
 ### IWM-Weighted Position Sizing
 **What it is:** `SYMBOL_SIZE_OVERRIDES=US.IWM:300,US.SPY:600,US.QQQ:500` to allocate more capital to IWM given its superior edge (61.9% win rate, 38% stop rate vs 50-58% for SPY/QQQ).
@@ -65,9 +64,33 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost �
 **Why it's on hold:** Low priority vs strategy research. The JSONL `bar_eval` events already have everything needed to build this.
 
 ### Multi-Model AI Research Workflow
-**What it is:** Use Gemini Flash / GPT-4o for data analysis and hypothesis generation (paste backtest tables, ask for parameter sweep design, flag statistical issues) — preserve Claude Code context for implementation.
-**Why it's interesting:** Research tasks (reading CSVs, proposing parameters, checking significance) don't need codebase context and burn it fast. Splitting the work saves tokens and is faster.
-**Status:** Discussed, not set up. No tooling needed — just a workflow habit.
+**What it is:** Use Gemini Flash / GPT-4o for data analysis and hypothesis generation — preserve Claude Code context for implementation.
+**Status:** Active workflow habit. No tooling needed — paste backtest tables to Gemini/GPT, bring findings back here for implementation.
+
+---
+
+## Decided Against (from Gemini expansion plan, June 2026)
+
+### VIX 3-Tier Strategy Switching
+**What it was:** Use VIX as a master regime switch — ORB when VIX<15, VWAP PB when VIX 15-28, BB+KDJ when VIX>30.
+**Why skipped:** Unvalidated assumption that strategy fit changes by regime. VIX daily filter backtest showed VIX is not predictive for BB+KDJ entries. Regime-strategy mapping needs independent backtesting per cell before trusting.
+
+### Symbol Scaling (DIA / TLT / XLK / XLF)
+**What it was:** Add sector ETFs and inverse-correlated assets (TLT) to diversify the symbol universe.
+**Why skipped:** Every new symbol needs a full backtest + OOS validation cycle. No bandwidth. The three current symbols (SPY/QQQ/IWM) already cover the liquid ETF space. Add when there's a specific edge hypothesis, not just "more symbols."
+
+### Dynamic ATR Trailing Stops
+**What it was:** Replace fixed BB-middle target with a 1.5× ATR trailing stop to capture "pierce" moves.
+**Why skipped:** Unvalidated. BB-middle is a clean, interpretable target with a proven OOS edge. Adding a trailing stop introduces a new parameter and potential for premature exit on reversion trades. Needs isolated backtest before considering.
+
+### Economic Event Gating (STOP_FOR_NEWS.txt / vol spike filter)
+**What it was:** Pause entries 30 min around CPI/FOMC. Auto-detect via 1-min ATR spike (>3× 60-min avg).
+**Why skipped:** Over-engineering for paper trading. STOP_TRADING.txt already handles manual pauses. 1-min ATR requires a separate data feed. Cost > benefit at this stage.
+
+### Push Architecture (intra-bar exits)
+**What it was:** Replace 60s polling with `StockQuoteHandlerBase` WebSocket push. Use push data for exits, closed bars for entries only.
+**Why deferred:** No evidence slippage is a real problem yet — need live trade data first. WebSocket stability on the VPS is unknown. Build `scripts/live_price_monitor.py` pilot first if this becomes a priority.
+**Revisit when:** Live trades show consistent exit slippage > 0.1% per trade.
 
 ---
 
@@ -76,7 +99,7 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost �
 | Strategy | PF (OOS) | Symbols | Notes |
 |----------|----------|---------|-------|
 | BB+KDJ mean reversion | 1.843 in-sample, walk-forward validated | IWM, SPY, QQQ | KDJ_WINDOW_BARS=3, MIN_SIGNAL_SCORE=2 |
-| ORB (long-only) | 1.215 | IWM, SPY, QQQ | 30-min OR for IWM, 15-min for SPY/QQQ |
+| ORB (long + short) | 1.215 | IWM, SPY, QQQ | 30-min OR for IWM, 15-min for SPY/QQQ. Shorts added 2026-06-04. |
 | VWAP Pullback | 1.655 SPY, 1.072 QQQ | SPY, QQQ only | IWM excluded (negative OOS) |
 
 ---
