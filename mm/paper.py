@@ -118,10 +118,11 @@ class PaperEventLog:
                     direction=direction, vix_at_entry=None)
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
-                       hold_bars: int = 0, strategy: str = "") -> None:
+                       hold_bars: int = 0, strategy: str = "",
+                       direction: str = "long") -> None:
         self._write("position_close", strategy=strategy, symbol=self._sym,
                     exit=round(exit_price, 4), reason=reason, pnl=round(pnl, 4),
-                    hold_bars=hold_bars)
+                    hold_bars=hold_bars, direction=direction)
 
     def error(self, message: str, strategy: str = "") -> None:
         self._write("error", strategy=strategy, message=message)
@@ -427,7 +428,7 @@ def _eval_bb_kdj(
             hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "bb_kdj")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars, strategy="bb_kdj")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars, strategy="bb_kdj", direction="long")
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [bb_kdj] CLOSE exit=%.4f pnl=%+.4f reason=%s",
                      symbol, close, pnl_total, exit_reason)
@@ -451,9 +452,12 @@ def _eval_vwap(
     dist_atr = (vsig.vwap - close) / atr_val
     log.info("%-8s [vwap]   BAR %s  close=%.4f  vwap=%.4f  dist=%.2fATR  entry=%s",
              symbol, candle_ts, close, vsig.vwap, dist_atr, vsig.entry_ready)
+    adx_vwap = float(last["adx"]) if "adx" in last and not pd.isna(last.get("adx", float("nan"))) else 0.0
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=int(vsig.entry_ready), bonus=0,
-                  signals=vsig.details, strategy="vwap")
+                  signals=vsig.details,
+                  regime_label="trending" if adx_vwap > 25 else "ranging",
+                  strategy="vwap")
 
     if position is None:
         entry_ok = (bool(last.get("vwap_entry", False)) and
@@ -505,9 +509,10 @@ def _eval_vwap(
             order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="vwap")
+            hold_bars_vwap = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "vwap")
-            elog.position_close(close, exit_reason, pnl_total, strategy="vwap")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vwap, strategy="vwap", direction="long")
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [vwap]   CLOSE exit=%.4f pnl=%+.4f reason=%s",
                      symbol, close, pnl_total, exit_reason)
@@ -577,7 +582,7 @@ def _eval_vwap_pb(
             hold_bars_vp = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "vwap_pb")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vp, strategy="vwap_pb")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vp, strategy="vwap_pb", direction="long")
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [vwap_pb] CLOSE exit=%.4f pnl=%+.4f reason=%s",
                      symbol, close, pnl_total, exit_reason)
@@ -627,14 +632,14 @@ def _eval_orb(
     position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
     already_entered: bool = False,
 ) -> PaperPosition | None:
-    """Evaluate ORB strategy (long-only) for one symbol.
+    """Evaluate ORB strategy for one symbol. Supports long and short entries.
 
-    Short entries are skipped in the live runner — they require TrdSide.SELL_SHORT
-    with margin handling not yet wired up. Backtest PnL includes shorts; live will be
-    long-only. Net effect: roughly half the trade frequency of the backtest.
+    Long: close > or_high + vol_ok + after_cutoff.
+    Short: close < or_low + vol_ok + after_cutoff + cfg.orb_shorts_enabled.
+    Kill switch: create STOP_SHORTS.txt in project root to disable short entries at runtime.
 
     already_entered: True if ORB already traded today for this symbol. Enforces the
-    one-trade-per-day rule across process restarts (state persisted to disk).
+    one-trade-per-day rule (long OR short) across process restarts (state persisted to disk).
     """
     from datetime import time as dtime
 
@@ -694,7 +699,7 @@ def _eval_orb(
             hold_bars_orb = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "orb")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_orb, strategy="orb")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_orb, strategy="orb", direction=position.direction)
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [orb]    CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s",
                      symbol, position.direction, close, pnl_total, exit_reason)

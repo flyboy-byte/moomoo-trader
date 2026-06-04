@@ -65,20 +65,6 @@ def section(title: str) -> None:
 
 def _uptime(records: list[dict]) -> None:
     section("1. UPTIME GAPS  (bar_eval gaps > 10 min)")
-    by_sym_strat: dict[tuple, list[datetime]] = defaultdict(list)
-    for r in records:
-        if r.get("event") != "bar_eval":
-            continue
-        sym = r.get("symbol", r.get("signals", {}).get("symbol", "?"))
-        strat = r.get("strategy", "?")
-        try:
-            ts = datetime.fromisoformat(r["ts"])
-        except (KeyError, ValueError):
-            continue
-        # symbol not in bar_eval top-level — use filename context
-        by_sym_strat[(strat,)].append(ts)
-
-    # re-group by strategy using top-level strategy field only
     strat_ts: dict[str, list[datetime]] = defaultdict(list)
     for r in records:
         if r.get("event") != "bar_eval":
@@ -185,19 +171,19 @@ def _trades(records: list[dict]) -> None:
         entry = o.get("entry", "?")
         stop = o.get("stop", "?")
         qty = o.get("qty", "?")
+        direction = o.get("direction", "long")
         ts = o.get("ts", "?")
-        print(f"  OPEN   {ts}  {sym}/{strat}  entry={entry}  stop={stop}  qty={qty}")
+        print(f"  OPEN   {ts}  {sym}/{strat} [{direction}]  entry={entry}  stop={stop}  qty={qty}")
 
-        # find matching close (same symbol + strategy, after open ts)
         match = next(
             (c for c in closes
              if c.get("symbol") == sym and c.get("strategy") == strat and c.get("ts", "") > ts),
             None,
         )
         if match:
-            print(f"  CLOSE  {match.get('ts','?')}  {sym}/{strat}  exit={match.get('exit','?')}  "
-                  f"reason={match.get('reason','?')}  pnl={match.get('pnl','?'):+}  "
-                  f"hold_bars={match.get('hold_bars', '?')}")
+            print(f"  CLOSE  {match.get('ts','?')}  {sym}/{strat} [{match.get('direction', direction)}]  "
+                  f"exit={match.get('exit','?')}  reason={match.get('reason','?')}  "
+                  f"pnl={match.get('pnl','?'):+}  hold_bars={match.get('hold_bars', '?')}")
         else:
             print(f"  CLOSE  (position still open)")
         print()
