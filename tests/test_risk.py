@@ -192,3 +192,37 @@ class TestLiveTradingBlocked:
         risk = _reload_risk(monkeypatch, {"LIVE_TRADING_ENABLED": "false"})
         monkeypatch.setattr(risk, "_KILL_SWITCH", tmp_path / "STOP_TRADING.txt")
         assert risk.trading_allowed() is True
+
+
+class TestFractionalSizing:
+    def test_fractional_qty_basic(self):
+        from mm.risk import calc_qty_fractional
+        qty = calc_qty_fractional(price=755.0, dollars=11.11)
+        assert abs(qty - 0.014715) < 0.0001
+
+    def test_fractional_qty_zero_price(self):
+        from mm.risk import calc_qty_fractional
+        assert calc_qty_fractional(price=0.0, dollars=100.0) == 0.0
+
+    def test_fractional_qty_zero_dollars(self):
+        from mm.risk import calc_qty_fractional
+        assert calc_qty_fractional(price=755.0, dollars=0.0) == 0.0
+
+    def test_fractional_qty_rounds_6dp(self):
+        from mm.risk import calc_qty_fractional
+        qty = calc_qty_fractional(price=3.0, dollars=10.0)
+        assert qty == round(qty, 6)
+
+    def test_per_slot_dollars_divides_evenly(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {"TOTAL_CAPITAL": "900", "FRACTIONAL_SHARES": "true"})
+        dollars = risk.per_slot_dollars(n_symbols=3, n_strategies=3)
+        assert abs(dollars - 100.0) < 0.001
+
+    def test_per_slot_dollars_zero_when_unset(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {"TOTAL_CAPITAL": "0"})
+        assert risk.per_slot_dollars(n_symbols=3, n_strategies=3) == 0.0
+
+    def test_per_slot_dollars_single_slot(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {"TOTAL_CAPITAL": "500"})
+        dollars = risk.per_slot_dollars(n_symbols=1, n_strategies=1)
+        assert abs(dollars - 500.0) < 0.001

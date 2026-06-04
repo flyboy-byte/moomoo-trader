@@ -40,7 +40,7 @@ from .data import fetch_candles
 from .indicators import add_all
 from .notifications import notify, notify_entry, notify_exit
 from .orb_strategy import _build_opening_ranges
-from .risk import trading_allowed, calc_qty, DailyTracker, market_open, seconds_until_open
+from .risk import trading_allowed, calc_qty, calc_qty_fractional, per_slot_dollars, DailyTracker, market_open, seconds_until_open
 from .signals import snapshot as signal_snapshot
 from .strategy import compute_signals
 from .vwap_signals import snapshot_vwap
@@ -111,10 +111,11 @@ class PaperEventLog:
         self._write("order_result", strategy=strategy, side=side, success=success,
                     order_id=order_id, error=error)
 
-    def position_open(self, entry: float, stop: float, qty: int,
+    def position_open(self, entry: float, stop: float, qty: int | float,
                       strategy: str = "", direction: str = "long") -> None:
         self._write("position_open", strategy=strategy, symbol=self._sym,
-                    entry=round(entry, 4), stop=round(stop, 4), qty=qty,
+                    entry=round(entry, 4), stop=round(stop, 4),
+                    qty=round(qty, 6) if isinstance(qty, float) else qty,
                     direction=direction, vix_at_entry=None)
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
@@ -306,6 +307,33 @@ def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Per-position sizing — fractional or whole shares
+# ---------------------------------------------------------------------------
+
+# Populated at run_multi() startup when TOTAL_CAPITAL is set.
+_slot_dollars: float = 0.0
+
+
+def _qty(price: float, symbol: str) -> int | float:
+    """Return order qty using fractional or whole-share logic.
+
+    When TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty
+    derived from the pre-computed per-slot dollar allocation.
+    Otherwise: falls back to integer calc_qty() using MAX_POSITION_DOLLARS.
+    """
+    if _slot_dollars > 0 and cfg.fractional_shares:
+        return calc_qty_fractional(price, _slot_dollars)
+    return calc_qty(price, symbol)
+
+
+def _position_cap(symbol: str) -> float:
+    """Dollar cap for risk-block logging — slot dollars if capital mode, else per-symbol cap."""
+    if _slot_dollars > 0:
+        return _slot_dollars
+    return cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
+
+
+# ---------------------------------------------------------------------------
 # Candle fetching with explicit closed-candle verification
 # ---------------------------------------------------------------------------
 
@@ -381,9 +409,9 @@ def _eval_bb_kdj(
                 elog.risk_block("daily_limit_reached", strategy="bb_kdj",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = calc_qty(close, symbol)
-                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                if qty == 0:
+                qty = _qty(close, symbol)
+                cap = _position_cap(symbol)
+                if not qty:
                     log.warning("RISK BLOCK [bb_kdj] %s: price %.2f exceeds cap %.2f",
                                 symbol, close, cap)
                     elog.risk_block("price_exceeds_max_position", strategy="bb_kdj",
@@ -467,9 +495,9 @@ def _eval_vwap(
                 elog.risk_block("daily_limit_reached", strategy="vwap",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = calc_qty(close, symbol)
-                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                if qty == 0:
+                qty = _qty(close, symbol)
+                cap = _position_cap(symbol)
+                if not qty:
                     log.warning("RISK BLOCK [vwap] %s: price %.2f exceeds cap %.2f",
                                 symbol, close, cap)
                     elog.risk_block("price_exceeds_max_position", strategy="vwap",
@@ -599,9 +627,9 @@ def _eval_vwap_pb(
                 elog.risk_block("daily_limit_reached", strategy="vwap_pb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = calc_qty(close, symbol)
-                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                if qty == 0:
+                qty = _qty(close, symbol)
+                cap = _position_cap(symbol)
+                if not qty:
                     log.warning("RISK BLOCK [vwap_pb] %s: price %.2f exceeds cap %.2f",
                                 symbol, close, cap)
                     elog.risk_block("price_exceeds_max_position", strategy="vwap_pb",
@@ -733,9 +761,9 @@ def _eval_orb(
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = calc_qty(close, symbol)
-                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                if qty == 0:
+                qty = _qty(close, symbol)
+                cap = _position_cap(symbol)
+                if not qty:
                     log.warning("RISK BLOCK [orb] %s: price %.2f exceeds cap %.2f",
                                 symbol, close, cap)
                     elog.risk_block("price_exceeds_max_position", strategy="orb",
@@ -768,9 +796,9 @@ def _eval_orb(
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = calc_qty(close, symbol)
-                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
-                if qty == 0:
+                qty = _qty(close, symbol)
+                cap = _position_cap(symbol)
+                if not qty:
                     log.warning("RISK BLOCK [orb-short] %s: price %.2f exceeds cap %.2f",
                                 symbol, close, cap)
                     elog.risk_block("price_exceeds_max_position", strategy="orb",
@@ -841,6 +869,15 @@ def run_multi(symbols: list[str] | None = None) -> None:
     if cfg.trd_env != "SIMULATE":
         log.error("TRD_ENV is '%s' — paper runner requires SIMULATE. Aborting.", cfg.trd_env)
         return
+
+    global _slot_dollars
+    if cfg.total_capital > 0:
+        _slot_dollars = per_slot_dollars(len(symbols), len(strategies))
+        mode = f"fractional" if cfg.fractional_shares else "whole-share"
+        log.info("Capital mode: TOTAL_CAPITAL=%.2f  slots=%d  per_slot=%.4f  mode=%s",
+                 cfg.total_capital, len(symbols) * len(strategies), _slot_dollars, mode)
+    else:
+        _slot_dollars = 0.0
 
     log.info("Multi runner: symbols=%s  strategies=%s  ktype=%s  min_signal_score=%d",
              symbols, strategies, cfg.candle_ktype, cfg.min_signal_score)

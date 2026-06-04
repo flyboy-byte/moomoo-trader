@@ -105,6 +105,12 @@ class Config:
     # Short entries for ORB. Disable at runtime by creating STOP_SHORTS.txt in project root.
     orb_shorts_enabled: bool = _bool("ORB_SHORTS_ENABLED", True)
 
+    # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
+    # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.
+    # FRACTIONAL_SHARES=true required to trade below one-share price (e.g. $100 / 9 slots).
+    total_capital: float = float(_get("TOTAL_CAPITAL", "0"))
+    fractional_shares: bool = _bool("FRACTIONAL_SHARES", False)
+
     logs_dir: Path = Path(__file__).parent.parent / "logs"
 
 

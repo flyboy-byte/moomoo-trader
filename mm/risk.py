@@ -73,6 +73,33 @@ def calc_qty(price: float, symbol: str | None = None) -> int:
     return math.floor(cap / price)
 
 
+def calc_qty_fractional(price: float, dollars: float) -> float:
+    """Return fractional share count for a given dollar allocation.
+
+    Used when TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true.
+    Returns a float qty — Moomoo converts qty to float internally and supports fractional shares.
+    Rounds to 6 decimal places to avoid floating-point noise in order submissions.
+    """
+    if price <= 0 or dollars <= 0:
+        return 0.0
+    return round(dollars / price, 6)
+
+
+def per_slot_dollars(n_symbols: int, n_strategies: int) -> float:
+    """Compute per-position dollar allocation from TOTAL_CAPITAL.
+
+    Divides total capital equally across all (symbol, strategy) slots.
+    Returns 0.0 if TOTAL_CAPITAL is not set.
+    """
+    if cfg.total_capital <= 0:
+        return 0.0
+    n_slots = max(1, n_symbols * n_strategies)
+    dollars = cfg.total_capital / n_slots
+    log.info("Capital allocation: $%.2f / %d slots = $%.4f per position",
+             cfg.total_capital, n_slots, dollars)
+    return dollars
+
+
 @dataclass
 class DailyTracker:
     """Tracks per-day trade count and realized PnL. Resets automatically on a new calendar day."""
