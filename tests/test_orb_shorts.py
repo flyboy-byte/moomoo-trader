@@ -58,6 +58,31 @@ def test_position_round_trip_preserves_direction():
     assert restored["direction"] == "short"
 
 
+def test_load_position_restores_direction():
+    """_load_position must restore direction — otherwise a restarted runner flips short exit logic."""
+    import tempfile
+    from unittest.mock import patch
+    from mm.paper import _load_position
+
+    pos = PaperPosition(
+        symbol="US.SPY", strategy="orb",
+        entry_time=datetime(2026, 6, 4, 10, 0),
+        entry_price=500.0, stop_price=505.0, qty=1,
+        direction="short", target_price=490.0,
+    )
+    d = asdict(pos)
+    d["entry_time"] = str(pos.entry_time)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pos_file = Path(tmpdir) / "paper_US_SPY_orb_position.json"
+        pos_file.write_text(json.dumps(d))
+        with patch("mm.paper._position_file", return_value=pos_file):
+            loaded = _load_position("US.SPY", "orb")
+
+    assert loaded is not None
+    assert loaded.direction == "short"
+
+
 # ---------------------------------------------------------------------------
 # Exit condition logic (direction-aware) — mirrors _eval_orb exit block
 # ---------------------------------------------------------------------------

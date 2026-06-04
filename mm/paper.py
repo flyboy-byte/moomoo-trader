@@ -180,9 +180,10 @@ def _load_position(symbol: str, strategy: str) -> PaperPosition | None:
             qty=d["qty"],
             order_id=d.get("order_id", ""),
             target_price=d.get("target_price", 0.0),
+            direction=d.get("direction", "long"),
         )
-        log.warning("Recovered open position [%s/%s]: entry=%.4f stop=%.4f qty=%d",
-                    symbol, strategy, pos.entry_price, pos.stop_price, pos.qty)
+        log.warning("Recovered open position [%s/%s]: entry=%.4f stop=%.4f qty=%d dir=%s",
+                    symbol, strategy, pos.entry_price, pos.stop_price, pos.qty, pos.direction)
         return pos
     except Exception as e:
         log.error("Failed to load position state [%s/%s]: %s — starting fresh",
