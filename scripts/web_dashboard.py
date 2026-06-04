@@ -35,12 +35,49 @@ def _load_recent_evals(n: int = 20) -> list[dict]:
         for line in f.read_text().splitlines():
             try:
                 e = json.loads(line)
-                if e.get("event") == "bar_eval":
+                if e.get("event") == "bar_eval" and e.get("strategy") == "bb_kdj":
                     e.setdefault("symbol", sym)
                     evals.append(e)
             except json.JSONDecodeError:
                 pass
     return evals[-n:]
+
+
+def _load_latest_evals_by_symbol() -> dict[str, dict[str, dict]]:
+    """Return {symbol: {strategy: latest bar_eval}} for today's session."""
+    date_str = _session_date.strftime("%Y-%m-%d")
+    result: dict[str, dict[str, dict]] = {}
+    for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
+        sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
+        result.setdefault(sym, {})
+        for line in f.read_text().splitlines():
+            try:
+                e = json.loads(line)
+                if e.get("event") == "bar_eval":
+                    strat = e.get("strategy", "?")
+                    e.setdefault("symbol", sym)
+                    result[sym][strat] = e
+            except json.JSONDecodeError:
+                pass
+    return result
+
+
+def _load_recent_skips(n: int = 12) -> list[dict]:
+    """Return last N signal_skip events across all symbol files."""
+    date_str = _session_date.strftime("%Y-%m-%d")
+    skips: list[dict] = []
+    for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
+        sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
+        for line in f.read_text().splitlines():
+            try:
+                e = json.loads(line)
+                if e.get("event") == "signal_skip":
+                    e.setdefault("symbol", sym)
+                    skips.append(e)
+            except json.JSONDecodeError:
+                pass
+    skips.sort(key=lambda x: x.get("ts", ""))
+    return skips[-n:]
 
 
 def _runner_status(last_eval: dict | None) -> tuple[str, str]:
@@ -72,11 +109,235 @@ def _fmt_pnl(v: float) -> str:
     return f"+${v:.2f}" if v >= 0 else f"-${abs(v):.2f}"
 
 
+def _bb_kdj_status(sig: dict, bonus: int) -> str:
+    bb = sig.get("bb_touch", False)
+    kdj = sig.get("kdj_cross", False)
+    bb_lower = sig.get("bb_lower", 0.0)
+    bb_middle = sig.get("bb_middle", 0.0)
+    close = sig.get("close", 0.0)
+    min_bonus = cfg.min_signal_score
+    if bb and kdj and bonus >= min_bonus:
+        return '<span style="color:#4caf50;font-weight:bold">READY ▲</span>'
+    if bb and not kdj:
+        return '<span style="color:#ffeb3b">BB ✓ · need KDJ</span>'
+    if kdj and not bb:
+        if bb_lower and close:
+            pct = (close - bb_lower) / close * 100
+            return f'<span style="color:#888">KDJ ✓ · BB {pct:+.2f}%</span>'
+        return '<span style="color:#888">KDJ ✓ · wait BB</span>'
+    # neither — show distance to BB lower
+    if bb_lower and close:
+        pct = (close - bb_lower) / close * 100
+        color = "#ffeb3b" if pct < 0.10 else "#555"
+        return f'<span style="color:{color}">BB {pct:+.2f}% away</span>'
+    return '<span style="color:#555">watching</span>'
+
+
+def _orb_status(sig: dict, close: float) -> str:
+    if not sig.get("or_valid"):
+        return '<span style="color:#555">no OR yet</span>'
+    or_high = sig.get("or_high", 0.0)
+    or_low = sig.get("or_low", 0.0)
+    if close > or_high:
+        return '<span style="color:#4caf50;font-weight:bold">LONG READY ▲</span>'
+    if or_low and close < or_low:
+        return '<span style="color:#ff5252;font-weight:bold">SHORT READY ▼</span>'
+    if or_high:
+        pct_to_high = (or_high - close) / close * 100
+        pct_to_low = (close - or_low) / close * 100 if or_low else 0
+        return f'<span style="color:#555">inside · +{pct_to_high:.2f}% to H · -{pct_to_low:.2f}% to L</span>'
+    return '<span style="color:#555">inside range</span>'
+
+
+def _vwap_status(sig: dict) -> str:
+    crosses = sig.get("cross_count", 0)
+    above = sig.get("close_above_vwap", False)
+    wick = sig.get("wick_below", False)
+    max_crosses = cfg.vwap_pb_max_crosses
+    if crosses > max_crosses:
+        return f'<span style="color:#555">choppy ({crosses} crosses > {max_crosses})</span>'
+    if wick and above:
+        return '<span style="color:#4caf50;font-weight:bold">READY ▲</span>'
+    if wick and not above:
+        return '<span style="color:#888">wick ✓ · close below VWAP</span>'
+    return '<span style="color:#555">watching</span>'
+
+
 # ---------------------------------------------------------------------------
 # HTML rendering
 # ---------------------------------------------------------------------------
 
-def _render(summary: SessionSummary, evals: list[dict]) -> str:
+def _render_market_conditions(
+    latest: dict[str, dict[str, dict]],
+    skips: list[dict],
+) -> str:
+    if not latest and not skips:
+        return ""
+
+    # --- BB+KDJ section ---
+    bb_rows = ""
+    for sym in sorted(latest):
+        e = latest[sym].get("bb_kdj")
+        if not e:
+            continue
+        sig = e.get("signals", {})
+        sig["close"] = e.get("close", 0.0)
+        close = e.get("close", 0.0)
+        bb_lower = sig.get("bb_lower", 0.0)
+        bb_middle = sig.get("bb_middle", 0.0)
+        bonus = e.get("bonus_score", 0)
+        ranging = sig.get("ranging", False)
+        regime_col = "#4caf50" if ranging else "#ff9800"
+        regime_txt = "RANGING" if ranging else "TRENDING"
+        bar_time = e.get("ts", "")[:16].replace("T", " ")[11:]
+        bb_rows += f"""<tr>
+          <td><b>{sym.replace("US.", "")}</b></td>
+          <td style="color:#666">{bar_time}</td>
+          <td>${close:.3f}</td>
+          <td style="color:#888">${bb_lower:.3f}</td>
+          <td style="color:#888">${bb_middle:.3f}</td>
+          <td style="color:{regime_col};font-size:11px;letter-spacing:.5px">{regime_txt}</td>
+          <td>{_signal_dot(sig.get("bb_touch", False))}</td>
+          <td>{_signal_dot(sig.get("kdj_cross", False))}</td>
+          <td>{_signal_dot(sig.get("rsi_oversold", False))}</td>
+          <td>{_signal_dot(ranging)}</td>
+          <td>{_signal_dot(sig.get("volume_spike", False))}</td>
+          <td style="color:#666;font-size:11px">{bonus}/{cfg.min_signal_score}</td>
+          <td>{_bb_kdj_status(sig, bonus)}</td>
+        </tr>"""
+
+    # --- ORB section ---
+    orb_rows = ""
+    for sym in sorted(latest):
+        e = latest[sym].get("orb")
+        if not e:
+            continue
+        sig = e.get("signals", {})
+        close = e.get("close", 0.0)
+        or_valid = sig.get("or_valid", False)
+        or_high = sig.get("or_high", 0.0)
+        or_low = sig.get("or_low", 0.0)
+        bar_time = e.get("ts", "")[:16].replace("T", " ")[11:]
+        or_valid_html = '<span style="color:#4caf50">✓</span>' if or_valid else '<span style="color:#444">—</span>'
+        or_high_str = f"${or_high:.3f}" if or_high else "—"
+        or_low_str = f"${or_low:.3f}" if or_low else "—"
+        orb_rows += f"""<tr>
+          <td><b>{sym.replace("US.", "")}</b></td>
+          <td style="color:#666">{bar_time}</td>
+          <td>${close:.3f}</td>
+          <td style="color:#888">{or_high_str}</td>
+          <td style="color:#888">{or_low_str}</td>
+          <td>{or_valid_html}</td>
+          <td>{_orb_status(sig, close)}</td>
+        </tr>"""
+
+    # --- VWAP PB section ---
+    vwap_rows = ""
+    for sym in sorted(latest):
+        e = latest[sym].get("vwap_pb")
+        if not e:
+            continue
+        sig = e.get("signals", {})
+        close = e.get("close", 0.0)
+        crosses = sig.get("cross_count", 0)
+        above = sig.get("close_above_vwap", False)
+        wick = sig.get("wick_below", False)
+        bar_time = e.get("ts", "")[:16].replace("T", " ")[11:]
+        cross_col = "#f44336" if crosses > cfg.vwap_pb_max_crosses else "#4caf50"
+        vwap_rows += f"""<tr>
+          <td><b>{sym.replace("US.", "")}</b></td>
+          <td style="color:#666">{bar_time}</td>
+          <td>${close:.3f}</td>
+          <td style="color:{cross_col}">{crosses}</td>
+          <td>{_signal_dot(above)}</td>
+          <td>{_signal_dot(wick)}</td>
+          <td>{_vwap_status(sig)}</td>
+        </tr>"""
+
+    # --- Skip reasons ---
+    skip_rows = ""
+    for e in reversed(skips):
+        ts = e.get("ts", "")[:16].replace("T", " ")[11:]
+        sym = e.get("symbol", "?").replace("US.", "")
+        strat = e.get("strategy", "?")
+        reason = e.get("reason", "?")
+        score = e.get("score", 0)
+        min_s = e.get("min_score", "?")
+        r_col = "#f44336" if "block" in reason or "risk" in reason else "#888"
+        skip_rows += f"""<tr>
+          <td style="color:#666">{ts}</td>
+          <td><b>{sym}</b></td>
+          <td style="color:#555;font-size:11px">{strat}</td>
+          <td style="color:{r_col}">{reason}</td>
+          <td style="color:#555;font-size:11px">{score}/{min_s}</td>
+        </tr>"""
+
+    section_label = '<div style="font-size:11px;color:#555;letter-spacing:1px;margin:12px 0 6px">'
+    divider = '<div style="border-top:1px solid #222;margin:10px 0"></div>'
+
+    bb_section = f"""
+        {section_label}BB+KDJ</div>
+        <table>
+          <tr class="th">
+            <th>Symbol</th><th>Bar</th><th>Price</th>
+            <th title="Bollinger lower band">BB Low</th>
+            <th title="Bollinger middle band">BB Mid</th>
+            <th>Regime</th>
+            <th title="Price ≤ BB lower">BB</th>
+            <th title="KDJ golden cross">KDJ</th>
+            <th title="RSI < 35">RSI</th>
+            <th title="ADX < 25">RNG</th>
+            <th title="Volume spike 1.5×">VOL</th>
+            <th>Bonus</th><th>Status</th>
+          </tr>
+          {bb_rows}
+        </table>""" if bb_rows else ""
+
+    orb_section = f"""
+        {divider}
+        {section_label}ORB</div>
+        <table>
+          <tr class="th">
+            <th>Symbol</th><th>Bar</th><th>Price</th>
+            <th>OR High</th><th>OR Low</th>
+            <th title="Opening range built">OR</th>
+            <th>Status</th>
+          </tr>
+          {orb_rows}
+        </table>""" if orb_rows else ""
+
+    vwap_section = f"""
+        {divider}
+        {section_label}VWAP PULLBACK</div>
+        <table>
+          <tr class="th">
+            <th>Symbol</th><th>Bar</th><th>Price</th>
+            <th title="VWAP crosses today">Crosses</th>
+            <th title="Close above VWAP">Above</th>
+            <th title="Wick below VWAP">Wick</th>
+            <th>Status</th>
+          </tr>
+          {vwap_rows}
+        </table>""" if vwap_rows else ""
+
+    skips_section = f"""
+        {divider}
+        {section_label}RECENT SKIPS</div>
+        <table>
+          <tr class="th">
+            <th>Time</th><th>Symbol</th><th>Strategy</th><th>Reason</th><th>Score/Min</th>
+          </tr>
+          {skip_rows}
+        </table>""" if skip_rows else ""
+
+    return f"""
+    <div class="card">
+      <div class="card-title">MARKET CONDITIONS</div>
+      {bb_section}{orb_section}{vwap_section}{skips_section}
+    </div>"""
+
+
+def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "") -> str:
     last_eval = evals[-1] if evals else None
     status_label, status_color = _runner_status(last_eval)
     now_str = datetime.now().strftime("%H:%M:%S")
@@ -215,9 +476,10 @@ def _render(summary: SessionSummary, evals: list[dict]) -> str:
 
   {open_html}
   {trades_html}
+  {market_cond_html}
 
   <div class="card">
-    <div class="card-title">SIGNAL FEED (last 20 bars)</div>
+    <div class="card-title">SIGNAL FEED (last 20 bars · bb_kdj only)</div>
     <table>
       <tr class="th">
         <th>Time</th><th>Close</th>
@@ -243,7 +505,10 @@ def _render(summary: SessionSummary, evals: list[dict]) -> str:
 def index() -> str:
     summary = load_summary(_session_date)
     evals = _load_recent_evals()
-    return _render(summary, evals)
+    latest = _load_latest_evals_by_symbol()
+    skips = _load_recent_skips()
+    market_cond_html = _render_market_conditions(latest, skips)
+    return _render(summary, evals, market_cond_html)
 
 
 # ---------------------------------------------------------------------------

@@ -60,8 +60,9 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost �
 **Why it's on hold:** Waiting for first live trades to validate signal engines agree before tuning sizing.
 
 ### Web Dashboard Market Conditions Card
-**What it is:** Add a live card to `scripts/web_dashboard.py` showing ATR percentile, session return, ADX value, and "why no entry" explanation when the strategy is quiet.
-**Why it's on hold:** Low priority vs strategy research. The JSONL `bar_eval` events already have everything needed to build this.
+**Status: DEPLOYED (2026-06-04).** `scripts/web_dashboard.py` updated.
+**What was built:** A `MARKET CONDITIONS` card injected between TRADES and SIGNAL FEED. Three sub-sections — BB+KDJ, ORB, VWAP PB — show the latest eval per symbol per strategy with entry-readiness status. A RECENT SKIPS section shows the last 12 `signal_skip` events with reason and score. `_render_market_conditions()` reads via two new loaders: `_load_latest_evals_by_symbol()` and `_load_recent_skips()`.
+**Status labels:** BB+KDJ shows "BB X% away" / "need KDJ" / "READY ▲". ORB shows "LONG READY ▲" / "SHORT READY ▼" / distance to breakout. VWAP PB shows "choppy (N crosses > max)" or "READY ▲".
 
 ### Multi-Model AI Research Workflow
 **What it is:** Use Gemini Flash / GPT-4o for data analysis and hypothesis generation — preserve Claude Code context for implementation.
