@@ -144,6 +144,7 @@ class PaperPosition:
     qty: int
     order_id: str = ""
     target_price: float = 0.0  # fixed target for ORB; 0 = not used (bb_kdj/vwap use dynamic targets)
+    direction: str = "long"    # "long" or "short"
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +272,34 @@ def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
         log.info("SELL %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
         return order_id
     log.error("SELL failed: %s", data)
+    return ""
+
+
+def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    ret, data = ctx.place_order(
+        price=price, qty=qty, code=symbol,
+        trd_side=TrdSide.SELL_SHORT, order_type=OrderType.NORMAL,
+        trd_env=TrdEnv.SIMULATE, acc_id=acc_id,
+    )
+    if ret == RET_OK:
+        order_id = str(data["order_id"].iloc[0])
+        log.info("SELL_SHORT %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
+        return order_id
+    log.error("SELL_SHORT failed: %s", data)
+    return ""
+
+
+def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    ret, data = ctx.place_order(
+        price=price, qty=qty, code=symbol,
+        trd_side=TrdSide.BUY_BACK, order_type=OrderType.NORMAL,
+        trd_env=TrdEnv.SIMULATE, acc_id=acc_id,
+    )
+    if ret == RET_OK:
+        order_id = str(data["order_id"].iloc[0])
+        log.info("BUY_BACK %s qty=%d price=%.4f order_id=%s", symbol, qty, price, order_id)
+        return order_id
+    log.error("BUY_BACK failed: %s", data)
     return ""
 
 
@@ -638,28 +667,36 @@ def _eval_orb(
                   strategy="orb")
 
     if position is not None:
+        is_short = position.direction == "short"
         exit_reason: str | None = None
         if is_time_stop:
             exit_reason = "TIME_STOP"
-        elif position.target_price > 0 and close >= position.target_price:
+        elif position.target_price > 0 and (
+            close <= position.target_price if is_short else close >= position.target_price
+        ):
             exit_reason = "TARGET"
-        elif close <= position.stop_price:
+        elif (close >= position.stop_price if is_short else close <= position.stop_price):
             exit_reason = "STOP"
 
         if exit_reason:
-            pnl_per_share = close - position.entry_price
+            pnl_per_share = (position.entry_price - close) if is_short else (close - position.entry_price)
             pnl_total = pnl_per_share * position.qty
-            elog.order_attempt("SELL", position.qty, close, strategy="orb")
-            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
-            elog.order_result("SELL", success=bool(order_id),
+            exit_side = "BUY_BACK" if is_short else "SELL"
+            elog.order_attempt(exit_side, position.qty, close, strategy="orb")
+            order_id = (
+                _place_cover(tctx, acc_id, symbol, close, position.qty)
+                if is_short
+                else _place_sell(tctx, acc_id, symbol, close, position.qty)
+            )
+            elog.order_result(exit_side, success=bool(order_id),
                               order_id=order_id, strategy="orb")
             hold_bars_orb = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "orb")
             elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_orb, strategy="orb")
             notify_exit(symbol, close, exit_reason, pnl_total)
-            log.info("%-8s [orb]    CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, close, pnl_total, exit_reason)
+            log.info("%-8s [orb]    CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s",
+                     symbol, position.direction, close, pnl_total, exit_reason)
             position = None
 
     elif or_valid and not is_time_stop and not already_entered:
@@ -671,10 +708,11 @@ def _eval_orb(
         vol = float(last.get("volume", 0))
         vol_ma = float(last.get("volume_ma", 1))
         vol_ok = vol > cfg.orb_vol_mult * vol_ma
-
         after_cutoff = bar_clock >= cutoff
         above_high = close > or_high
+        below_low = close < or_low
 
+        # --- Long entry ---
         if above_high and after_cutoff and not vol_ok:
             log.info("%-8s [orb]    SKIP  above_high vol_fail vol=%.0f vol_ma=%.0f ratio=%.2f",
                      symbol, vol, vol_ma, vol / vol_ma if vol_ma else 0)
@@ -705,7 +743,7 @@ def _eval_orb(
                                       order_id=order_id, strategy="orb")
                     if order_id:
                         position = PaperPosition(
-                            symbol=symbol, strategy="orb",
+                            symbol=symbol, strategy="orb", direction="long",
                             entry_time=candle_ts, entry_price=close,
                             stop_price=stop, target_price=target,
                             qty=qty, order_id=order_id,
@@ -713,8 +751,47 @@ def _eval_orb(
                         _save_position(position)
                         elog.position_open(close, stop, qty, strategy="orb")
                         notify_entry(symbol, close, stop)
-                        log.info("%-8s [orb]    OPEN  entry=%.4f stop=%.4f target=%.4f qty=%d",
+                        log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%d",
                                  symbol, close, stop, target, qty)
+
+        # --- Short entry ---
+        elif (after_cutoff and below_low and vol_ok
+              and cfg.orb_shorts_enabled
+              and not (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists()):
+            if not daily.can_open():
+                elog.risk_block("daily_limit_reached", strategy="orb",
+                                trades=daily.trades, pnl=daily.pnl)
+            else:
+                qty = calc_qty(close, symbol)
+                cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars)
+                if qty == 0:
+                    log.warning("RISK BLOCK [orb-short] %s: price %.2f exceeds cap %.2f",
+                                symbol, close, cap)
+                    elog.risk_block("price_exceeds_max_position", strategy="orb",
+                                    price=close, max_dollars=cap)
+                else:
+                    stop = or_high
+                    target = close - cfg.orb_target_mult * or_range
+                    elog.order_attempt("SELL_SHORT", qty, close, strategy="orb")
+                    order_id = _place_short(tctx, acc_id, symbol, close, qty)
+                    elog.order_result("SELL_SHORT", success=bool(order_id),
+                                      order_id=order_id, strategy="orb")
+                    if order_id:
+                        position = PaperPosition(
+                            symbol=symbol, strategy="orb", direction="short",
+                            entry_time=candle_ts, entry_price=close,
+                            stop_price=stop, target_price=target,
+                            qty=qty, order_id=order_id,
+                        )
+                        _save_position(position)
+                        elog.position_open(close, stop, qty, strategy="orb")
+                        notify_entry(symbol, close, stop)
+                        log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%d",
+                                 symbol, close, stop, target, qty)
+        elif below_low and not after_cutoff:
+            elog.signal_skip("orb_before_cutoff", score=0, bonus=0, min_score=0, strategy="orb")
+        elif below_low and after_cutoff and not vol_ok:
+            elog.signal_skip("orb_vol_fail", score=0, bonus=0, min_score=0, strategy="orb")
 
     return position
 

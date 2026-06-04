@@ -102,6 +102,8 @@ class Config:
     orb_vol_mult: float = float(_get("ORB_VOL_MULT", "1.2"))
     orb_min_range_pct: float = float(_get("ORB_MIN_RANGE_PCT", "0.001"))
     orb_max_range_pct: float = float(_get("ORB_MAX_RANGE_PCT", "0.008"))
+    # Short entries for ORB. Disable at runtime by creating STOP_SHORTS.txt in project root.
+    orb_shorts_enabled: bool = _bool("ORB_SHORTS_ENABLED", True)
 
     logs_dir: Path = Path(__file__).parent.parent / "logs"
 
