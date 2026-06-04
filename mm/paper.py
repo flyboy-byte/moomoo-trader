@@ -86,12 +86,13 @@ class PaperEventLog:
             print(f"[JSONL WRITE FAIL] {json.dumps(record)} err={e}", file=sys.stderr)
 
     def bar_eval(self, candle_ts, eval_ts: datetime, accepted: bool, close: float,
-                 score: int, bonus: int, signals: dict, strategy: str = "") -> None:
+                 score: int, bonus: int, signals: dict, strategy: str = "",
+                 regime_label: str = "") -> None:
         age_s = int((eval_ts - pd.Timestamp(candle_ts)).total_seconds())
         self._write("bar_eval", strategy=strategy, candle_ts=str(candle_ts),
                     eval_ts=eval_ts.isoformat(), candle_age_s=age_s, accepted=accepted,
                     close=round(close, 4), signal_score=score, bonus_score=bonus,
-                    signals=signals)
+                    regime_label=regime_label, signals=signals)
 
     def signal_skip(self, reason: str, score: int, bonus: int, min_score: int,
                     strategy: str = "") -> None:
@@ -113,12 +114,14 @@ class PaperEventLog:
     def position_open(self, entry: float, stop: float, qty: int,
                       strategy: str = "") -> None:
         self._write("position_open", strategy=strategy, symbol=self._sym,
-                    entry=round(entry, 4), stop=round(stop, 4), qty=qty)
+                    entry=round(entry, 4), stop=round(stop, 4), qty=qty,
+                    vix_at_entry=None)
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
-                       strategy: str = "") -> None:
+                       hold_bars: int = 0, strategy: str = "") -> None:
         self._write("position_close", strategy=strategy, symbol=self._sym,
-                    exit=round(exit_price, 4), reason=reason, pnl=round(pnl, 4))
+                    exit=round(exit_price, 4), reason=reason, pnl=round(pnl, 4),
+                    hold_bars=hold_bars)
 
     def error(self, message: str, strategy: str = "") -> None:
         self._write("error", strategy=strategy, message=message)
@@ -322,9 +325,11 @@ def _eval_bb_kdj(
     bb_middle = round(float(last["bb_middle"]), 4) if "bb_middle" in last else None
     log.info("%-8s [bb_kdj] BAR %s  close=%.4f  bb_lower=%.4f  score=%d/5  bonus=%d/3  %s",
              symbol, candle_ts, close, bb_lower or 0, sig.score, bonus, sig)
+    adx = float(last["adx"]) if "adx" in last and not pd.isna(last["adx"]) else 0.0
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=sig.score, bonus=bonus,
                   signals={**sig.details, "bb_lower": bb_lower, "bb_middle": bb_middle},
+                  regime_label="trending" if adx > 25 else "ranging",
                   strategy="bb_kdj")
 
     if position is None:
@@ -389,9 +394,10 @@ def _eval_bb_kdj(
             order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="bb_kdj")
+            hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "bb_kdj")
-            elog.position_close(close, exit_reason, pnl_total, strategy="bb_kdj")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars, strategy="bb_kdj")
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [bb_kdj] CLOSE exit=%.4f pnl=%+.4f reason=%s",
                      symbol, close, pnl_total, exit_reason)
@@ -514,10 +520,12 @@ def _eval_vwap_pb(
     cross_count = int(last.get("vwap_cross_count", 0))
     log.info("%-8s [vwap_pb] BAR %s  close=%.4f  vwap=%.4f  crosses=%d  wick_below=%s",
              symbol, candle_ts, close, vwap, cross_count, wick_below)
+    adx_vp = float(last["adx"]) if "adx" in last and not pd.isna(last.get("adx", float("nan"))) else 0.0
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=0, bonus=0,
                   signals={"cross_count": cross_count, "close_above_vwap": close > vwap,
                            "wick_below": wick_below},
+                  regime_label="trending" if adx_vp > 25 else "ranging",
                   strategy="vwap_pb")
 
     if position is not None:
@@ -536,9 +544,10 @@ def _eval_vwap_pb(
             order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="vwap_pb")
+            hold_bars_vp = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "vwap_pb")
-            elog.position_close(close, exit_reason, pnl_total, strategy="vwap_pb")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vp, strategy="vwap_pb")
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [vwap_pb] CLOSE exit=%.4f pnl=%+.4f reason=%s",
                      symbol, close, pnl_total, exit_reason)
@@ -621,9 +630,12 @@ def _eval_orb(
         "above_or_high": bool(close > or_info["high"]) if or_info else False,
     }
     log.info("%-8s [orb]    BAR %s  close=%.4f  or_valid=%s", symbol, candle_ts, close, or_valid)
+    adx_orb = float(last["adx"]) if "adx" in last and not pd.isna(last.get("adx", float("nan"))) else 0.0
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=int(or_valid), bonus=0,
-                  signals=signals_dict, strategy="orb")
+                  signals=signals_dict,
+                  regime_label="trending" if adx_orb > 25 else "ranging",
+                  strategy="orb")
 
     if position is not None:
         exit_reason: str | None = None
@@ -641,9 +653,10 @@ def _eval_orb(
             order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="orb")
+            hold_bars_orb = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total)
             _clear_position(symbol, "orb")
-            elog.position_close(close, exit_reason, pnl_total, strategy="orb")
+            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_orb, strategy="orb")
             notify_exit(symbol, close, exit_reason, pnl_total)
             log.info("%-8s [orb]    CLOSE exit=%.4f pnl=%+.4f reason=%s",
                      symbol, close, pnl_total, exit_reason)
