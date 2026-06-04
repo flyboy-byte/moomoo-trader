@@ -40,14 +40,15 @@ A reference for everything tested, abandoned, or parked. Nothing here is lost �
 **Code ready:** `strategy.py` has `blocked_hours: set[int] | None = None` param in `run_signals()`. `scripts/sweep_session_filter.py` for analysis. Wire `BLOCKED_HOURS=10,11` in config to activate.
 
 ### VIX Daily Regime Filter
-**What it is:** Block BB+KDJ entries on high-volatility days (VIX > 25). One number per day — no intraday alignment needed.
-**Why it's interesting:** Wide ATR on high-VIX days means stops get hit constantly. Filtering out those days could improve PF without reducing signal frequency much.
-**Implementation plan:**
-- Download CBOE VIX historical CSV (free, no API) — join on date for backtest
-- Use yfinance for daily VIX pull at session start in paper runner
-- Add `VIX_BLOCK_THRESHOLD=25` to config
-- If threshold sweep shows OOS edge → deploy; if not → abandon
-**Status:** Not started. Next research task after waiting for first live trades.
+**What it is:** Block BB+KDJ entries on high-volatility days (VIX > threshold).
+**Backtested (2026-06-04):** `scripts/backtest_vix_filter.py --all` on SPY+QQQ+IWM combined CSVs.
+**Result — do not deploy:**
+- Combined OOS (2024+): Baseline PF=1.224. All filtered variants worse (best: Block>=20 = 1.208).
+- IWM destroyed by any VIX block: Baseline OOS=1.033 → Block>=20 OOS=0.800. High-VIX days are IWM's best mean-reversion entries.
+- QQQ OOS baseline (1.260) beats every filtered variant.
+- SPY Block>=20 OOS (1.443) looks good in isolation but doesn't hold when combined.
+- "Relax>30" (drop min_bonus to 1 on crisis days): Combined OOS=1.193 — also worse than baseline.
+**Code:** `scripts/backtest_vix_filter.py` kept for reference. yfinance added to requirements.
 
 ### ORB Short Entries
 **What it is:** ORB currently long-only in the live runner. Short = enter when price breaks below OR low.

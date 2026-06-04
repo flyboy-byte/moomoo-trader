@@ -13,7 +13,7 @@ Source: `docs/STRATEGY_EXPANSION.md`
 
 ---
 
-## Step 1 — ORB Shorts (2-3 hrs)
+## Step 1 — ORB Shorts ✅ DONE (2026-06-04)
 
 **Why first:** Recovers ~50% of ORB edge currently discarded. Clear scope, low risk.
 
@@ -49,25 +49,21 @@ Source: `docs/STRATEGY_EXPANSION.md`
 
 ---
 
-## Step 2 — Logging improvements (1 hr)
+## Step 2 — Logging improvements ✅ DONE (2026-06-04)
 
-No strategy logic changes. Pure observability.
+**`mm/paper.py`:**
+- `bar_eval` — `regime_label` added (trending/ranging, ADX>25) — all 4 strategies
+- `position_open` — `direction` + `vix_at_entry: null` added
+- `position_close` — `hold_bars` + `direction` added — all 4 strategies
 
-**`mm/paper.py` — bar_eval**
-- Add `"regime_label": "trending" if adx > 25 else "ranging"`
-
-**`mm/paper.py` — position_open**
-- Add `"vix_at_entry": null` placeholder (populated in Step 3)
-
-**`mm/paper.py` — position_close** (currently missing from live runner)
-- Add close event in all three exit blocks (`_eval_orb`, `_eval_bb_kdj`, `_eval_vwap_pb`)
-- Fields: `exit_price`, `exit_reason`, `pnl`, `hold_bars`
-
-**Verify:** sync logs → `position_close` event appears after a trade exits
+**Bugs fixed during audit:**
+- `_load_position` was not restoring `direction` field on restart (would flip short exit logic)
+- `_eval_vwap` was missing `regime_label` in bar_eval and `hold_bars` in position_close
+- Dead code removed from diagnose_logs.py `_uptime()`
 
 ---
 
-## Step 3 — VIX daily regime filter + relaxed MR mode (3-4 hrs)
+## Step 3 — VIX daily regime filter + relaxed MR mode
 
 **Prereq:** `pip install yfinance`, add to `requirements.txt`
 
@@ -90,29 +86,23 @@ def _fetch_vix() -> float | None:
 - VIX > 25 → `signal_skip("vix_block")`
 - VIX > 30 → use `effective_score = 1` instead of `cfg.min_signal_score`
 
-**Backtest before deploying:**
-```bash
-python scripts/backtest_vix_filter.py --all
+**Backtest result (2026-06-04): DO NOT DEPLOY — VIX filter makes things worse OOS.**
 ```
-Download CBOE VIX history CSV, join on date, run BB+KDJ with/without filter.
-Only deploy if OOS PF improves.
+Combined OOS (2024+):  Baseline=1.224  Block>=20=1.208  Block>=25=1.181  Relax>30=1.193
+IWM specifically:      Baseline=1.033  Block>=20=0.800  (VIX>20 days are IWM's best entries)
+SPY exception:         Block>=20 OOS=1.443 (vs 1.287 baseline) but not worth IWM damage
+```
+Verdict: moved to graveyard. Code in `scripts/backtest_vix_filter.py` for reference.
 
 ---
 
-## Step 4 — diagnose_logs.py (1 hr)
+## Step 4 — diagnose_logs.py ✅ DONE (2026-06-04)
 
 ```bash
-python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all]
+python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
 ```
 
-Output:
-1. Runner uptime gaps (> 10 min between bar_evals)
-2. Signal hit rates (bb_touch%, kdj_cross%, bonus distribution)
-3. Candle staleness warnings (candle_age_s > 600)
-4. Trade summary (entry/exit/pnl/hold_bars per trade)
-5. Why no entry (most common blocker per symbol/strategy)
-
-No new dependencies.
+Output: uptime gaps, signal hit rates, staleness (market hours only), trade pairs with direction, skip reasons.
 
 ---
 
