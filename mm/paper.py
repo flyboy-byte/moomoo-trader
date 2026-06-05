@@ -21,6 +21,7 @@ import json
 import sys
 import time
 from contextlib import contextmanager
+import math
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -871,7 +872,7 @@ def _eval_orb(
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = _qty(close, symbol)
+                qty = math.floor(_qty(close, symbol))  # Moomoo rejects fractional short orders
                 cap = _position_cap(symbol)
                 if not qty:
                     log.warning("RISK BLOCK [orb-short] %s: price %.2f exceeds cap %.2f",
