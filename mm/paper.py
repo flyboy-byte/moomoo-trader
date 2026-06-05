@@ -23,6 +23,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pandas as pd
@@ -410,7 +411,6 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
     bar that will actually be evaluated. Checking the forming bar's age is wrong:
     a same-day partial bar has age ~0 but the second-to-last could be from yesterday.
     """
-    from zoneinfo import ZoneInfo
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     df = fetch_candles(symbol=symbol, ktype=cfg.candle_ktype, start=start, end=end)
@@ -451,7 +451,7 @@ def _eval_bb_kdj(
     last = df_signals.iloc[-1]
     candle_ts = last["time_key"]
     close = float(last["close"])
-    now = datetime.now()
+    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
 
     sig = signal_snapshot(last)
     bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
@@ -548,7 +548,7 @@ def _eval_vwap(
     last = df_signals.iloc[-1]
     candle_ts = last["time_key"]
     close = float(last["close"])
-    now = datetime.now()
+    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
 
     vsig = snapshot_vwap(last)
     atr_val = float(last.get("atr", 1) or 1)
@@ -646,7 +646,7 @@ def _eval_vwap_pb(
     candle_ts = last["time_key"]
     close = float(last["close"])
     vwap = float(last["vwap"]) if not pd.isna(last.get("vwap")) else None
-    now = datetime.now()
+    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
 
     if vwap is None:
         return position
@@ -753,7 +753,7 @@ def _eval_orb(
     bar_time = pd.Timestamp(candle_ts)
     bar_date = bar_time.date()
     bar_clock = bar_time.time()
-    now = datetime.now()
+    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
     is_time_stop = bar_clock >= dtime(15, 45)
 
     orb_mins = cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes)
