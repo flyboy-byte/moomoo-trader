@@ -209,9 +209,14 @@ MAX_POSITION_DOLLARS=900  (or SYMBOL_SIZE_OVERRIDES=US.IWM:300,...)
 qty = floor(cap / price)
 ```
 
-### Daily Guards (`DailyTracker`)
-- `MAX_TRADES_PER_DAY=3` — shared across ALL strategies. 3 ORB longs = no more entries today.
-- `MAX_DAILY_LOSS=5` — daily P&L floor; trips if cumulative loss ≥ $5
+### Daily Guards (`DailyTracker` in `mm/risk.py`)
+- `MAX_TRADES_PER_DAY=3` — global cap across ALL strategies combined
+- `MAX_TRADES_PER_STRATEGY=0` — per-strategy cap (0 = disabled). Set to 1 to prevent ORB consuming all 3 global slots and starving BB+KDJ/VWAP PB.
+- `MAX_DAILY_LOSS=5` — daily P&L floor; trips if cumulative loss ≥ $5. Both limits checked on every `can_open(strategy=...)` call.
+
+### Startup Safety (`mm/config.py` → `mm/paper.py`)
+- `validate_config()` runs before the main loop — fails fast on bad `.env` (wrong TRD_ENV, unknown strategies, invalid numerics). CRITICAL errors abort; warnings log and continue.
+- `_reconcile_positions()` runs on startup if any local position files exist — queries broker via `position_list_query()` and clears stale local state if broker disagrees.
 
 ### Kill Switches (runtime, no restart)
 | File | Effect |
@@ -386,16 +391,17 @@ Coverage by area:
 
 ## What's Parked / Backlog
 
-See `docs/strategy_graveyard.md` for full details with research data.
+See `docs/strategy_graveyard.md` for full details with research data and graveyard'd features.
 
 | Item | Status | Gate |
 |------|--------|------|
-| ATR-normalized sizing (`risk_dollars / (atr × mult)`) | Backlog | After 2+ weeks live slippage data |
-| IWM-weighted position sizing | Parked | Superseded by ATR sizing |
-| Session filter (BLOCKED_HOURS) | Swept, no universal improvement | Data is definitive |
-| VIX daily regime filter | Backtested, graveyard'd | IWM OOS destroyed (0.800 vs 1.033 baseline) |
-| Push architecture (WebSocket exits) | Deferred | After live slippage proves 60s polling costs > 0.1% |
-| ORB short live verification | Waiting | First short signal needed to confirm SELL_SHORT works |
+| ATR-normalized sizing (`risk_dollars / (atr × mult)`) | On hold | 2+ weeks live slippage data |
+| IWM-weighted sizing | On hold | Superseded by ATR sizing — do that first |
+| Session filter (BLOCKED_HOURS) | Swept, no universal benefit | Data is definitive |
+| VIX daily regime filter | Graveyard'd | IWM OOS 0.800 vs 1.033 baseline — destroyed edge |
+| Push architecture (WebSocket exits) | Deferred | slippage_bps shows 60s poll costs real edge |
+| ORB short live verification | Waiting | First short order in JSONL needed |
+| paper.py refactor (split 1,100-line file) | On hold | Large project, no functional gain yet |
 
 ---
 

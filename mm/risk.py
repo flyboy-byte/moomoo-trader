@@ -102,18 +102,26 @@ def per_slot_dollars(n_symbols: int, n_strategies: int) -> float:
 
 @dataclass
 class DailyTracker:
-    """Tracks per-day trade count and realized PnL. Resets automatically on a new calendar day."""
+    """Tracks per-day trade count and realized PnL. Resets automatically on a new calendar day.
+
+    Enforces two limits:
+    - Global: MAX_TRADES_PER_DAY across all strategies combined.
+    - Per-strategy: MAX_TRADES_PER_STRATEGY per strategy (0 = disabled).
+    """
     _day: date = field(default_factory=date.today)
     _trades: int = 0
     _pnl: float = 0.0
+    _strategy_trades: dict = field(default_factory=dict)  # {strategy: trade_count}
 
     def _maybe_reset(self) -> None:
         today = date.today()
         if today != self._day:
-            log.info("New trading day %s — resetting daily counters (prev: %d trades, pnl=%.4f)", today, self._trades, self._pnl)
+            log.info("New trading day %s — resetting daily counters (prev: %d trades, pnl=%.4f)",
+                     today, self._trades, self._pnl)
             self._day = today
             self._trades = 0
             self._pnl = 0.0
+            self._strategy_trades = {}
 
     @property
     def trades(self) -> int:
@@ -125,18 +133,31 @@ class DailyTracker:
         self._maybe_reset()
         return self._pnl
 
-    def can_open(self) -> bool:
+    def can_open(self, strategy: str = "") -> bool:
+        """Return True if both global and per-strategy limits allow a new entry."""
         self._maybe_reset()
         if self._trades >= cfg.max_trades_per_day:
-            log.warning("Daily trade limit reached (%d/%d) — no new entries", self._trades, cfg.max_trades_per_day)
+            log.warning("Daily trade limit reached (%d/%d) — no new entries",
+                        self._trades, cfg.max_trades_per_day)
             return False
         if self._pnl <= -abs(cfg.max_daily_loss):
-            log.warning("Daily loss limit reached (pnl=%.4f limit=%.4f) — no new entries", self._pnl, -cfg.max_daily_loss)
+            log.warning("Daily loss limit reached (pnl=%.4f limit=%.4f) — no new entries",
+                        self._pnl, -cfg.max_daily_loss)
             return False
+        if strategy and cfg.max_trades_per_strategy > 0:
+            strat_count = self._strategy_trades.get(strategy, 0)
+            if strat_count >= cfg.max_trades_per_strategy:
+                log.warning("Per-strategy limit reached [%s] (%d/%d) — no new entries",
+                            strategy, strat_count, cfg.max_trades_per_strategy)
+                return False
         return True
 
-    def record_trade(self, pnl: float) -> None:
+    def record_trade(self, pnl: float, strategy: str = "") -> None:
         self._maybe_reset()
         self._trades += 1
         self._pnl += pnl
-        log.info("Daily stats: trades=%d/%d  pnl=%.4f/%.4f", self._trades, cfg.max_trades_per_day, self._pnl, -cfg.max_daily_loss)
+        if strategy:
+            self._strategy_trades[strategy] = self._strategy_trades.get(strategy, 0) + 1
+        log.info("Daily stats: trades=%d/%d  pnl=%.4f/%.4f  strategy_trades=%s",
+                 self._trades, cfg.max_trades_per_day, self._pnl, -cfg.max_daily_loss,
+                 self._strategy_trades)

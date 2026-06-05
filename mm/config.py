@@ -27,6 +27,10 @@ class Config:
     candle_ktype: str = _get("CANDLE_KTYPE", "K_5M")
 
     max_trades_per_day: int = int(_get("MAX_TRADES_PER_DAY", "3"))
+    # Per-strategy cap within the global daily limit. 0 = disabled (global limit only).
+    # Example: MAX_TRADES_PER_STRATEGY=1 lets each strategy take at most 1 trade/day,
+    # preventing ORB from consuming all 3 global slots and starving BB+KDJ/VWAP PB.
+    max_trades_per_strategy: int = int(_get("MAX_TRADES_PER_STRATEGY", "0"))
     max_daily_loss: float = float(_get("MAX_DAILY_LOSS", "5"))
     max_position_dollars: float = float(_get("MAX_POSITION_DOLLARS", "50"))
     # Per-symbol overrides: "US.IWM:300,US.SPY:600" → {"US.IWM": 300.0, "US.SPY": 600.0}
@@ -115,3 +119,52 @@ class Config:
 
 
 cfg = Config()
+
+_VALID_STRATEGIES = {"bb_kdj", "orb", "vwap_pb", "vwap"}
+
+
+def validate_config() -> list[str]:
+    """Return a list of error strings. Empty list = config is sane.
+
+    Call at paper runner startup. Any CRITICAL error should abort the process.
+    Warnings are logged but do not block startup.
+    """
+    errors: list[str] = []
+
+    # Safety invariants — these are always fatal
+    if cfg.trd_env != "SIMULATE":
+        errors.append(f"CRITICAL: TRD_ENV={cfg.trd_env!r} — must be SIMULATE")
+    if cfg.live_trading_enabled:
+        errors.append("CRITICAL: LIVE_TRADING_ENABLED=true — paper runner refuses to run")
+
+    # Strategy / symbol config
+    if not cfg.symbols:
+        errors.append("SYMBOLS is empty — nothing to trade")
+    if not cfg.active_strategies:
+        errors.append("STRATEGIES is empty — no strategies active")
+    for s in cfg.active_strategies:
+        if s not in _VALID_STRATEGIES:
+            errors.append(f"Unknown strategy {s!r} in STRATEGIES — valid: {sorted(_VALID_STRATEGIES)}")
+
+    # Numeric sanity
+    if cfg.min_signal_score < 0 or cfg.min_signal_score > 3:
+        errors.append(f"MIN_SIGNAL_SCORE={cfg.min_signal_score} must be 0–3")
+    if cfg.atr_stop_mult <= 0:
+        errors.append(f"ATR_STOP_MULT={cfg.atr_stop_mult} must be > 0")
+    if cfg.kdj_window_bars < 0:
+        errors.append(f"KDJ_WINDOW_BARS={cfg.kdj_window_bars} must be >= 0")
+    if cfg.total_capital < 0:
+        errors.append(f"TOTAL_CAPITAL={cfg.total_capital} must be >= 0")
+    if cfg.total_capital == 0 and cfg.max_position_dollars <= 0:
+        errors.append("MAX_POSITION_DOLLARS must be > 0 when TOTAL_CAPITAL is not set")
+    if cfg.max_trades_per_day < 1:
+        errors.append(f"MAX_TRADES_PER_DAY={cfg.max_trades_per_day} must be >= 1")
+    if cfg.max_daily_loss <= 0:
+        errors.append(f"MAX_DAILY_LOSS={cfg.max_daily_loss} must be > 0")
+
+    # VWAP PB symbol whitelist sanity
+    for s in cfg.vwap_pb_symbols:
+        if s not in cfg.symbols:
+            errors.append(f"VWAP_PB_SYMBOLS contains {s!r} which is not in SYMBOLS")
+
+    return errors

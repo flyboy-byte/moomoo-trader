@@ -35,7 +35,7 @@ from moomoo import (
     OrderType,
 )
 
-from .config import cfg
+from .config import cfg, validate_config
 from .data import fetch_candles
 from .indicators import add_all
 from .notifications import notify, notify_entry, notify_exit
@@ -202,6 +202,64 @@ def _clear_position(symbol: str, strategy: str) -> None:
     path = _position_file(symbol, strategy)
     if path.exists():
         path.unlink()
+
+
+def _reconcile_positions(
+    tctx, acc_id: int,
+    positions: dict[tuple[str, str], "PaperPosition | None"],
+    elogs: dict[str, "PaperEventLog"],
+) -> None:
+    """Compare local position state against the broker's actual open positions.
+
+    If the broker shows no position for a symbol where we have local state,
+    the trade was likely closed externally (API rejection, manual cancel, restart).
+    We clear the stale local state so the runner doesn't try to exit a ghost position.
+    Runs once at startup after acc_id is obtained.
+    """
+    try:
+        ret, df = tctx.position_list_query(trd_env=TrdEnv.SIMULATE, acc_id=acc_id)
+    except Exception as e:
+        log.warning("Broker reconciliation failed (will use local state): %s", e)
+        return
+
+    if ret != RET_OK:
+        log.warning("Broker reconciliation: position_list_query failed — %s", df)
+        return
+
+    broker_syms: set[str] = set()
+    if not df.empty and "stock_code" in df.columns:
+        for _, row in df.iterrows():
+            if float(row.get("qty", 0)) != 0:
+                broker_syms.add(str(row["stock_code"]))
+
+    any_local = False
+    for (sym, strat), pos in list(positions.items()):
+        if pos is None:
+            continue
+        any_local = True
+        if sym not in broker_syms:
+            log.error(
+                "RECONCILE MISMATCH [%s/%s]: local entry=%.4f but broker has no %s position — clearing",
+                sym, strat, pos.entry_price, sym,
+            )
+            elogs[sym].error(
+                f"reconcile_mismatch strat={strat} local_entry={pos.entry_price} broker=none cleared",
+                strategy=strat,
+            )
+            _clear_position(sym, strat)
+            positions[(sym, strat)] = None
+        else:
+            log.info("RECONCILE OK [%s/%s]: broker confirms %s position", sym, strat, sym)
+
+    # Warn about broker positions with no local tracking
+    for bsym in broker_syms:
+        if not any(sym == bsym and pos is not None for (sym, _), pos in positions.items()):
+            log.warning(
+                "RECONCILE WARNING: broker has %s position but no local state — investigate manually", bsym
+            )
+
+    if not any_local:
+        log.info("RECONCILE: no local positions to verify")
 
 
 def _orb_traded_file(symbol: str) -> Path:
@@ -422,7 +480,7 @@ def _eval_bb_kdj(
             bonus_met = bonus >= cfg.min_signal_score
 
         if core_met and bonus_met:
-            if not daily.can_open():
+            if not daily.can_open(strategy="bb_kdj"):
                 elog.risk_block("daily_limit_reached", strategy="bb_kdj",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -471,7 +529,7 @@ def _eval_bb_kdj(
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="bb_kdj")
             hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
-            daily.record_trade(pnl_total)
+            daily.record_trade(pnl_total, strategy="bb_kdj")
             _clear_position(symbol, "bb_kdj")
             elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars, strategy="bb_kdj", direction="long")
             notify_exit(symbol, close, exit_reason, pnl_total)
@@ -508,7 +566,7 @@ def _eval_vwap(
         entry_ok = (bool(last.get("vwap_entry", False)) and
                     float(last.get("session_return", 0)) > -0.015)
         if entry_ok:
-            if not daily.can_open():
+            if not daily.can_open(strategy="vwap"):
                 elog.risk_block("daily_limit_reached", strategy="vwap",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -555,7 +613,7 @@ def _eval_vwap(
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="vwap")
             hold_bars_vwap = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
-            daily.record_trade(pnl_total)
+            daily.record_trade(pnl_total, strategy="vwap")
             _clear_position(symbol, "vwap")
             elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vwap, strategy="vwap", direction="long")
             notify_exit(symbol, close, exit_reason, pnl_total)
@@ -625,7 +683,7 @@ def _eval_vwap_pb(
             elog.order_result("SELL", success=bool(order_id),
                               order_id=order_id, strategy="vwap_pb")
             hold_bars_vp = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
-            daily.record_trade(pnl_total)
+            daily.record_trade(pnl_total, strategy="vwap_pb")
             _clear_position(symbol, "vwap_pb")
             elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vp, strategy="vwap_pb", direction="long")
             notify_exit(symbol, close, exit_reason, pnl_total)
@@ -640,7 +698,7 @@ def _eval_vwap_pb(
         quiet_bar = float(last.get("volume", 0)) < float(last.get("volume_ma", float("inf")))
 
         if wick_below and close_above and no_chop and quiet_bar:
-            if not daily.can_open():
+            if not daily.can_open(strategy="vwap_pb"):
                 elog.risk_block("daily_limit_reached", strategy="vwap_pb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -742,7 +800,7 @@ def _eval_orb(
             elog.order_result(exit_side, success=bool(order_id),
                               order_id=order_id, strategy="orb")
             hold_bars_orb = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
-            daily.record_trade(pnl_total)
+            daily.record_trade(pnl_total, strategy="orb")
             _clear_position(symbol, "orb")
             elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_orb, strategy="orb", direction=position.direction)
             notify_exit(symbol, close, exit_reason, pnl_total)
@@ -774,7 +832,7 @@ def _eval_orb(
             elog.signal_skip("orb_before_cutoff", score=0, bonus=0, min_score=0, strategy="orb")
 
         if after_cutoff and above_high and vol_ok:
-            if not daily.can_open():
+            if not daily.can_open(strategy="orb"):
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -809,7 +867,7 @@ def _eval_orb(
         elif (after_cutoff and below_low and vol_ok
               and cfg.orb_shorts_enabled
               and not (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists()):
-            if not daily.can_open():
+            if not daily.can_open(strategy="orb"):
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -887,8 +945,15 @@ def run_multi(symbols: list[str] | None = None) -> None:
     symbols = symbols or cfg.symbols
     strategies = cfg.active_strategies
 
-    if cfg.trd_env != "SIMULATE":
-        log.error("TRD_ENV is '%s' — paper runner requires SIMULATE. Aborting.", cfg.trd_env)
+    # --- Config validation (fail fast on bad .env before touching the broker) ---
+    errors = validate_config()
+    for msg in errors:
+        if msg.startswith("CRITICAL"):
+            log.error("CONFIG ERROR: %s", msg)
+        else:
+            log.warning("CONFIG WARNING: %s", msg)
+    if any(e.startswith("CRITICAL") for e in errors):
+        log.error("Aborting: critical config error(s). Fix .env and restart.")
         return
 
     global _slot_dollars
@@ -928,6 +993,20 @@ def run_multi(symbols: list[str] | None = None) -> None:
                 f"recovered_position entry={pos.entry_price} stop={pos.stop_price} qty={pos.qty}",
                 strategy=strat,
             )
+
+    # --- Startup: reconcile local position state against broker ---
+    has_local_positions = any(p is not None for p in positions.values())
+    if has_local_positions:
+        log.info("Local positions found — reconciling against broker state...")
+        try:
+            with trade_context() as tctx:
+                startup_acc_id = _get_simulate_acc_id(tctx)
+                _reconcile_positions(tctx, startup_acc_id, positions, elogs)
+                acc_id = startup_acc_id
+        except Exception as e:
+            log.warning("Startup reconciliation failed (%s) — proceeding with local state", e)
+    else:
+        log.info("No local positions to reconcile — starting fresh")
 
     while True:
         _is_market_open = market_open()
