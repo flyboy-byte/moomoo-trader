@@ -96,6 +96,22 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 **Why parked:** Large refactor with no functional benefit right now. Risk of introducing bugs.
 **When:** Before adding a 4th strategy or when paper.py hits a natural split point during feature work.
 
+### Qty Floor / Auto-Fallback in `_qty()`
+**What it is:** A guard in `_qty()` that detects when fractional-mode produces a quantity
+below Moomoo's minimum order size and automatically falls back to whole-share `calc_qty()`.
+**Why parked:** Found 2026-06-08 — `TOTAL_CAPITAL=100` + `FRACTIONAL_SHARES=true` split
+$100 across ~8 (symbol×strategy) slots → ~$12.50/slot → qty≈0.015 shares. Moomoo's paper
+API silently rejected every BUY and SELL_SHORT all of Friday 2026-06-05 with
+"Invalid quantity" — zero trades fired, zero P&L, no crash. Reverted VPS `.env` to
+`TOTAL_CAPITAL=0` / `FRACTIONAL_SHARES=false` (the proven June 4 whole-share path:
+`MAX_POSITION_DOLLARS=900` → qty=1 SPY/QQQ, ~3 IWM — both June 4 entries filled clean).
+**Caught by:** structured JSONL `order_attempt`/`order_result` events (success=false) +
+`paper.log` ERROR lines. Traced root cause to the `.env` config in minutes — logging worked.
+**Gate:** Before re-enabling fractional sizing, determine Moomoo's actual minimum order
+quantity/value (test in isolation), then add the floor check so a bad config degrades
+gracefully instead of silently killing every order for a session.
+**Files to touch:** `mm/paper.py` (`_qty()`), maybe `mm/risk.py` (`calc_qty_fractional`).
+
 ---
 
 ## Decided Against (with data/reasoning)
