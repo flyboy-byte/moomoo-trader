@@ -20,7 +20,16 @@ from mm.config import cfg
 from eod_summary import SessionSummary, load_summary
 
 app = Flask(__name__)
-_session_date: date = date.today()
+_date_override: date | None = None
+
+
+def _session_date() -> date:
+    """Return the session date — fixed override (--date) or today, computed fresh each call.
+
+    Must not be cached at module load: the dashboard runs as a long-lived service and
+    a frozen date silently strands it on the day it started (looked DEAD every day after).
+    """
+    return _date_override if _date_override is not None else date.today()
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +37,7 @@ _session_date: date = date.today()
 # ---------------------------------------------------------------------------
 
 def _load_recent_evals(n: int = 20) -> list[dict]:
-    date_str = _session_date.strftime("%Y-%m-%d")
+    date_str = _session_date().strftime("%Y-%m-%d")
     evals: list[dict] = []
     for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
         sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
@@ -45,7 +54,7 @@ def _load_recent_evals(n: int = 20) -> list[dict]:
 
 def _load_latest_evals_by_symbol() -> dict[str, dict[str, dict]]:
     """Return {symbol: {strategy: latest bar_eval}} for today's session."""
-    date_str = _session_date.strftime("%Y-%m-%d")
+    date_str = _session_date().strftime("%Y-%m-%d")
     result: dict[str, dict[str, dict]] = {}
     for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
         sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
@@ -64,7 +73,7 @@ def _load_latest_evals_by_symbol() -> dict[str, dict[str, dict]]:
 
 def _load_recent_skips(n: int = 12) -> list[dict]:
     """Return last N signal_skip events across all symbol files."""
-    date_str = _session_date.strftime("%Y-%m-%d")
+    date_str = _session_date().strftime("%Y-%m-%d")
     skips: list[dict] = []
     for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
         sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
@@ -341,7 +350,7 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     last_eval = evals[-1] if evals else None
     status_label, status_color = _runner_status(last_eval)
     now_str = datetime.now().strftime("%H:%M:%S")
-    date_str = _session_date.strftime("%Y-%m-%d (%A)")
+    date_str = _session_date().strftime("%Y-%m-%d (%A)")
 
     last_close = f"${last_eval['close']:.3f}" if last_eval else "—"
     last_score = str(last_eval.get("signal_score", "—")) if last_eval else "—"
@@ -512,7 +521,7 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
 
 @app.route("/")
 def index() -> str:
-    summary = load_summary(_session_date)
+    summary = load_summary(_session_date())
     evals = _load_recent_evals()
     latest = _load_latest_evals_by_symbol()
     skips = _load_recent_skips()
@@ -528,12 +537,12 @@ def main() -> None:
     parser.add_argument("--date", help="Session date YYYY-MM-DD (default: today)")
     args = parser.parse_args()
 
-    global _session_date
+    global _date_override
     if args.date:
-        _session_date = date.fromisoformat(args.date)
+        _date_override = date.fromisoformat(args.date)
 
     print(f"Dashboard running at http://0.0.0.0:{args.port}")
-    print(f"Session date: {_session_date}")
+    print(f"Session date: {_session_date()}")
     app.run(host="0.0.0.0", port=args.port, debug=False)
 
 
