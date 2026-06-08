@@ -316,6 +316,7 @@ def _get_simulate_acc_id(ctx: OpenSecTradeContext) -> int:
 
 
 def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
         trd_side=TrdSide.BUY, order_type=OrderType.NORMAL,
@@ -330,6 +331,7 @@ def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
         trd_side=TrdSide.SELL, order_type=OrderType.NORMAL,
@@ -344,6 +346,7 @@ def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
         trd_side=TrdSide.SELL_SHORT, order_type=OrderType.NORMAL,
@@ -358,6 +361,7 @@ def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
         trd_side=TrdSide.BUY_BACK, order_type=OrderType.NORMAL,
@@ -377,6 +381,10 @@ def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 # Populated at run_multi() startup when TOTAL_CAPITAL is set.
 _slot_dollars: float = 0.0
+
+# Tracks the last candle_ts for which an entry was attempted per (symbol, strategy).
+# Prevents the 60s poll from retrying the same failed order on every tick until a new candle arrives.
+_entry_attempted: dict[tuple[str, str], str] = {}
 
 
 def _qty(price: float, symbol: str) -> int | float:
@@ -481,7 +489,9 @@ def _eval_bb_kdj(
             bonus_met = bonus >= cfg.min_signal_score
 
         if core_met and bonus_met:
-            if not daily.can_open(strategy="bb_kdj"):
+            if _entry_attempted.get((symbol, "bb_kdj")) == str(candle_ts):
+                pass  # already tried this candle — don't retry until next bar
+            elif not daily.can_open(strategy="bb_kdj"):
                 elog.risk_block("daily_limit_reached", strategy="bb_kdj",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -493,6 +503,7 @@ def _eval_bb_kdj(
                     elog.risk_block("price_exceeds_max_position", strategy="bb_kdj",
                                     price=close, max_dollars=cap)
                 else:
+                    _entry_attempted[(symbol, "bb_kdj")] = str(candle_ts)
                     stop = close - cfg.atr_stop_mult * float(last["atr"])
                     elog.order_attempt("BUY", qty, close, strategy="bb_kdj")
                     order_id = _place_buy(tctx, acc_id, symbol, close, qty)
@@ -567,7 +578,9 @@ def _eval_vwap(
         entry_ok = (bool(last.get("vwap_entry", False)) and
                     float(last.get("session_return", 0)) > -0.015)
         if entry_ok:
-            if not daily.can_open(strategy="vwap"):
+            if _entry_attempted.get((symbol, "vwap")) == str(candle_ts):
+                pass  # already tried this candle — don't retry until next bar
+            elif not daily.can_open(strategy="vwap"):
                 elog.risk_block("daily_limit_reached", strategy="vwap",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -579,6 +592,7 @@ def _eval_vwap(
                     elog.risk_block("price_exceeds_max_position", strategy="vwap",
                                     price=close, max_dollars=cap)
                 else:
+                    _entry_attempted[(symbol, "vwap")] = str(candle_ts)
                     stop = close - cfg.vwap_stop_mult * float(last["atr"])
                     elog.order_attempt("BUY", qty, close, strategy="vwap")
                     order_id = _place_buy(tctx, acc_id, symbol, close, qty)
@@ -699,7 +713,9 @@ def _eval_vwap_pb(
         quiet_bar = float(last.get("volume", 0)) < float(last.get("volume_ma", float("inf")))
 
         if wick_below and close_above and no_chop and quiet_bar:
-            if not daily.can_open(strategy="vwap_pb"):
+            if _entry_attempted.get((symbol, "vwap_pb")) == str(candle_ts):
+                pass  # already tried this candle — don't retry until next bar
+            elif not daily.can_open(strategy="vwap_pb"):
                 elog.risk_block("daily_limit_reached", strategy="vwap_pb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -711,6 +727,7 @@ def _eval_vwap_pb(
                     elog.risk_block("price_exceeds_max_position", strategy="vwap_pb",
                                     price=close, max_dollars=cap)
                 else:
+                    _entry_attempted[(symbol, "vwap_pb")] = str(candle_ts)
                     stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
                     elog.order_attempt("BUY", qty, close, strategy="vwap_pb")
                     order_id = _place_buy(tctx, acc_id, symbol, close, qty)
@@ -833,7 +850,9 @@ def _eval_orb(
             elog.signal_skip("orb_before_cutoff", score=0, bonus=0, min_score=0, strategy="orb")
 
         if after_cutoff and above_high and vol_ok:
-            if not daily.can_open(strategy="orb"):
+            if _entry_attempted.get((symbol, "orb")) == str(candle_ts):
+                pass  # already tried this candle — don't retry until next bar
+            elif not daily.can_open(strategy="orb"):
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -845,6 +864,7 @@ def _eval_orb(
                     elog.risk_block("price_exceeds_max_position", strategy="orb",
                                     price=close, max_dollars=cap)
                 else:
+                    _entry_attempted[(symbol, "orb")] = str(candle_ts)
                     stop = or_low
                     target = close + cfg.orb_target_mult * or_range
                     elog.order_attempt("BUY", qty, close, strategy="orb")
@@ -868,7 +888,9 @@ def _eval_orb(
         elif (after_cutoff and below_low and vol_ok
               and cfg.orb_shorts_enabled
               and not (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists()):
-            if not daily.can_open(strategy="orb"):
+            if _entry_attempted.get((symbol, "orb")) == str(candle_ts):
+                pass  # already tried this candle — don't retry until next bar
+            elif not daily.can_open(strategy="orb"):
                 elog.risk_block("daily_limit_reached", strategy="orb",
                                 trades=daily.trades, pnl=daily.pnl)
             else:
@@ -880,6 +902,7 @@ def _eval_orb(
                     elog.risk_block("price_exceeds_max_position", strategy="orb",
                                     price=close, max_dollars=cap)
                 else:
+                    _entry_attempted[(symbol, "orb")] = str(candle_ts)
                     stop = or_high
                     target = close - cfg.orb_target_mult * or_range
                     elog.order_attempt("SELL_SHORT", qty, close, strategy="orb")
