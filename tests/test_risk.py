@@ -136,6 +136,56 @@ class TestDailyTrackerLossLimit:
 
 
 # ---------------------------------------------------------------------------
+# DailyTracker — per-strategy trade limit
+# ---------------------------------------------------------------------------
+
+class TestDailyTrackerPerStrategy:
+    def test_allows_before_per_strategy_limit(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {
+            "MAX_TRADES_PER_DAY": "10", "MAX_TRADES_PER_STRATEGY": "2", "MAX_DAILY_LOSS": "100",
+        })
+        t = risk.DailyTracker()
+        t.record_trade(1.0, strategy="bb_kdj")
+        assert t.can_open(strategy="bb_kdj") is True
+
+    def test_blocks_at_per_strategy_limit(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {
+            "MAX_TRADES_PER_DAY": "10", "MAX_TRADES_PER_STRATEGY": "2", "MAX_DAILY_LOSS": "100",
+        })
+        t = risk.DailyTracker()
+        t.record_trade(1.0, strategy="bb_kdj")
+        t.record_trade(1.0, strategy="bb_kdj")
+        assert t.can_open(strategy="bb_kdj") is False
+
+    def test_limits_are_independent_per_strategy(self, monkeypatch):
+        """Hitting the ORB limit must not block bb_kdj."""
+        risk = _reload_risk(monkeypatch, {
+            "MAX_TRADES_PER_DAY": "10", "MAX_TRADES_PER_STRATEGY": "1", "MAX_DAILY_LOSS": "100",
+        })
+        t = risk.DailyTracker()
+        t.record_trade(1.0, strategy="orb")
+        assert t.can_open(strategy="orb") is False
+        assert t.can_open(strategy="bb_kdj") is True
+
+    def test_zero_means_no_per_strategy_limit(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {
+            "MAX_TRADES_PER_DAY": "10", "MAX_TRADES_PER_STRATEGY": "0", "MAX_DAILY_LOSS": "100",
+        })
+        t = risk.DailyTracker()
+        for _ in range(5):
+            t.record_trade(0.5, strategy="bb_kdj")
+        assert t.can_open(strategy="bb_kdj") is True
+
+    def test_no_strategy_arg_skips_per_strategy_check(self, monkeypatch):
+        risk = _reload_risk(monkeypatch, {
+            "MAX_TRADES_PER_DAY": "10", "MAX_TRADES_PER_STRATEGY": "1", "MAX_DAILY_LOSS": "100",
+        })
+        t = risk.DailyTracker()
+        t.record_trade(1.0, strategy="orb")
+        assert t.can_open() is True  # no strategy arg → only global limit checked
+
+
+# ---------------------------------------------------------------------------
 # Kill switch
 # ---------------------------------------------------------------------------
 
