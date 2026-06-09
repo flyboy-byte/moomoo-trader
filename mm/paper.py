@@ -486,8 +486,9 @@ def _eval_bb_kdj(
             core_met = bool(last["sig_bb_touch"])
             bonus_met = bonus >= 1
         else:
-            if cfg.kdj_window_bars > 0:
-                window = min(cfg.kdj_window_bars + 1, len(df_signals))
+            effective_window = cfg.kdj_window_overrides.get(symbol, cfg.kdj_window_bars)
+            if effective_window > 0:
+                window = min(effective_window + 1, len(df_signals))
                 kdj_met = bool(df_signals["kdj_golden_cross"].iloc[-window:].any())
             else:
                 kdj_met = bool(last["sig_kdj_cross"])

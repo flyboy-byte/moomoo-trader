@@ -49,8 +49,15 @@ class Config:
     # KDJ window: look back N bars for a KDJ golden cross when evaluating a BB touch entry.
     # 0 = same-bar only (original behavior).
     # Sweep on IWM+QQQ 2022-2025: w=3 gives 10x more trades, PF>1.1, improves OOS.
-    # SPY breaks at any window>0 — exclude SPY from BB+KDJ or keep at w=0.
+    # SPY breaks at any window>0 — use KDJ_WINDOW_OVERRIDES=US.SPY:0 to keep SPY at same-bar only.
     kdj_window_bars: int = int(_get("KDJ_WINDOW_BARS", "0"))
+    # Per-symbol overrides: "US.SPY:0,US.IWM:3" → {"US.SPY": 0, "US.IWM": 3}
+    # Falls back to kdj_window_bars for symbols not listed.
+    kdj_window_overrides: dict[str, int] = {
+        s.split(":")[0].strip(): int(s.split(":")[1].strip())
+        for s in _get("KDJ_WINDOW_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
 
     discord_webhook_url: str = _get("DISCORD_WEBHOOK_URL", "")
 
@@ -176,5 +183,9 @@ def validate_config() -> list[str]:
         raw = raw.strip()
         if raw and ":" not in raw:
             errors.append(f"ORB_MINUTES_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:MINUTES'")
+    for raw in _get("KDJ_WINDOW_OVERRIDES", "").split(","):
+        raw = raw.strip()
+        if raw and ":" not in raw:
+            errors.append(f"KDJ_WINDOW_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:BARS'")
 
     return errors
