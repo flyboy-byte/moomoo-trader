@@ -313,8 +313,8 @@ def _orb_filters(records: list[dict]) -> None:
                   f"{c.get('orb_shorts_kill_switch',0):>10}")
 
 
-def _bb_kdj_signals(records: list[dict]) -> None:
-    section("7. BB+KDJ SIGNAL CONTEXT  (bar_eval bonus≥2 bars)")
+def _bb_kdj_signals(records: list[dict], kdj_window: int = 3) -> None:
+    section(f"7. BB+KDJ SIGNAL CONTEXT  (bar_eval bonus≥2, KDJ window=w{kdj_window})")
     evals = [r for r in records if r.get("event") == "bar_eval" and r.get("strategy") == "bb_kdj"]
     if not evals:
         print("  No bb_kdj bar_eval events.")
@@ -328,30 +328,65 @@ def _bb_kdj_signals(records: list[dict]) -> None:
         return
 
     bb_touch = sum(1 for r in bonus2 if r.get("signals", {}).get("bb_touch"))
-    kdj_cross = sum(1 for r in bonus2 if r.get("signals", {}).get("kdj_cross"))
-    both = sum(1 for r in bonus2 if r.get("signals", {}).get("bb_touch") and r.get("signals", {}).get("kdj_cross"))
+    kdj_same = sum(1 for r in bonus2 if r.get("signals", {}).get("kdj_cross"))
+    both_same = sum(1 for r in bonus2 if r.get("signals", {}).get("bb_touch")
+                    and r.get("signals", {}).get("kdj_cross"))
 
-    print(f"\n  Of bonus≥2 bars:")
-    print(f"    bb_touch:           {bb_touch:>4}  ({100*bb_touch/len(bonus2):.1f}%)")
-    print(f"    kdj_cross:          {kdj_cross:>4}  ({100*kdj_cross/len(bonus2):.1f}%)")
-    print(f"    bb_touch+kdj_cross: {both:>4}  ({100*both/len(bonus2):.1f}%)  ← core gate met")
+    print(f"\n  Of bonus≥2 bars (same-bar signals from logs):")
+    print(f"    bb_touch:                {bb_touch:>4}  ({100*bb_touch/len(bonus2):.1f}%)")
+    print(f"    kdj_cross (same-bar):    {kdj_same:>4}  ({100*kdj_same/len(bonus2):.1f}%)")
+    print(f"    both same-bar:           {both_same:>4}  ({100*both_same/len(bonus2):.1f}%)")
 
-    # Why didn't the core-gate bars convert to entries?
-    core_met_ts = {r["ts"] for r in bonus2 if r.get("signals", {}).get("bb_touch")
-                   and r.get("signals", {}).get("kdj_cross")}
-    if not core_met_ts:
-        print("\n  No bars cleared the full core gate (bb_touch + kdj_cross + bonus≥2).")
-        return
+    # w=N window check: rebuild per-(sym, date) bar sequence and check rolling window
+    # This mirrors the live paper runner logic: kdj_cross within last N bars counts.
+    sym_date_bars: dict[tuple, list[dict]] = defaultdict(list)
+    seen: dict[tuple, dict] = {}
+    for r in evals:
+        key = (r.get("_sym", ""), r.get("ts", "")[:10], r["candle_ts"])
+        if key not in seen:
+            seen[key] = r
+            sym_date_bars[(r.get("_sym", ""), r.get("ts", "")[:10])].append(r)
 
-    # Find risk_blocks and signal_skips that immediately follow core-met bars
-    risk_blocks = [r for r in records if r.get("event") == "risk_block" and r.get("strategy") == "bb_kdj"]
-    block_reasons: Counter = Counter(r.get("reason", "?") for r in risk_blocks)
-    if block_reasons:
-        print(f"\n  Risk blocks (bb_kdj, all bars):")
-        for reason, count in sorted(block_reasons.items(), key=lambda x: -x[1]):
+    would_fire = []
+    for bars in sym_date_bars.values():
+        bars.sort(key=lambda r: r["candle_ts"])
+        for i, r in enumerate(bars):
+            if not r["signals"].get("bb_touch") or r.get("bonus_score", 0) < 2:
+                continue
+            start = max(0, i - kdj_window)
+            if any(b["signals"].get("kdj_cross") for b in bars[start:i + 1]):
+                would_fire.append(r)
+
+    print(f"\n  With w={kdj_window} rolling window (mirrors live runner logic):")
+    print(f"    bb_touch + kdj_w{kdj_window} + bonus≥2: {len(would_fire):>4}  ← actual would-fire count")
+
+    if would_fire:
+        # Show each would-fire bar and what happened
+        risk_blocks = [r for r in records if r.get("event") == "risk_block"
+                       and r.get("strategy") == "bb_kdj"]
+        # Group risk_blocks by (sym, date)
+        blocks_by_sym_date: dict[tuple, list] = defaultdict(list)
+        for rb in risk_blocks:
+            blocks_by_sym_date[(rb.get("_sym", ""), rb.get("ts", "")[:10])].append(rb)
+
+        print()
+        for r in sorted(would_fire, key=lambda x: x.get("ts", "")):
+            sym = r.get("_sym", "?")
+            date = r.get("ts", "")[:10]
+            cts = r["candle_ts"]
+            bonus = r.get("bonus_score", 0)
+            day_blocks = blocks_by_sym_date.get((sym, date), [])
+            block_reasons = Counter(b.get("reason", "?") for b in day_blocks)
+            block_str = ", ".join(f"{k}×{v}" for k, v in block_reasons.items()) if block_reasons else "no block logged"
+            print(f"    {date} {sym:<8} {cts}  bonus={bonus}  blocked_by=[{block_str}]")
+
+    # Overall risk_block summary for bb_kdj
+    all_blocks = [r for r in records if r.get("event") == "risk_block" and r.get("strategy") == "bb_kdj"]
+    if all_blocks:
+        print(f"\n  All bb_kdj risk_blocks across loaded sessions:")
+        for reason, count in sorted(Counter(r.get("reason") for r in all_blocks).items(),
+                                    key=lambda x: -x[1]):
             print(f"    {reason:<35} ×{count}")
-    else:
-        print("\n  No risk_block events for bb_kdj.")
 
 
 def _daily_trend(trades: list[dict]) -> None:
