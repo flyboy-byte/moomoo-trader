@@ -167,4 +167,14 @@ def validate_config() -> list[str]:
         if s not in cfg.symbols:
             errors.append(f"VWAP_PB_SYMBOLS contains {s!r} which is not in SYMBOLS")
 
+    # Override format sanity — catch "US.IWM:300,US.SPY" (missing value on SPY)
+    for raw in _get("SYMBOL_SIZE_OVERRIDES", "").split(","):
+        raw = raw.strip()
+        if raw and ":" not in raw:
+            errors.append(f"SYMBOL_SIZE_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:DOLLARS'")
+    for raw in _get("ORB_MINUTES_OVERRIDES", "").split(","):
+        raw = raw.strip()
+        if raw and ":" not in raw:
+            errors.append(f"ORB_MINUTES_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:MINUTES'")
+
     return errors

@@ -497,35 +497,36 @@ def _eval_bb_kdj(
         if core_met and bonus_met:
             if _entry_attempted.get((symbol, "bb_kdj")) == str(candle_ts):
                 pass  # already tried this candle — don't retry until next bar
-            elif not daily.can_open(strategy="bb_kdj"):
-                elog.risk_block("daily_limit_reached", strategy="bb_kdj",
-                                trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = _qty(close, symbol)
-                cap = _position_cap(symbol)
-                if not qty:
-                    log.warning("RISK BLOCK [bb_kdj] %s: price %.2f exceeds cap %.2f",
-                                symbol, close, cap)
-                    elog.risk_block("price_exceeds_max_position", strategy="bb_kdj",
-                                    price=close, max_dollars=cap)
+                _entry_attempted[(symbol, "bb_kdj")] = str(candle_ts)
+                if not daily.can_open(strategy="bb_kdj"):
+                    elog.risk_block("daily_limit_reached", strategy="bb_kdj",
+                                    trades=daily.trades, pnl=daily.pnl)
                 else:
-                    _entry_attempted[(symbol, "bb_kdj")] = str(candle_ts)
-                    stop = close - cfg.atr_stop_mult * float(last["atr"])
-                    elog.order_attempt("BUY", qty, close, strategy="bb_kdj")
-                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                    elog.order_result("BUY", success=bool(order_id),
-                                      order_id=order_id, strategy="bb_kdj")
-                    if order_id:
-                        position = PaperPosition(
-                            symbol=symbol, strategy="bb_kdj",
-                            entry_time=candle_ts, entry_price=close,
-                            stop_price=stop, qty=qty, order_id=order_id,
-                        )
-                        _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="bb_kdj")
-                        notify_entry(symbol, close, stop)
-                        log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%s",
-                                 symbol, close, stop, qty)
+                    qty = _qty(close, symbol)
+                    cap = _position_cap(symbol)
+                    if not qty:
+                        log.warning("RISK BLOCK [bb_kdj] %s: price %.2f exceeds cap %.2f",
+                                    symbol, close, cap)
+                        elog.risk_block("price_exceeds_max_position", strategy="bb_kdj",
+                                        price=close, max_dollars=cap)
+                    else:
+                        stop = close - cfg.atr_stop_mult * float(last["atr"])
+                        elog.order_attempt("BUY", qty, close, strategy="bb_kdj")
+                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                        elog.order_result("BUY", success=bool(order_id),
+                                          order_id=order_id, strategy="bb_kdj")
+                        if order_id:
+                            position = PaperPosition(
+                                symbol=symbol, strategy="bb_kdj",
+                                entry_time=candle_ts, entry_price=close,
+                                stop_price=stop, qty=qty, order_id=order_id,
+                            )
+                            _save_position(position)
+                            elog.position_open(close, stop, qty, strategy="bb_kdj")
+                            notify_entry(symbol, close, stop)
+                            log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%s",
+                                     symbol, close, stop, qty)
         elif core_met:
             log.info("%-8s [bb_kdj] SKIP  bonus=%d < %d", symbol, bonus, cfg.min_signal_score)
             elog.signal_skip("bonus_below_threshold", score=sig.score,
@@ -586,35 +587,36 @@ def _eval_vwap(
         if entry_ok:
             if _entry_attempted.get((symbol, "vwap")) == str(candle_ts):
                 pass  # already tried this candle — don't retry until next bar
-            elif not daily.can_open(strategy="vwap"):
-                elog.risk_block("daily_limit_reached", strategy="vwap",
-                                trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = _qty(close, symbol)
-                cap = _position_cap(symbol)
-                if not qty:
-                    log.warning("RISK BLOCK [vwap] %s: price %.2f exceeds cap %.2f",
-                                symbol, close, cap)
-                    elog.risk_block("price_exceeds_max_position", strategy="vwap",
-                                    price=close, max_dollars=cap)
+                _entry_attempted[(symbol, "vwap")] = str(candle_ts)
+                if not daily.can_open(strategy="vwap"):
+                    elog.risk_block("daily_limit_reached", strategy="vwap",
+                                    trades=daily.trades, pnl=daily.pnl)
                 else:
-                    _entry_attempted[(symbol, "vwap")] = str(candle_ts)
-                    stop = close - cfg.vwap_stop_mult * float(last["atr"])
-                    elog.order_attempt("BUY", qty, close, strategy="vwap")
-                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                    elog.order_result("BUY", success=bool(order_id),
-                                      order_id=order_id, strategy="vwap")
-                    if order_id:
-                        position = PaperPosition(
-                            symbol=symbol, strategy="vwap",
-                            entry_time=candle_ts, entry_price=close,
-                            stop_price=stop, qty=qty, order_id=order_id,
-                        )
-                        _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="vwap")
-                        notify_entry(symbol, close, stop)
-                        log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%s",
-                                 symbol, close, stop, qty)
+                    qty = _qty(close, symbol)
+                    cap = _position_cap(symbol)
+                    if not qty:
+                        log.warning("RISK BLOCK [vwap] %s: price %.2f exceeds cap %.2f",
+                                    symbol, close, cap)
+                        elog.risk_block("price_exceeds_max_position", strategy="vwap",
+                                        price=close, max_dollars=cap)
+                    else:
+                        stop = close - cfg.vwap_stop_mult * float(last["atr"])
+                        elog.order_attempt("BUY", qty, close, strategy="vwap")
+                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                        elog.order_result("BUY", success=bool(order_id),
+                                          order_id=order_id, strategy="vwap")
+                        if order_id:
+                            position = PaperPosition(
+                                symbol=symbol, strategy="vwap",
+                                entry_time=candle_ts, entry_price=close,
+                                stop_price=stop, qty=qty, order_id=order_id,
+                            )
+                            _save_position(position)
+                            elog.position_open(close, stop, qty, strategy="vwap")
+                            notify_entry(symbol, close, stop)
+                            log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%s",
+                                     symbol, close, stop, qty)
     else:
         from datetime import time as dtime
         exit_reason: str | None = None
@@ -721,35 +723,36 @@ def _eval_vwap_pb(
         if wick_below and close_above and no_chop and quiet_bar:
             if _entry_attempted.get((symbol, "vwap_pb")) == str(candle_ts):
                 pass  # already tried this candle — don't retry until next bar
-            elif not daily.can_open(strategy="vwap_pb"):
-                elog.risk_block("daily_limit_reached", strategy="vwap_pb",
-                                trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = _qty(close, symbol)
-                cap = _position_cap(symbol)
-                if not qty:
-                    log.warning("RISK BLOCK [vwap_pb] %s: price %.2f exceeds cap %.2f",
-                                symbol, close, cap)
-                    elog.risk_block("price_exceeds_max_position", strategy="vwap_pb",
-                                    price=close, max_dollars=cap)
+                _entry_attempted[(symbol, "vwap_pb")] = str(candle_ts)
+                if not daily.can_open(strategy="vwap_pb"):
+                    elog.risk_block("daily_limit_reached", strategy="vwap_pb",
+                                    trades=daily.trades, pnl=daily.pnl)
                 else:
-                    _entry_attempted[(symbol, "vwap_pb")] = str(candle_ts)
-                    stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
-                    elog.order_attempt("BUY", qty, close, strategy="vwap_pb")
-                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                    elog.order_result("BUY", success=bool(order_id),
-                                      order_id=order_id, strategy="vwap_pb")
-                    if order_id:
-                        position = PaperPosition(
-                            symbol=symbol, strategy="vwap_pb",
-                            entry_time=candle_ts, entry_price=close,
-                            stop_price=stop, qty=qty, order_id=order_id,
-                        )
-                        _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="vwap_pb")
-                        notify_entry(symbol, close, stop)
-                        log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%s",
-                                 symbol, close, stop, qty)
+                    qty = _qty(close, symbol)
+                    cap = _position_cap(symbol)
+                    if not qty:
+                        log.warning("RISK BLOCK [vwap_pb] %s: price %.2f exceeds cap %.2f",
+                                    symbol, close, cap)
+                        elog.risk_block("price_exceeds_max_position", strategy="vwap_pb",
+                                        price=close, max_dollars=cap)
+                    else:
+                        stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
+                        elog.order_attempt("BUY", qty, close, strategy="vwap_pb")
+                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                        elog.order_result("BUY", success=bool(order_id),
+                                          order_id=order_id, strategy="vwap_pb")
+                        if order_id:
+                            position = PaperPosition(
+                                symbol=symbol, strategy="vwap_pb",
+                                entry_time=candle_ts, entry_price=close,
+                                stop_price=stop, qty=qty, order_id=order_id,
+                            )
+                            _save_position(position)
+                            elog.position_open(close, stop, qty, strategy="vwap_pb")
+                            notify_entry(symbol, close, stop)
+                            log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%s",
+                                     symbol, close, stop, qty)
 
     return position
 
@@ -858,37 +861,38 @@ def _eval_orb(
         if after_cutoff and above_high and vol_ok:
             if _entry_attempted.get((symbol, "orb")) == str(candle_ts):
                 pass  # already tried this candle — don't retry until next bar
-            elif not daily.can_open(strategy="orb"):
-                elog.risk_block("daily_limit_reached", strategy="orb",
-                                trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = _qty(close, symbol)
-                cap = _position_cap(symbol)
-                if not qty:
-                    log.warning("RISK BLOCK [orb] %s: price %.2f exceeds cap %.2f",
-                                symbol, close, cap)
-                    elog.risk_block("price_exceeds_max_position", strategy="orb",
-                                    price=close, max_dollars=cap)
+                _entry_attempted[(symbol, "orb")] = str(candle_ts)
+                if not daily.can_open(strategy="orb"):
+                    elog.risk_block("daily_limit_reached", strategy="orb",
+                                    trades=daily.trades, pnl=daily.pnl)
                 else:
-                    _entry_attempted[(symbol, "orb")] = str(candle_ts)
-                    stop = or_low
-                    target = close + cfg.orb_target_mult * or_range
-                    elog.order_attempt("BUY", qty, close, strategy="orb")
-                    order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                    elog.order_result("BUY", success=bool(order_id),
-                                      order_id=order_id, strategy="orb")
-                    if order_id:
-                        position = PaperPosition(
-                            symbol=symbol, strategy="orb", direction="long",
-                            entry_time=candle_ts, entry_price=close,
-                            stop_price=stop, target_price=target,
-                            qty=qty, order_id=order_id,
-                        )
-                        _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="orb", direction="long")
-                        notify_entry(symbol, close, stop)
-                        log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%s",
-                                 symbol, close, stop, target, qty)
+                    qty = _qty(close, symbol)
+                    cap = _position_cap(symbol)
+                    if not qty:
+                        log.warning("RISK BLOCK [orb] %s: price %.2f exceeds cap %.2f",
+                                    symbol, close, cap)
+                        elog.risk_block("price_exceeds_max_position", strategy="orb",
+                                        price=close, max_dollars=cap)
+                    else:
+                        stop = or_low
+                        target = close + cfg.orb_target_mult * or_range
+                        elog.order_attempt("BUY", qty, close, strategy="orb")
+                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
+                        elog.order_result("BUY", success=bool(order_id),
+                                          order_id=order_id, strategy="orb")
+                        if order_id:
+                            position = PaperPosition(
+                                symbol=symbol, strategy="orb", direction="long",
+                                entry_time=candle_ts, entry_price=close,
+                                stop_price=stop, target_price=target,
+                                qty=qty, order_id=order_id,
+                            )
+                            _save_position(position)
+                            elog.position_open(close, stop, qty, strategy="orb", direction="long")
+                            notify_entry(symbol, close, stop)
+                            log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%s",
+                                     symbol, close, stop, target, qty)
 
         # --- Short entry ---
         elif (after_cutoff and below_low and vol_ok
@@ -896,37 +900,38 @@ def _eval_orb(
               and not (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists()):
             if _entry_attempted.get((symbol, "orb")) == str(candle_ts):
                 pass  # already tried this candle — don't retry until next bar
-            elif not daily.can_open(strategy="orb"):
-                elog.risk_block("daily_limit_reached", strategy="orb",
-                                trades=daily.trades, pnl=daily.pnl)
             else:
-                qty = math.floor(_qty(close, symbol))  # Moomoo rejects fractional short orders
-                cap = _position_cap(symbol)
-                if not qty:
-                    log.warning("RISK BLOCK [orb-short] %s: price %.2f exceeds cap %.2f",
-                                symbol, close, cap)
-                    elog.risk_block("price_exceeds_max_position", strategy="orb",
-                                    price=close, max_dollars=cap)
+                _entry_attempted[(symbol, "orb")] = str(candle_ts)
+                if not daily.can_open(strategy="orb"):
+                    elog.risk_block("daily_limit_reached", strategy="orb",
+                                    trades=daily.trades, pnl=daily.pnl)
                 else:
-                    _entry_attempted[(symbol, "orb")] = str(candle_ts)
-                    stop = or_high
-                    target = close - cfg.orb_target_mult * or_range
-                    elog.order_attempt("SELL_SHORT", qty, close, strategy="orb")
-                    order_id = _place_short(tctx, acc_id, symbol, close, qty)
-                    elog.order_result("SELL_SHORT", success=bool(order_id),
-                                      order_id=order_id, strategy="orb")
-                    if order_id:
-                        position = PaperPosition(
-                            symbol=symbol, strategy="orb", direction="short",
-                            entry_time=candle_ts, entry_price=close,
-                            stop_price=stop, target_price=target,
-                            qty=qty, order_id=order_id,
-                        )
-                        _save_position(position)
-                        elog.position_open(close, stop, qty, strategy="orb", direction="short")
-                        notify_entry(symbol, close, stop)
-                        log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%s",
-                                 symbol, close, stop, target, qty)
+                    qty = math.floor(_qty(close, symbol))  # Moomoo rejects fractional short orders
+                    cap = _position_cap(symbol)
+                    if not qty:
+                        log.warning("RISK BLOCK [orb-short] %s: price %.2f exceeds cap %.2f",
+                                    symbol, close, cap)
+                        elog.risk_block("price_exceeds_max_position", strategy="orb",
+                                        price=close, max_dollars=cap)
+                    else:
+                        stop = or_high
+                        target = close - cfg.orb_target_mult * or_range
+                        elog.order_attempt("SELL_SHORT", qty, close, strategy="orb")
+                        order_id = _place_short(tctx, acc_id, symbol, close, qty)
+                        elog.order_result("SELL_SHORT", success=bool(order_id),
+                                          order_id=order_id, strategy="orb")
+                        if order_id:
+                            position = PaperPosition(
+                                symbol=symbol, strategy="orb", direction="short",
+                                entry_time=candle_ts, entry_price=close,
+                                stop_price=stop, target_price=target,
+                                qty=qty, order_id=order_id,
+                            )
+                            _save_position(position)
+                            elog.position_open(close, stop, qty, strategy="orb", direction="short")
+                            notify_entry(symbol, close, stop)
+                            log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%s",
+                                     symbol, close, stop, target, qty)
         elif below_low and after_cutoff and vol_ok and not cfg.orb_shorts_enabled:
             elog.signal_skip("orb_shorts_disabled", score=0, bonus=0, min_score=0, strategy="orb")
         elif below_low and after_cutoff and vol_ok and (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists():

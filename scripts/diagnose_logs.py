@@ -181,9 +181,11 @@ def _trades(records: list[dict]) -> None:
             None,
         )
         if match:
+            pnl_val = match.get("pnl", "?")
+            pnl_str = f"{pnl_val:+.4f}" if isinstance(pnl_val, (int, float)) else str(pnl_val)
             print(f"  CLOSE  {match.get('ts','?')}  {sym}/{strat} [{match.get('direction', direction)}]  "
                   f"exit={match.get('exit','?')}  reason={match.get('reason','?')}  "
-                  f"pnl={match.get('pnl','?'):+}  hold_bars={match.get('hold_bars', '?')}")
+                  f"pnl={pnl_str}  hold_bars={match.get('hold_bars', '?')}")
         else:
             print(f"  CLOSE  (position still open)")
         print()
