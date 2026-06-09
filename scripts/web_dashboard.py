@@ -7,20 +7,325 @@ Usage:
     python scripts/web_dashboard.py --date 2026-06-01   # review past session
 """
 import argparse
+import hashlib
 import json
+import re
+import subprocess
 import sys
 from datetime import date, datetime, timedelta
+from functools import wraps
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flask import Flask
+from flask import Flask, Response, redirect, render_template_string, request, session, url_for
 from mm.config import cfg
 from eod_summary import SessionSummary, load_summary
 
+_PROJECT_ROOT = Path(__file__).parent.parent
+_ENV_PATH = _PROJECT_ROOT / ".env"
+
 app = Flask(__name__)
+# Secret key derived from dashboard password; falls back to a fixed dev key if unset.
+app.secret_key = hashlib.sha256(
+    (cfg.dashboard_password or "dev-no-password").encode() + b"moomoo-dash"
+).hexdigest()
 _date_override: date | None = None
+
+# ---------------------------------------------------------------------------
+# Auth + config editor support
+# ---------------------------------------------------------------------------
+
+# Keys the config editor is allowed to read and write.
+_EDITABLE_KEYS = {
+    "MAX_DAILY_LOSS", "MAX_POSITION_DOLLARS", "MAX_TRADES_PER_DAY",
+    "MAX_TRADES_PER_STRATEGY", "MIN_SIGNAL_SCORE", "KDJ_WINDOW_BARS",
+    "KDJ_WINDOW_OVERRIDES", "STRATEGIES", "SYMBOLS", "SYMBOL_SIZE_OVERRIDES",
+    "ORB_MINUTES", "ORB_MINUTES_OVERRIDES", "ORB_VOL_MULT", "ORB_TARGET_MULT",
+    "ORB_SHORTS_ENABLED", "TOTAL_CAPITAL", "FRACTIONAL_SHARES",
+    "VWAP_PB_SYMBOLS", "VWAP_PB_MAX_CROSSES", "VWAP_PB_STOP_MULT",
+    "ATR_STOP_MULT", "EXIT_ON_KDJ_DEATH",
+}
+
+
+def _require_login(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not cfg.dashboard_password:
+            return f(*args, **kwargs)
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _read_env() -> dict[str, str]:
+    """Parse .env into ordered dict (only editable keys)."""
+    result: dict[str, str] = {}
+    if not _ENV_PATH.exists():
+        return result
+    for line in _ENV_PATH.read_text().splitlines():
+        m = re.match(r"^\s*([A-Z_]+)\s*=\s*(.*)", line)
+        if m and m.group(1) in _EDITABLE_KEYS:
+            result[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+    return result
+
+
+def _write_env_key(key: str, value: str) -> None:
+    """Update a single key in .env, preserving all other lines."""
+    if key not in _EDITABLE_KEYS:
+        return
+    text = _ENV_PATH.read_text() if _ENV_PATH.exists() else ""
+    lines = text.splitlines()
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    updated = False
+    new_lines = []
+    for line in lines:
+        if pattern.match(line):
+            new_lines.append(f"{key}={value}")
+            updated = True
+        else:
+            new_lines.append(line)
+    if not updated:
+        new_lines.append(f"{key}={value}")
+    _ENV_PATH.write_text("\n".join(new_lines) + "\n")
+
+
+def _kill_switch_state() -> dict[str, bool]:
+    return {
+        "STOP_TRADING": (_PROJECT_ROOT / "STOP_TRADING.txt").exists(),
+        "STOP_SHORTS": (_PROJECT_ROOT / "STOP_SHORTS.txt").exists(),
+    }
+
+
+_CSS_BASE = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: monospace; background: #111; color: #ddd; padding: 24px; font-size: 14px; }
+h1 { font-size: 18px; margin-bottom: 20px; color: #fff; }
+h2 { font-size: 13px; color: #666; letter-spacing: 1px; margin: 20px 0 10px; }
+.card { background: #1a1a1a; border-radius: 6px; padding: 16px 18px; margin-bottom: 16px; }
+input[type=password], input[type=text] {
+  background: #222; border: 1px solid #333; color: #ddd; padding: 8px 10px;
+  border-radius: 4px; font-family: monospace; font-size: 13px; width: 100%;
+}
+input[type=password]:focus, input[type=text]:focus {
+  border-color: #555; outline: none;
+}
+button, .btn {
+  background: #2a2a2a; border: 1px solid #444; color: #ddd; padding: 7px 14px;
+  border-radius: 4px; font-family: monospace; font-size: 13px; cursor: pointer;
+}
+button:hover, .btn:hover { background: #333; border-color: #666; }
+.btn-danger { border-color: #f44336; color: #f44336; }
+.btn-danger:hover { background: #1a0000; }
+.btn-warn { border-color: #ff9800; color: #ff9800; }
+.btn-warn:hover { background: #1a0f00; }
+.btn-ok { border-color: #4caf50; color: #4caf50; }
+.btn-ok:hover { background: #001a00; }
+.msg { padding: 8px 12px; border-radius: 4px; margin-bottom: 14px; font-size: 13px; }
+.msg-ok { background: #001a00; border: 1px solid #4caf50; color: #4caf50; }
+.msg-err { background: #1a0000; border: 1px solid #f44336; color: #f44336; }
+.kv-row { display: grid; grid-template-columns: 220px 1fr 90px; gap: 8px;
+           align-items: center; margin-bottom: 6px; }
+.kv-label { color: #888; font-size: 12px; }
+.switch-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+a { color: #888; text-decoration: none; }
+a:hover { color: #ddd; }
+"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login() -> Response | str:
+    if not cfg.dashboard_password:
+        return redirect(url_for("index"))
+    error = ""
+    if request.method == "POST":
+        pw = request.form.get("password", "")
+        if pw == cfg.dashboard_password:
+            session["logged_in"] = True
+            return redirect(request.args.get("next") or url_for("index"))
+        error = "Wrong password."
+    return render_template_string(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Login</title>
+<style>{_CSS_BASE}</style></head>
+<body>
+  <h1>moomoo-trader</h1>
+  <div class="card" style="max-width:340px">
+    <h2>DASHBOARD LOGIN</h2>
+    {{'<div class="msg msg-err">' + error + '</div>' if error else ''}}
+    <form method="POST">
+      <input type="password" name="password" placeholder="Password" autofocus style="margin-bottom:10px">
+      <button type="submit" style="width:100%">Sign in</button>
+    </form>
+  </div>
+</body></html>""", error=error)
+
+
+@app.route("/logout")
+def logout() -> Response:
+    session.clear()
+    return redirect(url_for("index"))
+
+
+@app.route("/config", methods=["GET", "POST"])
+@_require_login
+def config_editor() -> Response | str:
+    msg = ""
+    msg_type = "ok"
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+
+        if action == "toggle_stop_trading":
+            p = _PROJECT_ROOT / "STOP_TRADING.txt"
+            if p.exists():
+                p.unlink()
+                msg = "STOP_TRADING.txt removed — trading resumed."
+            else:
+                p.write_text("stop\n")
+                msg = "STOP_TRADING.txt created — trading paused."
+
+        elif action == "toggle_stop_shorts":
+            p = _PROJECT_ROOT / "STOP_SHORTS.txt"
+            if p.exists():
+                p.unlink()
+                msg = "STOP_SHORTS.txt removed — shorts re-enabled."
+            else:
+                p.write_text("stop\n")
+                msg = "STOP_SHORTS.txt created — ORB shorts disabled."
+
+        elif action == "restart_runner":
+            try:
+                result = subprocess.run(
+                    ["systemctl", "--user", "restart", "moomoo-paper"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    msg = "moomoo-paper.service restarted."
+                else:
+                    msg = f"Restart failed: {result.stderr.strip()}"
+                    msg_type = "err"
+            except Exception as e:
+                msg = f"Restart error: {e}"
+                msg_type = "err"
+
+        elif action == "save_config":
+            changed = []
+            for key in _EDITABLE_KEYS:
+                if key in request.form:
+                    val = request.form[key].strip()
+                    _write_env_key(key, val)
+                    changed.append(key)
+            if changed:
+                msg = f"Saved: {', '.join(sorted(changed))}. Restart runner to apply."
+            else:
+                msg = "No changes submitted."
+
+    current = _read_env()
+    kills = _kill_switch_state()
+
+    def _field(key: str) -> str:
+        val = current.get(key, "")
+        return (f'<div class="kv-row">'
+                f'<span class="kv-label">{key}</span>'
+                f'<input type="text" name="{key}" value="{val}" form="cfg-form">'
+                f'</div>')
+
+    numeric_keys = [
+        "MAX_DAILY_LOSS", "MAX_POSITION_DOLLARS", "MAX_TRADES_PER_DAY",
+        "MAX_TRADES_PER_STRATEGY", "MIN_SIGNAL_SCORE", "ATR_STOP_MULT",
+        "KDJ_WINDOW_BARS", "ORB_MINUTES", "ORB_VOL_MULT", "ORB_TARGET_MULT",
+        "VWAP_PB_MAX_CROSSES", "VWAP_PB_STOP_MULT", "TOTAL_CAPITAL",
+    ]
+    list_keys = [
+        "STRATEGIES", "SYMBOLS", "VWAP_PB_SYMBOLS",
+        "KDJ_WINDOW_OVERRIDES", "ORB_MINUTES_OVERRIDES", "SYMBOL_SIZE_OVERRIDES",
+    ]
+    bool_keys = [
+        "FRACTIONAL_SHARES", "ORB_SHORTS_ENABLED", "EXIT_ON_KDJ_DEATH",
+    ]
+
+    fields_numeric = "\n".join(_field(k) for k in numeric_keys)
+    fields_list = "\n".join(_field(k) for k in list_keys)
+    fields_bool = "\n".join(_field(k) for k in bool_keys)
+
+    stop_btn_cls = "btn-danger" if not kills["STOP_TRADING"] else "btn-ok"
+    stop_btn_lbl = "Pause Trading (create STOP_TRADING.txt)" if not kills["STOP_TRADING"] else "Resume Trading (remove STOP_TRADING.txt)"
+    stop_active = '<span style="color:#f44336">ACTIVE — trading paused</span>' if kills["STOP_TRADING"] else '<span style="color:#4caf50">inactive</span>'
+
+    shorts_btn_cls = "btn-warn" if not kills["STOP_SHORTS"] else "btn-ok"
+    shorts_btn_lbl = "Disable ORB Shorts (create STOP_SHORTS.txt)" if not kills["STOP_SHORTS"] else "Re-enable ORB Shorts (remove STOP_SHORTS.txt)"
+    shorts_active = '<span style="color:#ff9800">ACTIVE — shorts disabled</span>' if kills["STOP_SHORTS"] else '<span style="color:#4caf50">inactive</span>'
+
+    msg_html = f'<div class="msg msg-{msg_type}">{msg}</div>' if msg else ""
+
+    return render_template_string(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Config — moomoo-trader</title>
+<style>{_CSS_BASE}</style></head>
+<body>
+  <h1>moomoo-trader &nbsp;<span style="color:#555;font-size:13px">/ config</span></h1>
+  <a href="/" style="font-size:12px">← back to dashboard</a>
+  &nbsp;&nbsp;
+  <a href="/logout" style="font-size:12px">logout</a>
+
+  {msg_html}
+
+  <!-- Kill switches -->
+  <div class="card">
+    <h2>KILL SWITCHES</h2>
+    <div class="switch-row">
+      <form method="POST">
+        <input type="hidden" name="action" value="toggle_stop_trading">
+        <button type="submit" class="btn {stop_btn_cls}">{stop_btn_lbl}</button>
+      </form>
+      <span style="font-size:12px">STOP_TRADING.txt: {stop_active}</span>
+    </div>
+    <div class="switch-row">
+      <form method="POST">
+        <input type="hidden" name="action" value="toggle_stop_shorts">
+        <button type="submit" class="btn {shorts_btn_cls}">{shorts_btn_lbl}</button>
+      </form>
+      <span style="font-size:12px">STOP_SHORTS.txt: {shorts_active}</span>
+    </div>
+  </div>
+
+  <!-- Restart -->
+  <div class="card">
+    <h2>RUNNER CONTROL</h2>
+    <form method="POST">
+      <input type="hidden" name="action" value="restart_runner">
+      <button type="submit" class="btn btn-warn">Restart moomoo-paper.service</button>
+    </form>
+    <div style="color:#555;font-size:11px;margin-top:6px">Config changes only take effect after restart.</div>
+  </div>
+
+  <!-- .env editor -->
+  <form id="cfg-form" method="POST">
+    <input type="hidden" name="action" value="save_config">
+
+    <div class="card">
+      <h2>RISK / SIZING</h2>
+      {fields_numeric}
+    </div>
+
+    <div class="card">
+      <h2>STRATEGY / SYMBOL LISTS</h2>
+      {fields_list}
+    </div>
+
+    <div class="card">
+      <h2>FLAGS (true/false)</h2>
+      {fields_bool}
+    </div>
+
+    <button type="submit" form="cfg-form" class="btn btn-ok"
+            style="padding:10px 24px;font-size:14px">Save to .env</button>
+    <span style="color:#555;font-size:11px;margin-left:10px">
+      Writes to .env only — restart runner to apply.
+    </span>
+  </form>
+</body></html>""")
 
 
 def _session_date() -> date:
@@ -470,6 +775,8 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     <span class="meta">symbol: {', '.join(cfg.symbols)}</span>
     <span class="meta">last price: {last_close}  score: {last_score}</span>
     <span class="meta" style="margin-left:auto">updated {now_str} · refreshes every 30s</span>
+    <a href="/config" style="font-size:11px;color:#555;margin-left:8px;text-decoration:none"
+       title="Config editor">⚙</a>
   </div>
 
   <div class="card">

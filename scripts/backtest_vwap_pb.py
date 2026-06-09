@@ -6,9 +6,11 @@ Usage:
     python scripts/backtest_vwap_pb.py --latest
     python scripts/backtest_vwap_pb.py --all          # all K_5M CSVs in logs/
     python scripts/backtest_vwap_pb.py --sweep        # sweep stop_mult × max_crosses
+    python scripts/backtest_vwap_pb.py --time-filter  # sweep min_entry_time (9:45/10:00/10:15)
 """
 import argparse
 import sys
+from datetime import time as dtime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,21 +28,36 @@ def latest_csv() -> Path:
     return csvs[-1]
 
 
-def sweep(df: pd.DataFrame, days: int, sym: str) -> None:
-    print(f"\n{'stop_mult':>10}  {'max_crosses':>12}  {'trades':>7}  {'win%':>6}  {'pnl':>9}  {'pf':>7}")
+def _row(trades: list, label: str) -> str:
+    if not trades:
+        return f"{label:<22}  {'—':>7}  {'—':>6}  {'—':>9}  {'—':>7}"
+    wins = sum(1 for t in trades if t.pnl > 0)
+    pnl = sum(t.pnl for t in trades)
+    gw = sum(t.pnl for t in trades if t.pnl > 0)
+    gl = abs(sum(t.pnl for t in trades if t.pnl <= 0))
+    pf = gw / gl if gl else 999.0
+    return (f"{label:<22}  {len(trades):>7}  "
+            f"{100*wins/len(trades):>5.1f}%  {pnl:>+9.2f}  {pf:>7.3f}")
+
+
+def sweep(df: pd.DataFrame, sym: str) -> None:
+    print(f"\n{'param':>22}  {'trades':>7}  {'win%':>6}  {'pnl':>9}  {'pf':>7}")
     print("-" * 60)
     for stop_m in [0.5, 0.75, 1.0, 1.25]:
         for max_c in [1, 2, 3, 4]:
             trades = run_vwap_pullback(df, stop_mult=stop_m, max_crosses=max_c)
-            if not trades:
-                continue
-            wins = sum(1 for t in trades if t.pnl > 0)
-            pnl = sum(t.pnl for t in trades)
-            gw = sum(t.pnl for t in trades if t.pnl > 0)
-            gl = abs(sum(t.pnl for t in trades if t.pnl <= 0))
-            pf = gw / gl if gl else 999.0
-            print(f"{stop_m:>10.2f}  {max_c:>12}  {len(trades):>7}  "
-                  f"{100*wins/len(trades):>5.1f}%  {pnl:>+9.2f}  {pf:>7.3f}")
+            print(_row(trades, f"stop={stop_m:.2f} cross={max_c}"))
+
+
+def sweep_time_filter(df: pd.DataFrame, sym: str) -> None:
+    """Sweep min_entry_time at fixed optimal params (stop=1.0, max_crosses=1)."""
+    print(f"\n=== {sym} — min_entry_time sweep (stop_mult=1.0, max_crosses=1) ===")
+    print(f"\n{'min_entry_time':>22}  {'trades':>7}  {'win%':>6}  {'pnl':>9}  {'pf':>7}")
+    print("-" * 60)
+    for h, m in [(9, 30), (9, 45), (10, 0), (10, 15), (10, 30)]:
+        t = dtime(h, m)
+        trades = run_vwap_pullback(df, stop_mult=1.0, max_crosses=1, min_entry_time=t)
+        print(_row(trades, f"{h:02d}:{m:02d}"))
 
 
 def main() -> None:
@@ -49,6 +66,8 @@ def main() -> None:
     parser.add_argument("--latest", action="store_true")
     parser.add_argument("--all", action="store_true", dest="all_csvs")
     parser.add_argument("--sweep", action="store_true")
+    parser.add_argument("--time-filter", action="store_true", dest="time_filter",
+                        help="Sweep min_entry_time cutoffs (9:30–10:30)")
     args = parser.parse_args()
 
     if args.all_csvs:
@@ -68,9 +87,11 @@ def main() -> None:
         df = add_all(df)
         days = df["time_key"].dt.date.nunique()
 
-        if args.sweep:
+        if args.time_filter:
+            sweep_time_filter(df, sym)
+        elif args.sweep:
             print(f"\n=== {sym} sweep ===")
-            sweep(df, days, sym)
+            sweep(df, sym)
         else:
             trades = run_vwap_pullback(df)
             print()

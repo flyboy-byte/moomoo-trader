@@ -92,13 +92,18 @@ def _build_opening_ranges(df: pd.DataFrame, orb_minutes: int | None = None) -> d
     return ranges
 
 
-def run_orb_signals(df: pd.DataFrame) -> tuple[list[ORBTrade], pd.DataFrame]:
+def run_orb_signals(
+    df: pd.DataFrame,
+    vol_mult: float = ORB_VOL_MULT,
+    orb_minutes: int | None = None,
+    target_mult: float = ORB_TARGET_MULT,
+) -> tuple[list[ORBTrade], pd.DataFrame]:
     """Stateful bar-by-bar ORB evaluation. Returns (trades, annotated_df)."""
     df = add_all(df)
     df = df.copy()
     df["orb_signal"] = "none"
 
-    ranges = _build_opening_ranges(df)
+    ranges = _build_opening_ranges(df, orb_minutes=orb_minutes)
     trades: list[ORBTrade] = []
     position: dict | None = None  # {entry, stop, target, direction, or_high, or_low}
     entered_today: set = set()
@@ -120,8 +125,9 @@ def run_orb_signals(df: pd.DataFrame) -> tuple[list[ORBTrade], pd.DataFrame]:
         or_range = or_high - or_low
 
         # Only evaluate bars AFTER the opening range period
-        cutoff = dtime(9, 30 + ORB_MINUTES) if 30 + ORB_MINUTES < 60 else \
-                 dtime(10, (30 + ORB_MINUTES) % 60)
+        _orb_min = orb_minutes if orb_minutes is not None else ORB_MINUTES
+        cutoff = dtime(9, 30 + _orb_min) if 30 + _orb_min < 60 else \
+                 dtime(10, (30 + _orb_min) % 60)
         if bar_clock < cutoff:
             continue
 
@@ -161,10 +167,10 @@ def run_orb_signals(df: pd.DataFrame) -> tuple[list[ORBTrade], pd.DataFrame]:
                 position = None
 
         if position is None and not is_time_stop and bar_date not in entered_today:
-            vol_ok = float(row["volume"]) > ORB_VOL_MULT * float(row.get("volume_ma", 0))
+            vol_ok = float(row["volume"]) > vol_mult * float(row.get("volume_ma", 0))
 
             if close > or_high and vol_ok:
-                target = close + ORB_TARGET_MULT * or_range
+                target = close + target_mult * or_range
                 stop = or_low
                 position = {"entry_time": bar_time, "entry_price": close,
                             "target": target, "stop": stop, "direction": "long",
@@ -175,7 +181,7 @@ def run_orb_signals(df: pd.DataFrame) -> tuple[list[ORBTrade], pd.DataFrame]:
                          bar_time, close, stop, target, or_low, or_high)
 
             elif close < or_low and vol_ok:
-                target = close - ORB_TARGET_MULT * or_range
+                target = close - target_mult * or_range
                 stop = or_high
                 position = {"entry_time": bar_time, "entry_price": close,
                             "target": target, "stop": stop, "direction": "short",

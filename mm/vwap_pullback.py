@@ -71,6 +71,7 @@ def run_vwap_pullback(
     df: pd.DataFrame,
     stop_mult: float = VWAP_PB_STOP_MULT,
     max_crosses: int = VWAP_PB_MAX_CROSSES,
+    min_entry_time: dtime = _NO_ENTRY_BEFORE,
 ) -> list[VWAPPBTrade]:
     """Stateful backtest pass. Returns list of completed trades."""
     if "vwap" not in df.columns:
@@ -122,7 +123,7 @@ def run_vwap_pullback(
             continue
 
         # Entry conditions
-        if is_time_stop or bar_clock < _NO_ENTRY_BEFORE:
+        if is_time_stop or bar_clock < min_entry_time:
             continue
 
         wick_below = float(row["low"]) < vwap
