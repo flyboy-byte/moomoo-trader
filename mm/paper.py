@@ -240,14 +240,14 @@ def _reconcile_positions(
             continue
         any_local = True
         if sym not in broker_syms:
-            log.error(
-                "RECONCILE MISMATCH [%s/%s]: local entry=%.4f but broker has no %s position — clearing",
-                sym, strat, pos.entry_price, sym,
-            )
+            msg = (f"RECONCILE MISMATCH [{sym}/{strat}]: local entry={pos.entry_price:.4f} "
+                   f"but broker has no {sym} position — clearing")
+            log.error(msg)
             elogs[sym].error(
                 f"reconcile_mismatch strat={strat} local_entry={pos.entry_price} broker=none cleared",
                 strategy=strat,
             )
+            notify(f"[PAPER] CRITICAL: {msg}")
             _clear_position(sym, strat)
             positions[(sym, strat)] = None
         else:
@@ -1021,6 +1021,8 @@ def run_multi(symbols: list[str] | None = None) -> None:
     consecutive_errors = 0
     _was_market_open: bool = False
     _session_day: date = date.today()
+    _reconcile_counter: int = 0
+    _RECONCILE_EVERY: int = 15  # poll cycles (~15 min)
 
     for (sym, strat), pos in positions.items():
         if pos:
@@ -1072,6 +1074,13 @@ def run_multi(symbols: list[str] | None = None) -> None:
             with trade_context() as tctx:
                 if acc_id is None:
                     acc_id = _get_simulate_acc_id(tctx)
+
+                _reconcile_counter += 1
+                if _reconcile_counter >= _RECONCILE_EVERY:
+                    _reconcile_counter = 0
+                    if any(p is not None for p in positions.values()):
+                        _reconcile_positions(tctx, acc_id, positions, elogs)
+
                 for symbol in symbols:
                     _eval_symbol_all_strategies(
                         symbol, strategies, tctx, acc_id, positions, elogs, daily,

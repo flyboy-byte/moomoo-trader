@@ -91,6 +91,7 @@ moomoo-trader/
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
 │   ├── ARCHITECTURE.md          # 30-line data flow diagram + config reference
+│   ├── HARDENING_PLAN.md        # NEW: Strategy for ATR-sizing and reliability
 │   └── strategy_graveyard.md   # All tested/abandoned/parked features with research data
 │
 ├── logs/                        # Runtime output (gitignored)
