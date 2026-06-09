@@ -392,10 +392,16 @@ def _qty(price: float, symbol: str) -> int | float:
 
     When TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty
     derived from the pre-computed per-slot dollar allocation.
-    Otherwise: falls back to integer calc_qty() using MAX_POSITION_DOLLARS.
+    Falls back to whole-share calc_qty() when fractional result < 1 — Moomoo
+    rejects sub-share orders with "Invalid quantity" and the trade is silently lost.
+    Also falls back when TOTAL_CAPITAL is not set or FRACTIONAL_SHARES=false.
     """
     if _slot_dollars > 0 and cfg.fractional_shares:
-        return calc_qty_fractional(price, _slot_dollars)
+        qty = calc_qty_fractional(price, _slot_dollars)
+        if qty >= 1:
+            return qty
+        log.warning("Fractional qty %.6f < 1 for %s at %.2f — falling back to whole-share",
+                    qty, symbol, price)
     return calc_qty(price, symbol)
 
 

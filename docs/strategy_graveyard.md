@@ -54,6 +54,10 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 | Startup config validation | `mm/config.py` (validate_config) | Fails fast on bad .env before touching broker |
 | Broker position reconciliation | `mm/paper.py` (_reconcile_positions) | On restart, clears stale local state if broker disagrees |
 | Per-strategy trade limits | `mm/risk.py` (DailyTracker) | MAX_TRADES_PER_STRATEGY config, prevents ORB starving BB+KDJ |
+| Order price rounding | `mm/paper.py` (_place_buy/sell/short/cover) | round(price, 2) — Moomoo rejects >2 dp (caught June 4, 8) |
+| Entry retry dedup | `mm/paper.py` (_entry_attempted dict) | One attempt per candle per (symbol, strategy) — prevents storm |
+| Fractional qty fallback | `mm/paper.py` (_qty()) | qty < 1 → whole-share fallback instead of silently rejecting |
+| Daily loss limit | `mm/config.py`, `mm/risk.py` | MAX_DAILY_LOSS raised to $20 — $5 killed full day after 1 VWAP PB loss |
 
 ---
 
@@ -95,22 +99,6 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 - Strategy evals stay in their own files (or mm/eval_bb_kdj.py etc.)
 **Why parked:** Large refactor with no functional benefit right now. Risk of introducing bugs.
 **When:** Before adding a 4th strategy or when paper.py hits a natural split point during feature work.
-
-### Qty Floor / Auto-Fallback in `_qty()`
-**What it is:** A guard in `_qty()` that detects when fractional-mode produces a quantity
-below Moomoo's minimum order size and automatically falls back to whole-share `calc_qty()`.
-**Why parked:** Found 2026-06-08 — `TOTAL_CAPITAL=100` + `FRACTIONAL_SHARES=true` split
-$100 across ~8 (symbol×strategy) slots → ~$12.50/slot → qty≈0.015 shares. Moomoo's paper
-API silently rejected every BUY and SELL_SHORT all of Friday 2026-06-05 with
-"Invalid quantity" — zero trades fired, zero P&L, no crash. Reverted VPS `.env` to
-`TOTAL_CAPITAL=0` / `FRACTIONAL_SHARES=false` (the proven June 4 whole-share path:
-`MAX_POSITION_DOLLARS=900` → qty=1 SPY/QQQ, ~3 IWM — both June 4 entries filled clean).
-**Caught by:** structured JSONL `order_attempt`/`order_result` events (success=false) +
-`paper.log` ERROR lines. Traced root cause to the `.env` config in minutes — logging worked.
-**Gate:** Before re-enabling fractional sizing, determine Moomoo's actual minimum order
-quantity/value (test in isolation), then add the floor check so a bad config degrades
-gracefully instead of silently killing every order for a session.
-**Files to touch:** `mm/paper.py` (`_qty()`), maybe `mm/risk.py` (`calc_qty_fractional`).
 
 ---
 

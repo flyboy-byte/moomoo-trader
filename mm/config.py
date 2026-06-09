@@ -31,7 +31,7 @@ class Config:
     # Example: MAX_TRADES_PER_STRATEGY=1 lets each strategy take at most 1 trade/day,
     # preventing ORB from consuming all 3 global slots and starving BB+KDJ/VWAP PB.
     max_trades_per_strategy: int = int(_get("MAX_TRADES_PER_STRATEGY", "0"))
-    max_daily_loss: float = float(_get("MAX_DAILY_LOSS", "5"))
+    max_daily_loss: float = float(_get("MAX_DAILY_LOSS", "20"))
     max_position_dollars: float = float(_get("MAX_POSITION_DOLLARS", "50"))
     # Per-symbol overrides: "US.IWM:300,US.SPY:600" → {"US.IWM": 300.0, "US.SPY": 600.0}
     # Falls back to max_position_dollars for symbols not listed.
