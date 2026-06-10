@@ -16,9 +16,10 @@ Goal:
 Build a practical Python project for AI-assisted stock strategy research and Moomoo paper trading.
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
-Current build state (as of 2026-06-04):
+Current build state (as of 2026-06-10):
 All core infrastructure complete. Multi-strategy paper runner live on VPS (bb_kdj + orb + vwap_pb on SPY/QQQ/IWM).
-First live trades fired 2026-06-04: SPY ORB +$2.92 (TARGET), QQQ ORB +$2.52 (TIME_STOP). Signal engines validated.
+6 live trades across 6 sessions (Jun 4–9): ORB 2/2 +$5.44, VWAP PB 0/4 -$9.09. BB+KDJ not yet fired (low freq).
+VWAP PB time filter fixed (9:45→10:00 ET) after all 4 losses were opening-noise entries. Deployed 2026-06-10.
 See docs/ARCHITECTURE.md for system map. Run ./scripts/verify.sh for one-command session health check.
 
 Package layout:
@@ -122,7 +123,7 @@ Historical data on disk:
   Combined CSVs created by merging old (2022-2025) + fresh fetch (2025-05-31 to 2026-06-03), deduped on time_key.
 
 Tests:
-  python -m pytest tests/           — 89 tests: risk (22), indicators/signals (47), strategy (18), orb (2)
+  python -m pytest tests/           — 141 tests: risk (22), indicators/signals (47), strategy (18), orb (2), +new
   python -m pytest tests/ -q        — quiet mode
 
 Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
@@ -154,13 +155,15 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
 10. VWAP Pullback (flush-and-reclaim) strategy (2026-06): implemented and deployed.
     Entry: 5-min candle wicks below VWAP (low < vwap) but closes above it.
     Filter: session VWAP cross count ≤ 1 (no-chop filter — critical for edge).
-            quiet bar (volume < volume_ma), no entry before 9:45.
+            quiet bar (volume < volume_ma), no entry before 10:00 ET.
     Exit: close < vwap (level lost), ATR stop, 15:45 time stop.
     Sweep on SPY+QQQ 2022-2025 (IWM excluded — fails OOS):
     - SPY: PF=1.655 OOS (train 2022-23, test 2024-25)
     - QQQ: PF=1.072 OOS
     - IWM: negative OOS — excluded via VWAP_PB_SYMBOLS=US.SPY,US.QQQ in config
     Optimal: stop_mult=1.0, max_crosses=1. Deployed to VPS.
+    Time filter: VWAP_PB_MIN_ENTRY_TIME=10:00 (sweep: 9:45→10:00 improves IWM PF 1.053→1.332).
+    All 4 live losses (Jun 8-9) were 9:50 ET opening-noise entries — fixed by this filter.
 
 11. ORB per-symbol window (2026-06): bug fix + per-symbol override implemented.
     IWM ORB: 15-min OR → PF=1.017. 30-min OR → PF=1.217. Override via ORB_MINUTES_OVERRIDES.
@@ -201,24 +204,38 @@ IWM outperformance root cause: lower stop rate (38% vs 50-58% for SPY/QQQ) and f
   reversals (132 min avg hold vs 309/507). Not about volatility ratios — those are equal
   across symbols. IWM's BB+KDJ signal is simply more predictive.
 
-VPS deployment (as of 2026-06-03):
+VPS deployment (as of 2026-06-10):
   STRATEGIES=bb_kdj,orb,vwap_pb
   SYMBOLS=US.IWM,US.SPY,US.QQQ
-  KDJ_WINDOW_BARS=3
+  KDJ_WINDOW_BARS=3, KDJ_WINDOW_OVERRIDES=US.SPY:0
   ORB_MINUTES=15, ORB_MINUTES_OVERRIDES=US.IWM:30
   VWAP_PB_SYMBOLS=US.SPY,US.QQQ  (IWM excluded)
+  VWAP_PB_MIN_ENTRY_TIME=10:00   (changed from 9:45 after all 4 live losses were opening-noise)
   MAX_POSITION_DOLLARS=900
+  MAX_DAILY_LOSS=20
   Services: moomoo-paper.service + moomoo-dashboard.service (Restart=always)
+  Dashboard: http://51.81.80.126:8080 — date picker for history, /config editor (needs DASHBOARD_PASSWORD)
   Sync logs: ./sync_logs.sh (rsync VPS → local)
 
 What to build next (in priority order):
-1. Wait for first live trades — no trades have fired yet (choppy market, VWAP crosses=6-9).
-   Once trades appear: run compare_paper_vs_backtest.py to validate signal engines agree.
-2. VIX daily regime filter — block BB+KDJ entries on high-volatility days (VIX > 25).
-   Approach: download CBOE VIX daily CSV (free), join on date, backtest on combined CSVs.
-   Use yfinance for daily VIX pull at session start. No intraday alignment needed.
-3. EMA momentum stop fix: if revisiting, fix stop to be ATR-only (not min(ema20, atr)).
-   Investigate ADX=25 anomaly before considering deployment.
+1. Accumulate live data — need 2+ weeks of trades before drawing strategy conclusions.
+   ORB confirmed working (2/2). VWAP PB needs proof with 10:00 ET filter in place.
+   BB+KDJ needs first live fire (low-freq, conditions haven't aligned yet).
+2. ATR-normalized sizing — RISK_DOLLARS_PER_TRADE replaces blind dollar cap.
+   Gated: wait for 2+ weeks live fill data first. See docs/strategy_graveyard.md.
+3. BB+KDJ KDJ-window dilution — TESTED 2026-06-10. KDJ IS load-bearing at same-bar (w=0):
+   w=0: 82 trades, 57.3% win, PF=2.131. w=3 (live): 864 trades, 41.7%, PF=1.107.
+   w=100 (KDJ always true): 4375 trades, PF=1.069 — barely above w=3.
+   FINDING: KDJ same-bar cross is a genuine edge signal. w=3 dilutes it 10x for minimal
+   PnL gain (+$22 absolute vs trading 10x more). Consider whether w=3 is worth the dilution.
+   The high-PF regime is w=0 but 82 trades over 4 years (~20/year combined) is very low-freq.
+4. ORB time-of-day sweep — does late-day ORB edge hold or degrade past 13:00 ET?
+   Could add ORB_CUTOFF_HOUR config if late entries underperform.
+
+Decided against:
+- VIX daily regime filter: TESTED AND FAILED OOS. All variants worse than baseline.
+  High-VIX days are IWM's best entries. See docs/strategy_graveyard.md.
+- EMA5/EMA20 momentum: no deployable edge. Stop parameter inert. See graveyard.
 
 Do not ask before every small change. Make reasonable implementation decisions.
 After changes, explain what was built, how to run it, and what remains.
