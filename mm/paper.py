@@ -524,7 +524,7 @@ def _eval_bb_kdj(
                                 stop_price=stop, qty=qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="bb_kdj")
+                            elog.position_open(close, stop, qty, strategy="bb_kdj", intended_price=close)
                             notify_entry(symbol, close, stop)
                             log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%s",
                                      symbol, close, stop, qty)
@@ -614,7 +614,7 @@ def _eval_vwap(
                                 stop_price=stop, qty=qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="vwap")
+                            elog.position_open(close, stop, qty, strategy="vwap", intended_price=close)
                             notify_entry(symbol, close, stop)
                             log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%s",
                                      symbol, close, stop, qty)
@@ -750,7 +750,7 @@ def _eval_vwap_pb(
                                 stop_price=stop, qty=qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="vwap_pb")
+                            elog.position_open(close, stop, qty, strategy="vwap_pb", intended_price=close)
                             notify_entry(symbol, close, stop)
                             log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%s",
                                      symbol, close, stop, qty)
@@ -890,7 +890,7 @@ def _eval_orb(
                                 qty=qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="orb", direction="long")
+                            elog.position_open(close, stop, qty, strategy="orb", direction="long", intended_price=close)
                             notify_entry(symbol, close, stop)
                             log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%s",
                                      symbol, close, stop, target, qty)
@@ -929,7 +929,7 @@ def _eval_orb(
                                 qty=qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="orb", direction="short")
+                            elog.position_open(close, stop, qty, strategy="orb", direction="short", intended_price=close)
                             notify_entry(symbol, close, stop)
                             log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%s",
                                      symbol, close, stop, target, qty)
