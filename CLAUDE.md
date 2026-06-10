@@ -111,9 +111,9 @@ until forward paper testing shows otherwise:
    - Conclusion: K_5M is the right timeframe. Hypothesis that longer TF reduces stop-out noise is FALSE.
 
 Historical data on disk:
-  logs/US_SPY_K_5M_combined.csv    — 86,100 candles, 2022-01-03 to 2026-06-03 (primary backtest file)
-  logs/US_QQQ_K_5M_combined.csv    — 86,100 candles, 2022-01-03 to 2026-06-03
-  logs/US_IWM_K_5M_combined.csv    — 86,100 candles, 2022-01-03 to 2026-06-03
+  logs/US_SPY_K_5M_combined.csv    — 86,412 candles, 2022-01-03 to 2026-06-09 (primary backtest file)
+  logs/US_QQQ_K_5M_combined.csv    — 86,412 candles, 2022-01-03 to 2026-06-09
+  logs/US_IWM_K_5M_combined.csv    — 86,412 candles, 2022-01-03 to 2026-06-09
   logs/US_SPY_K_15M_2026-05-31.csv — 22,158 candles, 2022-01-03 to 2025-05-30
   logs/US_QQQ_K_15M_2026-05-31.csv — 22,158 candles, 2022-01-03 to 2025-05-30
   logs/US_IWM_K_15M_2026-05-31.csv — 22,158 candles, 2022-01-03 to 2025-05-30
