@@ -115,13 +115,14 @@ class PaperEventLog:
 
     def position_open(self, entry: float, stop: float, qty: int | float,
                       strategy: str = "", direction: str = "long",
-                      intended_price: float = 0.0) -> None:
+                      intended_price: float = 0.0, **extra) -> None:
         intended = intended_price if intended_price > 0 else entry
         slippage_bps = round((entry - intended) / intended * 10000, 1)
         self._write("position_open", strategy=strategy, symbol=self._sym,
                     entry=round(entry, 4), stop=round(stop, 4),
                     qty=round(qty, 6) if isinstance(qty, float) else qty,
-                    direction=direction, slippage_bps=slippage_bps, vix_at_entry=None)
+                    direction=direction, slippage_bps=slippage_bps, vix_at_entry=None,
+                    **extra)
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
                        hold_bars: int = 0, strategy: str = "",
@@ -458,6 +459,22 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
 # Per-strategy evaluation — called once per (symbol, strategy) per poll
 # ---------------------------------------------------------------------------
 
+def _kdj_cross_age(df_signals: pd.DataFrame, max_lookback: int = 50) -> int | None:
+    """Bars since the most recent KDJ golden cross (0 = current bar).
+
+    Logged on every bb_kdj bar_eval/position_open so live w>0 trades can be
+    post-hoc split into the same-bar (w=0) subset vs diluted window entries.
+    Returns None if no cross within max_lookback bars.
+    """
+    if "kdj_golden_cross" not in df_signals.columns:
+        return None
+    tail = df_signals["kdj_golden_cross"].tail(max_lookback).tolist()
+    for age, fired in enumerate(reversed(tail)):
+        if bool(fired):
+            return age
+    return None
+
+
 def _eval_bb_kdj(
     symbol: str, df_signals: pd.DataFrame, tctx, acc_id: int,
     position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
@@ -475,9 +492,11 @@ def _eval_bb_kdj(
     log.info("%-8s [bb_kdj] BAR %s  close=%.4f  bb_lower=%.4f  score=%d/5  bonus=%d/3  %s",
              symbol, candle_ts, close, bb_lower or 0, sig.score, bonus, sig)
     adx = float(last["adx"]) if "adx" in last and not pd.isna(last["adx"]) else 0.0
+    cross_age = _kdj_cross_age(df_signals)
     elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
                   close=close, score=sig.score, bonus=bonus,
-                  signals={**sig.details, "bb_lower": bb_lower, "bb_middle": bb_middle},
+                  signals={**sig.details, "bb_lower": bb_lower, "bb_middle": bb_middle,
+                           "kdj_cross_age": cross_age},
                   regime_label="trending" if adx > 25 else "ranging",
                   strategy="bb_kdj")
 
@@ -524,7 +543,8 @@ def _eval_bb_kdj(
                                 stop_price=stop, qty=qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="bb_kdj", intended_price=close)
+                            elog.position_open(close, stop, qty, strategy="bb_kdj", intended_price=close,
+                                               kdj_cross_age=cross_age)
                             notify_entry(symbol, close, stop)
                             log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%s",
                                      symbol, close, stop, qty)

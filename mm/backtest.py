@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .config import cfg
 from .strategy import run_signals, Signal, Trade
 from .logger import get_logger
 
@@ -33,6 +34,7 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], pd.DataFrame]:
                 open_entry = {
                     "entry_time": row["time_key"],
                     "entry_price": row["close"],
+                    "risk": cfg.atr_stop_mult * float(row["atr"]),
                 }
         else:
             if sig in (Signal.EXIT_TARGET, Signal.EXIT_DEATH_CROSS, Signal.EXIT_STOP_LOSS):
@@ -42,6 +44,7 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], pd.DataFrame]:
                     exit_time=row["time_key"],
                     exit_price=row["close"],
                     exit_reason=sig.name,
+                    risk=open_entry.get("risk", 0.0),
                 )
                 trades.append(trade)
                 open_entry = None
@@ -65,6 +68,11 @@ def print_summary(trades: list[Trade]) -> None:
     log.info("Win rate:      %.1f%%  (%d W / %d L)", win_rate, len(wins), len(losses))
     log.info("Total PnL:     %.4f", total_pnl)
     log.info("Avg PnL/trade: %.4f", avg_pnl)
+    r_vals = [t.r_mult for t in trades if t.r_mult is not None]
+    if r_vals:
+        log.info("Avg R:         %+.3f  (PnL / initial ATR risk, size-independent)", sum(r_vals) / len(r_vals))
+    avg_bps = sum(t.bps for t in trades) / len(trades)
+    log.info("Avg bps/trade: %+.1f  (round-trip spread+slip hurdle ≈ 1-3 bps)", avg_bps)
     log.info("Best trade:    %.4f", max(t.pnl for t in trades))
     log.info("Worst trade:   %.4f", min(t.pnl for t in trades))
 

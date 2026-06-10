@@ -46,10 +46,21 @@ class Trade:
     exit_time: pd.Timestamp
     exit_price: float
     exit_reason: str
+    risk: float = 0.0  # initial risk per share (entry − stop); 0 = unknown
     pnl: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.pnl = self.exit_price - self.entry_price
+
+    @property
+    def r_mult(self) -> float | None:
+        """PnL as a multiple of initial risk — size-independent."""
+        return self.pnl / self.risk if self.risk > 0 else None
+
+    @property
+    def bps(self) -> float:
+        """Return on notional in basis points — comparable against slippage cost."""
+        return self.pnl / self.entry_price * 10000
 
 
 def compute_signals(df: pd.DataFrame) -> pd.DataFrame:

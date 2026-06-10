@@ -101,20 +101,34 @@ def _pair_trades(records: list[dict]) -> list[dict]:
              and c.get("ts", "") > o["ts"]),
             None,
         )
+        entry = o.get("entry", 0.0)
+        stop = o.get("stop", 0.0)
+        qty = o.get("qty", 1) or 1
+        direction = o.get("direction", "long")
+        pnl = match.get("pnl") if match else None
+
+        # Size-independent metrics. R = PnL / initial risk; bps = return on notional.
+        risk_share = (entry - stop) if direction == "long" else (stop - entry)
+        r_mult = (pnl / (risk_share * qty)) if (pnl is not None and risk_share > 0) else None
+        bps = (pnl / (entry * qty) * 10000) if (pnl is not None and entry > 0) else None
+
         trades.append({
             "symbol": sym,
             "strategy": strat,
-            "entry": o.get("entry", 0.0),
-            "stop": o.get("stop", 0.0),
-            "qty": o.get("qty", 1),
-            "direction": o.get("direction", "long"),
+            "entry": entry,
+            "stop": stop,
+            "qty": qty,
+            "direction": direction,
+            "kdj_cross_age": o.get("kdj_cross_age"),
             "open_ts": o["ts"],
             "open_et": _to_et(o["ts"]),
             "close_ts": match["ts"] if match else None,
             "close_et": _to_et(match["ts"]) if match else None,
             "exit": match.get("exit") if match else None,
             "reason": match.get("reason") if match else None,
-            "pnl": match.get("pnl") if match else None,
+            "pnl": pnl,
+            "r_mult": r_mult,
+            "bps": bps,
             "hold_bars": match.get("hold_bars") if match else None,
             "closed": match is not None,
             "win": (match.get("pnl", 0) or 0) > 0 if match else None,
@@ -152,7 +166,8 @@ def _per_strategy(trades: list[dict]) -> None:
     for t in trades:
         by_strat[t["strategy"]].append(t)
 
-    header = f"  {'Strategy':<12} {'Trades':>6} {'W':>4} {'L':>4} {'Win%':>6} {'PnL':>8} {'PF':>6} {'AvgHold':>8}"
+    header = (f"  {'Strategy':<12} {'Trades':>6} {'W':>4} {'L':>4} {'Win%':>6} {'PnL':>8} "
+              f"{'PF':>6} {'AvgR':>6} {'AvgBps':>7} {'AvgHold':>8}")
     print(header)
     print("  " + "-" * (len(header) - 2))
     for strat in sorted(by_strat):
@@ -165,10 +180,16 @@ def _per_strategy(trades: list[dict]) -> None:
         gross_loss = abs(sum(t["pnl"] for t in closed if t["pnl"] and t["pnl"] < 0))
         pf = gross_win / gross_loss if gross_loss > 0 else float("inf")
         avg_hold = sum(t["hold_bars"] for t in closed if t["hold_bars"]) / len(closed) if closed else 0
+        r_vals = [t["r_mult"] for t in closed if t["r_mult"] is not None]
+        bps_vals = [t["bps"] for t in closed if t["bps"] is not None]
+        avg_r = f"{sum(r_vals)/len(r_vals):+.2f}" if r_vals else "—"
+        avg_bps = f"{sum(bps_vals)/len(bps_vals):+.1f}" if bps_vals else "—"
         win_pct = f"{100*len(wins)/len(closed):.0f}%" if closed else "—"
         pf_str = f"{pf:.2f}" if gross_loss > 0 else "∞" if gross_win > 0 else "—"
         print(f"  {strat:<12} {len(ts):>6} {len(wins):>4} {len(losses):>4} {win_pct:>6} "
-              f"{total_pnl:>+8.2f} {pf_str:>6} {avg_hold:>7.1f}b")
+              f"{total_pnl:>+8.2f} {pf_str:>6} {avg_r:>6} {avg_bps:>7} {avg_hold:>7.1f}b")
+    print("\n  AvgR = avg PnL / initial risk (entry−stop).  AvgBps = avg return on notional.")
+    print("  Slippage hurdle: SPY/QQQ/IWM round-trip spread+slip ≈ 1–3 bps. AvgBps must clear it.")
 
 
 def _time_of_day(trades: list[dict]) -> None:
@@ -389,6 +410,85 @@ def _bb_kdj_signals(records: list[dict], kdj_window: int = 3) -> None:
             print(f"    {reason:<35} ×{count}")
 
 
+def _bb_kdj_cross_age(trades: list[dict]) -> None:
+    """KDJ cross-age subset comparison — the w=0 vs w>0 dilution question.
+
+    Backtest: w=0 (same-bar cross) PF=2.131 vs w=3 (live) PF=1.107. Every live
+    trade logs kdj_cross_age, so we can check whether the pure same-bar subset
+    outperforms diluted window entries in forward data. Gate is in
+    docs/evaluation_criteria.md (3 months of data).
+    """
+    section("7b. BB+KDJ CROSS-AGE SUBSETS  (w=0 purity vs window dilution)")
+    bb = [t for t in trades if t["strategy"] == "bb_kdj" and t["closed"]]
+    if not bb:
+        print("  No closed bb_kdj trades yet.")
+        return
+    tagged = [t for t in bb if t.get("kdj_cross_age") is not None]
+    untagged = len(bb) - len(tagged)
+    if untagged:
+        print(f"  ({untagged} trade(s) predate cross-age logging — excluded)")
+    if not tagged:
+        return
+
+    subsets = {
+        "w=0 (same-bar cross)": [t for t in tagged if t["kdj_cross_age"] == 0],
+        "w>0 (window entries) ": [t for t in tagged if t["kdj_cross_age"] > 0],
+    }
+    print(f"  {'Subset':<24} {'Trades':>6} {'Win%':>6} {'PnL':>8} {'AvgR':>6}")
+    print("  " + "-" * 54)
+    for label, ts in subsets.items():
+        if not ts:
+            print(f"  {label:<24} {'0':>6} {'—':>6} {'—':>8} {'—':>6}")
+            continue
+        wins = sum(1 for t in ts if t["win"])
+        pnl = sum(t["pnl"] for t in ts if t["pnl"] is not None)
+        r_vals = [t["r_mult"] for t in ts if t["r_mult"] is not None]
+        avg_r = f"{sum(r_vals)/len(r_vals):+.2f}" if r_vals else "—"
+        print(f"  {label:<24} {len(ts):>6} {100*wins/len(ts):>5.0f}% {pnl:>+8.2f} {avg_r:>6}")
+
+    age_dist = Counter(t["kdj_cross_age"] for t in tagged)
+    print(f"\n  Cross-age distribution: " +
+          ", ".join(f"age {a}: {n}" for a, n in sorted(age_dist.items())))
+
+
+def _concurrency(trades: list[dict]) -> None:
+    section("9. CONCURRENT EXPOSURE  (live sessions)")
+    closed = [t for t in trades if t["closed"]]
+    if not closed:
+        print("  No closed trades.")
+        return
+    events = []
+    for t in closed:
+        notional = (t["entry"] or 0) * (t["qty"] or 1)
+        events.append((t["open_ts"], 1, notional))
+        events.append((t["close_ts"], -1, notional))
+    events.sort(key=lambda e: (e[0], -e[1]))
+
+    open_now, notional_now = 0, 0.0
+    peak_n, peak_notional, peak_at = 0, 0.0, None
+    stacked_entries = 0
+    for ts, delta, notional in events:
+        if delta == 1:
+            if open_now >= 1:
+                stacked_entries += 1
+            open_now += 1
+            notional_now += notional
+            if open_now > peak_n:
+                peak_n, peak_at = open_now, ts
+            peak_notional = max(peak_notional, notional_now)
+        else:
+            open_now -= 1
+            notional_now -= notional
+
+    print(f"  Peak simultaneous positions: {peak_n}" +
+          (f"  (at {peak_at})" if peak_n > 1 else ""))
+    print(f"  Peak combined notional:      ${peak_notional:,.0f}")
+    print(f"  Entries while ≥1 open:       {stacked_entries}/{len(closed)}")
+    print("\n  Historical context (scripts/analyze_portfolio.py on 2022-2026 backtests):")
+    print("  strategy daily-PnL correlations ≈ 0.04-0.08 (diversified), but 66% of")
+    print("  entries stack and worst combined day was -$27/share across 9 pairs.")
+
+
 def _daily_trend(trades: list[dict]) -> None:
     section("8. DAILY PnL TREND")
     closed = [t for t in trades if t["closed"] and t["pnl"] is not None]
@@ -462,7 +562,9 @@ def main() -> None:
     _vwap_pb_deep_dive(trades, records)
     _orb_filters(records)
     _bb_kdj_signals(records)
+    _bb_kdj_cross_age(trades)
     _daily_trend(trades)
+    _concurrency(trades)
     print()
 
 
