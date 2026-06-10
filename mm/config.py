@@ -98,6 +98,11 @@ class Config:
     vwap_pb_symbols: list[str] = [
         s.strip() for s in _get("VWAP_PB_SYMBOLS", "").split(",") if s.strip()
     ]
+    # No entries before this ET time. Sweep confirmed 10:00 >> 9:45 (opening noise).
+    # Format: "H:MM" e.g. "10:00". Default 10:00.
+    vwap_pb_min_entry_time: tuple[int, int] = (
+        lambda s: (int(s.split(":")[0]), int(s.split(":")[1]))
+    )(_get("VWAP_PB_MIN_ENTRY_TIME", "10:00"))
 
     # ORB strategy parameters
     # orb_minutes: opening range window in minutes (15 or 30). Default 15.

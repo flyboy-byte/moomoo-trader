@@ -715,7 +715,7 @@ def _eval_vwap_pb(
                      symbol, close, pnl_total, exit_reason)
             position = None
 
-    elif not is_time_stop and bar_clock >= dtime(9, 45):
+    elif not is_time_stop and bar_clock >= dtime(*cfg.vwap_pb_min_entry_time):
         wick_below = float(last["low"]) < vwap
         close_above = close > vwap
         no_chop = int(last.get("vwap_cross_count", 0)) <= cfg.vwap_pb_max_crosses
