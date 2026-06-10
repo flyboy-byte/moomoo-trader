@@ -329,12 +329,29 @@ def config_editor() -> Response | str:
 
 
 def _session_date() -> date:
-    """Return the session date — fixed override (--date) or today, computed fresh each call.
+    """Return the session date — ?date= param → --date override → today."""
+    if _date_override is not None:
+        return _date_override
+    try:
+        d_str = request.args.get("date")
+        if d_str:
+            return date.fromisoformat(d_str)
+    except RuntimeError:
+        pass
+    return date.today()
 
-    Must not be cached at module load: the dashboard runs as a long-lived service and
-    a frozen date silently strands it on the day it started (looked DEAD every day after).
-    """
-    return _date_override if _date_override is not None else date.today()
+
+def _available_dates() -> list[date]:
+    """Sorted descending list of dates that have at least one JSONL log file."""
+    dates: set[date] = set()
+    for f in cfg.logs_dir.glob("paper_US_*_*.jsonl"):
+        parts = f.stem.rsplit("_", 1)
+        if len(parts) == 2:
+            try:
+                dates.add(date.fromisoformat(parts[1]))
+            except ValueError:
+                pass
+    return sorted(dates, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -651,11 +668,36 @@ def _render_market_conditions(
     </div>"""
 
 
-def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "") -> str:
+def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "",
+            available_dates: list[date] | None = None) -> str:
     last_eval = evals[-1] if evals else None
     status_label, status_color = _runner_status(last_eval)
     now_str = datetime.now().strftime("%H:%M:%S")
-    date_str = _session_date().strftime("%Y-%m-%d (%A)")
+    sess_date = _session_date()
+    date_str = sess_date.strftime("%Y-%m-%d (%A)")
+    is_today = sess_date == date.today()
+
+    # Date nav
+    avail = available_dates or []
+    prev_date = next((d for d in avail if d < sess_date), None)
+    next_date = next((d for d in reversed(avail) if d > sess_date), None)
+    prev_link = f'<a href="/?date={prev_date}" style="color:#555;text-decoration:none" title="Previous session">◀</a>' if prev_date else '<span style="color:#2a2a2a">◀</span>'
+    next_link = f'<a href="/?date={next_date}" style="color:#555;text-decoration:none" title="Next session">▶</a>' if next_date else ('<a href="/" style="color:#555;text-decoration:none" title="Today">▶</a>' if not is_today else '<span style="color:#2a2a2a">▶</span>')
+    today_link = '' if is_today else '<a href="/" style="font-size:11px;color:#555;margin-left:4px" title="Jump to today">today</a>'
+    date_opts = "".join(
+        f'<option value="{d}" {"selected" if d == sess_date else ""}>{d.strftime("%Y-%m-%d (%a)")}</option>'
+        for d in avail
+    )
+    date_picker = f"""<span class="meta" style="display:flex;align-items:center;gap:5px">
+      {prev_link}
+      <form method="GET" style="display:inline;margin:0">
+        <select name="date" onchange="this.form.submit()" style="background:#1a1a1a;border:1px solid #333;color:#aaa;font-family:monospace;font-size:12px;padding:2px 4px;border-radius:3px">
+          {date_opts}
+        </select>
+      </form>
+      {next_link}{today_link}
+    </span>"""
+    auto_refresh = '<meta http-equiv="refresh" content="30">' if is_today else ''
 
     last_close = f"${last_eval['close']:.3f}" if last_eval else "—"
     last_score = str(last_eval.get("signal_score", "—")) if last_eval else "—"
@@ -742,7 +784,7 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="refresh" content="30">
+  {auto_refresh}
   <title>moomoo-trader</title>
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -769,8 +811,8 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
   <h1>moomoo-trader</h1>
 
   <div class="status-bar">
-    <span class="runner-status">{status_label}</span>
-    <span class="meta">date: {date_str}</span>
+    <span class="runner-status">{status_label if is_today else f'HISTORY · {date_str}'}</span>
+    {date_picker}
     <span class="meta">mode: {cfg.strategy_mode}</span>
     <span class="meta">symbol: {', '.join(cfg.symbols)}</span>
     <span class="meta">last price: {last_close}  score: {last_score}</span>
@@ -828,12 +870,13 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
 
 @app.route("/")
 def index() -> str:
+    avail = _available_dates()
     summary = load_summary(_session_date())
     evals = _load_recent_evals()
     latest = _load_latest_evals_by_symbol()
     skips = _load_recent_skips()
     market_cond_html = _render_market_conditions(latest, skips)
-    return _render(summary, evals, market_cond_html)
+    return _render(summary, evals, market_cond_html, available_dates=avail)
 
 
 # ---------------------------------------------------------------------------
