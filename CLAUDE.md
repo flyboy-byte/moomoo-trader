@@ -190,6 +190,18 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
     (300 trades/4yr per symbol) makes per-hour improvement unreliable. Session filter code
     exists in strategy.py (blocked_hours param) and sweep script for future reference.
 
+15. Reconcile fill-latency race (2026-06-10): first VWAP PB trade under 10:00 filter VOIDED.
+    QQQ limit BUY placed 10:10 ET pended 5.5 min (price above limit); periodic broker
+    reconciliation ran at minute 4, saw no broker position, cleared local state; order then
+    filled at 706.67 and was never exit-managed (rode 707→695 unmanaged). Managed exit would
+    have been VWAP_LOST 10:50 ET, −$1.08. Fix in _reconcile_positions: check entry-order
+    status before clearing (FILLED → keep, position list lagging; PENDING within 30-min
+    grace → keep; PENDING past grace → cancel order + clear; CANCELLED/unknown-old → clear).
+    7 tests in tests/test_paper.py::TestReconcile. Trade does not count toward the 20-trade
+    gate (see docs/evaluation_criteria.md amendment log). Simulate account holds orphaned
+    shares (QQQ 2, SPY 2, IWM 1) from this + earlier sessions — they don't affect strategy
+    bookkeeping (PnL computed from entry/exit prices, not broker positions).
+
 13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
     Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5
     while EMA5>EMA20), with ADX filter [20/25/30] and ATR target [0.5/1.0/1.5/2.0×].

@@ -207,6 +207,27 @@ def _clear_position(symbol: str, strategy: str) -> None:
         path.unlink()
 
 
+_RECONCILE_GRACE_MINUTES = 30  # pending entry orders younger than this are left alone
+
+_FILLED_STATUSES = {"FILLED_ALL", "FILLED_PART"}
+_PENDING_STATUSES = {"WAITING_SUBMIT", "SUBMITTING", "SUBMITTED", "NONE", "UNSUBMITTED"}
+
+
+def _order_status(tctx, acc_id: int, order_id: str) -> str | None:
+    """Return the broker's status string for an order, or None if unknown."""
+    if not order_id:
+        return None
+    try:
+        ret, df = tctx.order_list_query(order_id=str(order_id),
+                                        trd_env=TrdEnv.SIMULATE, acc_id=acc_id)
+    except Exception as e:
+        log.warning("order_list_query failed for %s: %s", order_id, e)
+        return None
+    if ret != RET_OK or df.empty:
+        return None
+    return str(df.iloc[0]["order_status"])
+
+
 def _reconcile_positions(
     tctx, acc_id: int,
     positions: dict[tuple[str, str], "PaperPosition | None"],
@@ -215,9 +236,16 @@ def _reconcile_positions(
     """Compare local position state against the broker's actual open positions.
 
     If the broker shows no position for a symbol where we have local state,
-    the trade was likely closed externally (API rejection, manual cancel, restart).
-    We clear the stale local state so the runner doesn't try to exit a ghost position.
-    Runs once at startup after acc_id is obtained.
+    check the entry order's status before assuming the trade is a ghost:
+    limit orders placed at candle close can sit pending for minutes (SIMULATE
+    fill latency), and position_list_query can lag a fresh fill. Clearing in
+    that window orphans a real position with no exit management (this happened
+    live 2026-06-10: order pended 5.5 min, reconcile cleared at minute 4).
+
+    - Order filled       → keep local state (position list is lagging).
+    - Order pending and position younger than grace → keep, fill may come.
+    - Order pending past grace → cancel order, clear (entry never happened).
+    - Order cancelled/failed/unknown → clear (genuine ghost).
     """
     try:
         ret, df = tctx.position_list_query(trd_env=TrdEnv.SIMULATE, acc_id=acc_id)
@@ -235,17 +263,43 @@ def _reconcile_positions(
             if float(row.get("qty", 0)) != 0:
                 broker_syms.add(str(row["stock_code"]))
 
+    now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+
     any_local = False
     for (sym, strat), pos in list(positions.items()):
         if pos is None:
             continue
         any_local = True
         if sym not in broker_syms:
+            status = _order_status(tctx, acc_id, pos.order_id)
+            age_min = (now_et - pd.Timestamp(pos.entry_time).to_pydatetime()).total_seconds() / 60
+
+            if status in _FILLED_STATUSES:
+                log.info("RECONCILE OK [%s/%s]: order %s is %s — position list lagging, keeping",
+                         sym, strat, pos.order_id, status)
+                continue
+            if (status in _PENDING_STATUSES or (status is None and pos.order_id)) \
+                    and age_min < _RECONCILE_GRACE_MINUTES:
+                log.info("RECONCILE WAIT [%s/%s]: entry order %s status=%s (%.0f min old) — keeping",
+                         sym, strat, pos.order_id, status, age_min)
+                continue
+            if status in _PENDING_STATUSES:
+                # Stale unfilled entry — cancel so it can't fill later unmanaged.
+                try:
+                    from moomoo import ModifyOrderOp
+                    tctx.modify_order(ModifyOrderOp.CANCEL, pos.order_id, 0, 0,
+                                      trd_env=TrdEnv.SIMULATE, acc_id=acc_id)
+                    log.warning("RECONCILE: cancelled stale pending entry order %s", pos.order_id)
+                except Exception as e:
+                    log.error("RECONCILE: failed to cancel stale order %s: %s — cancel manually",
+                              pos.order_id, e)
+
             msg = (f"RECONCILE MISMATCH [{sym}/{strat}]: local entry={pos.entry_price:.4f} "
-                   f"but broker has no {sym} position — clearing")
+                   f"but broker has no {sym} position (order status={status}) — clearing")
             log.error(msg)
             elogs[sym].error(
-                f"reconcile_mismatch strat={strat} local_entry={pos.entry_price} broker=none cleared",
+                f"reconcile_mismatch strat={strat} local_entry={pos.entry_price} "
+                f"order_status={status} cleared",
                 strategy=strat,
             )
             notify(f"[PAPER] CRITICAL: {msg}")

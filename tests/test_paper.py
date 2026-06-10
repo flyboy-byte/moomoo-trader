@@ -215,3 +215,97 @@ class TestEntryAttempted:
         p._entry_attempted[("US.SPY", "bb_kdj")] = "2026-06-08 09:45:00"
         p2 = _reload_paper(monkeypatch, {})
         assert len(p2._entry_attempted) == 0
+
+
+# ---------------------------------------------------------------------------
+# _reconcile_positions() — fill-latency race (live bug 2026-06-10: limit order
+# pended 5.5 min, reconcile cleared local state at minute 4, fill came at 5.7,
+# position rode unmanaged from 707 to 695)
+# ---------------------------------------------------------------------------
+
+class TestReconcile:
+
+    def _setup(self, monkeypatch, *, broker_positions, order_status,
+               entry_age_minutes):
+        paper = _reload_paper(monkeypatch, {})
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+        pos = paper.PaperPosition(
+            symbol="US.QQQ", strategy="vwap_pb",
+            entry_time=now_et - timedelta(minutes=entry_age_minutes),
+            entry_price=707.20, stop_price=703.95, qty=1, order_id="665395",
+        )
+        positions = {("US.QQQ", "vwap_pb"): pos}
+        elogs = {"US.QQQ": MagicMock()}
+
+        ctx = MagicMock()
+        if broker_positions:
+            pos_df = pd.DataFrame({"stock_code": broker_positions,
+                                   "qty": [1.0] * len(broker_positions)})
+        else:
+            pos_df = pd.DataFrame()
+        ctx.position_list_query.return_value = (RET_OK, pos_df)
+        if order_status is None:
+            ctx.order_list_query.return_value = (RET_OK, pd.DataFrame())
+        else:
+            ctx.order_list_query.return_value = (
+                RET_OK, pd.DataFrame({"order_status": [order_status]}))
+        # don't touch real position state files
+        monkeypatch.setattr(paper, "_clear_position", MagicMock())
+        monkeypatch.setattr(paper, "notify", MagicMock())
+        return paper, ctx, positions
+
+    def test_broker_confirms_position_kept(self, monkeypatch):
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=["US.QQQ"],
+            order_status="FILLED_ALL", entry_age_minutes=5)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is not None
+
+    def test_filled_order_kept_despite_missing_broker_position(self, monkeypatch):
+        """Position list lags a fresh fill — must NOT clear."""
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=[],
+            order_status="FILLED_ALL", entry_age_minutes=4)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is not None
+
+    def test_pending_order_within_grace_kept(self, monkeypatch):
+        """The exact live race: order SUBMITTED but unfilled at minute 4."""
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=[],
+            order_status="SUBMITTED", entry_age_minutes=4)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is not None
+
+    def test_pending_order_past_grace_cancelled_and_cleared(self, monkeypatch):
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=[],
+            order_status="SUBMITTED", entry_age_minutes=45)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is None
+        assert ctx.modify_order.called
+
+    def test_cancelled_order_cleared(self, monkeypatch):
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=[],
+            order_status="CANCELLED_ALL", entry_age_minutes=5)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is None
+
+    def test_unknown_status_young_position_kept(self, monkeypatch):
+        """Transient order_list_query miss must not clear a fresh position."""
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=[],
+            order_status=None, entry_age_minutes=4)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is not None
+
+    def test_unknown_status_old_position_cleared(self, monkeypatch):
+        paper, ctx, positions = self._setup(
+            monkeypatch, broker_positions=[],
+            order_status=None, entry_age_minutes=45)
+        paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
+        assert positions[("US.QQQ", "vwap_pb")] is None

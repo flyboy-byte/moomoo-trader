@@ -74,3 +74,11 @@ strategy, but most execution-sensitive (breakout fills are competitive).
 ## Amendment log
 
 - 2026-06-10: Initial version.
+- 2026-06-10 (post-close): VWAP PB trade #1 (QQQ, entry 10:10 ET @ 707.20) VOIDED — does
+  not count toward the 20-trade gate. The entry limit order pended 5.5 min; periodic broker
+  reconciliation ran at minute 4, saw no broker position, and cleared local state. The order
+  then filled at 706.67 and the position was never exit-managed (rode to 695 unmanaged).
+  Entry logic itself was correct (10:00 filter, cross_count=1, flush-and-reclaim all valid).
+  Hypothetical managed exit: VWAP_LOST at 10:50 ET @ 706.12 = −$1.08. Not counted either way.
+  Fix: reconcile now checks entry-order status (filled → keep; pending within 30-min grace →
+  keep; pending past grace → cancel + clear). VWAP PB gate counter remains 0/20.

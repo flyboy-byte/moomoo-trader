@@ -24,6 +24,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers (same patterns as diagnose_logs.py)
@@ -368,18 +370,27 @@ def _bb_kdj_signals(records: list[dict], kdj_window: int = 3) -> None:
             seen[key] = r
             sym_date_bars[(r.get("_sym", ""), r.get("ts", "")[:10])].append(r)
 
+    # Per-symbol window overrides (e.g. US.SPY:0 requires same-bar cross live)
+    try:
+        from mm.config import cfg
+        overrides = cfg.kdj_window_overrides
+    except Exception:
+        overrides = {}
+
     would_fire = []
-    for bars in sym_date_bars.values():
+    for (sym, _), bars in sym_date_bars.items():
+        w = overrides.get(sym, kdj_window)
         bars.sort(key=lambda r: r["candle_ts"])
         for i, r in enumerate(bars):
             if not r["signals"].get("bb_touch") or r.get("bonus_score", 0) < 2:
                 continue
-            start = max(0, i - kdj_window)
+            start = max(0, i - w)
             if any(b["signals"].get("kdj_cross") for b in bars[start:i + 1]):
                 would_fire.append(r)
 
-    print(f"\n  With w={kdj_window} rolling window (mirrors live runner logic):")
-    print(f"    bb_touch + kdj_w{kdj_window} + bonus≥2: {len(would_fire):>4}  ← actual would-fire count")
+    ov_note = f", overrides={overrides}" if overrides else ""
+    print(f"\n  With w={kdj_window} rolling window (mirrors live runner logic{ov_note}):")
+    print(f"    bb_touch + kdj_w + bonus≥2: {len(would_fire):>4}  ← actual would-fire count")
 
     if would_fire:
         # Show each would-fire bar and what happened
