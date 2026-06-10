@@ -171,6 +171,22 @@ def logout() -> Response:
 @app.route("/config", methods=["GET", "POST"])
 @_require_login
 def config_editor() -> Response | str:
+    if not cfg.dashboard_password:
+        return render_template_string(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Config — moomoo-trader</title>
+<style>{_CSS_BASE}</style></head>
+<body>
+  <h1>moomoo-trader &nbsp;<span style="color:#555;font-size:13px">/ config</span></h1>
+  <a href="/">← back to dashboard</a>
+  <div class="card" style="margin-top:20px;border-left:3px solid #f44336">
+    <h2 style="color:#f44336">CONFIG EDITOR DISABLED</h2>
+    <p style="margin-top:10px;color:#aaa">
+      Set <code>DASHBOARD_PASSWORD=yourpassword</code> in <code>.env</code> and restart
+      the dashboard service to enable the config editor.<br><br>
+      Without a password the editor is open to anyone who can reach port 8080.
+    </p>
+  </div>
+</body></html>""")
     msg = ""
     msg_type = "ok"
 

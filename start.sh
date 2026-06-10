@@ -32,10 +32,13 @@ if [[ "$MAX_POS" =~ ^[0-9]+\.?[0-9]*$ ]] && awk "BEGIN{exit !($MAX_POS < 200)}";
     echo ""
 fi
 
-# Remove stale kill switch if present
+# Abort if kill switch is active — never silently override an intentional pause
 if [ -f STOP_TRADING.txt ]; then
-    echo "WARNING: STOP_TRADING.txt exists — removing it so trading is allowed."
-    rm STOP_TRADING.txt
+    echo ""
+    echo "ERROR: STOP_TRADING.txt exists — trading is intentionally paused."
+    echo "       Remove it manually to resume:  rm STOP_TRADING.txt"
+    echo ""
+    exit 1
 fi
 
 # Start paper runner

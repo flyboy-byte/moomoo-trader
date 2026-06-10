@@ -1,7 +1,7 @@
 # moomoo-trader
 
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
-![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen)
 ![Trading](https://img.shields.io/badge/trading-paper%20only-orange)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -95,7 +95,7 @@ Filter: OR range must be 0.1%–0.8% of price (skips flat opens and news spikes)
 | Total PnL | +$346 |
 | Profit factor | 1.215 |
 
-> *Live runner is long-only. Short entries require margin handling not yet wired up.*
+> *Short entries are enabled by default (`ORB_SHORTS_ENABLED=true`). Disable via `touch STOP_SHORTS.txt` or the config editor.*
 
 ---
 
@@ -108,7 +108,7 @@ Entry:  low < VWAP  (wick below)
         AND close > VWAP  (closes above — buyers defended)
         AND session VWAP cross count ≤ 1  (no-chop filter)
         AND volume < 20-bar MA  (quiet pullback, not distribution)
-        AND bar time ≥ 09:45 ET
+        AND bar time ≥ 10:00 ET
 
 Exit:   close < VWAP  (level lost)
      OR close < entry − 1.0 × ATR(14)  (stop)
@@ -182,7 +182,7 @@ python scripts/dashboard.py         # terminal dashboard in a second window
 | `MAX_POSITION_DOLLARS` | `50` | Max notional per trade — **raise before trading** |
 | `SYMBOL_SIZE_OVERRIDES` | _(empty)_ | Per-symbol cap: `US.IWM:300,US.SPY:600` |
 | `MAX_TRADES_PER_DAY` | `3` | Daily trade limit across all strategies combined |
-| `MAX_DAILY_LOSS` | `5` | Daily loss limit in dollars |
+| `MAX_DAILY_LOSS` | `20` | Daily loss limit in dollars |
 | `ATR_STOP_MULT` | `1.0` | BB+KDJ stop multiplier (1.0 validated optimal) |
 | `MIN_SIGNAL_SCORE` | `2` | Bonus signals required for BB+KDJ entry (0–3) |
 | `KDJ_WINDOW_BARS` | `0` | Look back N bars for KDJ cross at BB touch (3 = 10× more signals) |
@@ -291,5 +291,5 @@ sync_logs.sh               rsync VPS logs → local logs/
 ## Tests
 
 ```bash
-python -m pytest tests/ -q    # 89 tests: risk, indicators, signals, strategy, orb
+python -m pytest tests/ -q    # 141 tests: risk, indicators, signals, strategy, orb
 ```
