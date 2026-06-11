@@ -82,3 +82,8 @@ strategy, but most execution-sensitive (breakout fills are competitive).
   Hypothetical managed exit: VWAP_LOST at 10:50 ET @ 706.12 = −$1.08. Not counted either way.
   Fix: reconcile now checks entry-order status (filled → keep; pending within 30-min grace →
   keep; pending past grace → cancel + clear). VWAP PB gate counter remains 0/20.
+- 2026-06-10 (post-close, audit): ORB trades #1–2 (Jun 4 SPY +$2.92, QQQ +$2.52) reclassified
+  as UNVERIFIED — broker history shows neither exit executed (SPY sell cancelled unfilled at
+  EOD; QQQ sell order failed outright). Entries and signal logic were valid; recorded PnL is
+  model PnL, not executed PnL. ORB gate counter resets to 0/30 effective with the
+  fill-confirmation deploy (2026-06-10). All gates now evaluate on confirmed-fill PnL only.

@@ -202,6 +202,21 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
     shares (QQQ 2, SPY 2, IWM 1) from this + earlier sessions — they don't affect strategy
     bookkeeping (PnL computed from entry/exit prices, not broker positions).
 
+16. Execution layer rebuilt with fill confirmation (2026-06-10). Audit of broker order
+    history proved the old fire-and-forget layer recorded fiction: June 4 QQQ ORB exit
+    order FAILED outright yet +$2.52 was booked; June 4 SPY ORB exit sat unfilled all day
+    (cancelled EOD) yet +$2.92 was booked — so ORB's "2/2" record never executed at the
+    broker, and that's where the orphaned simulate shares came from. Entries also pended
+    up to 28 min and filled at different prices than recorded (slippage_bps always logged 0).
+    Now: _execute_entry places the limit at the signal close, polls _confirm_fill (~20s);
+    unfilled → cancel, no trade (entry_unfilled signal_skip). _execute_exit places a
+    MARKETABLE limit (0.3% buffer, 1% retry), confirms; unfilled → position stays open and
+    retries next poll (never books an unconfirmed close). All PnL now uses actual
+    dealt_avg_price; intended_price logged alongside so slippage telemetry is real.
+    Plus: market-hours guard inside _place_* (June 1 history showed after-hours orders
+    pending overnight), reconcile runs periodically even when flat (orphan detection),
+    scripts/flatten_simulate.py cleans orphaned broker shares. 159 tests.
+
 13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
     Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5
     while EMA5>EMA20), with ADX filter [20/25/30] and ATR target [0.5/1.0/1.5/2.0×].

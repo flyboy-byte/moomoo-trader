@@ -208,6 +208,7 @@ def _clear_position(symbol: str, strategy: str) -> None:
 
 
 _RECONCILE_GRACE_MINUTES = 30  # pending entry orders younger than this are left alone
+_orphan_warned: set[str] = set()  # symbols already flagged as broker-only orphans this run
 
 _FILLED_STATUSES = {"FILLED_ALL", "FILLED_PART"}
 _PENDING_STATUSES = {"WAITING_SUBMIT", "SUBMITTING", "SUBMITTED", "NONE", "UNSUBMITTED"}
@@ -308,15 +309,17 @@ def _reconcile_positions(
         else:
             log.info("RECONCILE OK [%s/%s]: broker confirms %s position", sym, strat, sym)
 
-    # Warn about broker positions with no local tracking
+    # Warn about broker positions with no local tracking (once per symbol per run)
     for bsym in broker_syms:
         if not any(sym == bsym and pos is not None for (sym, _), pos in positions.items()):
-            log.warning(
-                "RECONCILE WARNING: broker has %s position but no local state — investigate manually", bsym
-            )
+            if bsym not in _orphan_warned:
+                _orphan_warned.add(bsym)
+                log.warning(
+                    "RECONCILE WARNING: broker has %s position but no local state — investigate manually", bsym
+                )
 
     if not any_local:
-        log.info("RECONCILE: no local positions to verify")
+        log.debug("RECONCILE: no local positions to verify")
 
 
 def _orb_traded_file(symbol: str) -> Path:
@@ -371,6 +374,9 @@ def _get_simulate_acc_id(ctx: OpenSecTradeContext) -> int:
 
 
 def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    if not market_open():
+        log.error("Order refused (market closed): BUY %s", symbol)
+        return ""
     price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
@@ -386,6 +392,9 @@ def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    if not market_open():
+        log.error("Order refused (market closed): SELL %s", symbol)
+        return ""
     price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
@@ -401,6 +410,9 @@ def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    if not market_open():
+        log.error("Order refused (market closed): SELL_SHORT %s", symbol)
+        return ""
     price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
@@ -416,6 +428,9 @@ def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
+    if not market_open():
+        log.error("Order refused (market closed): BUY_BACK %s", symbol)
+        return ""
     price = round(price, 2)
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
@@ -428,6 +443,140 @@ def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
         return order_id
     log.error("BUY_BACK failed: %s", data)
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Order execution with fill confirmation
+#
+# Limit orders at a stale candle close are NOT guaranteed to fill: live history
+# shows entries pending 5-28 min and exit sells cancelled unfilled at EOD while
+# the runner had already booked the PnL. A trade only exists once the broker
+# confirms the fill, and PnL is computed from the actual fill price.
+# ---------------------------------------------------------------------------
+
+_FILL_TIMEOUT_S = 20
+_FILL_POLL_S = 2
+_CANCEL_RECHECK_S = 6  # post-cancel re-check window (cancel can race a fill)
+_EXIT_BUFFERS = (0.003, 0.01)  # marketable-limit buffers: first try, aggressive retry
+_TERMINAL_STATUSES = {"CANCELLED_ALL", "CANCELLED_PART", "FAILED", "DISABLED", "DELETED"}
+
+
+def _confirm_fill(tctx, acc_id: int, order_id: str,
+                  timeout_s: float | None = None) -> tuple[str | None, float, float | None]:
+    """Poll an order until filled, terminal, or timeout.
+
+    Returns (status, dealt_qty, dealt_avg_price). dealt_avg_price is None
+    if nothing was filled.
+    """
+    deadline = time.monotonic() + (timeout_s if timeout_s is not None else _FILL_TIMEOUT_S)
+    status: str | None = None
+    dealt = 0.0
+    price: float | None = None
+    while True:
+        try:
+            ret, df = tctx.order_list_query(order_id=str(order_id),
+                                            trd_env=TrdEnv.SIMULATE, acc_id=acc_id)
+            if ret == RET_OK and not df.empty:
+                row = df.iloc[0]
+                status = str(row["order_status"])
+                dealt = float(row.get("dealt_qty", 0) or 0)
+                price = float(row["dealt_avg_price"]) if dealt > 0 else None
+                if status == "FILLED_ALL" or status in _TERMINAL_STATUSES:
+                    return status, dealt, price
+        except Exception as e:
+            log.warning("confirm_fill query failed for order %s: %s", order_id, e)
+        if time.monotonic() >= deadline:
+            return status, dealt, price
+        time.sleep(_FILL_POLL_S)
+
+
+def _cancel_order(tctx, acc_id: int, order_id: str) -> bool:
+    try:
+        from moomoo import ModifyOrderOp
+        ret, data = tctx.modify_order(ModifyOrderOp.CANCEL, order_id, 0, 0,
+                                      trd_env=TrdEnv.SIMULATE, acc_id=acc_id)
+        if ret == RET_OK:
+            return True
+        log.error("Cancel failed for order %s: %s", order_id, data)
+    except Exception as e:
+        log.error("Cancel exception for order %s: %s", order_id, e)
+    return False
+
+
+def _execute_entry(tctx, acc_id: int, symbol: str, qty: int | float, intended: float,
+                   strategy: str, elog: "PaperEventLog",
+                   direction: str = "long") -> tuple[str, float, float] | None:
+    """Place an entry limit at the signal price and wait for the fill.
+
+    Returns (order_id, fill_price, fill_qty) on a confirmed fill. Returns None
+    if the order failed or didn't fill in the window — the order is cancelled
+    and NO position exists. Chasing a moved price is not the strategy's signal.
+    """
+    side = "SELL_SHORT" if direction == "short" else "BUY"
+    place = _place_short if direction == "short" else _place_buy
+    elog.order_attempt(side, qty, intended, strategy=strategy)
+    order_id = place(tctx, acc_id, symbol, intended, qty)
+    elog.order_result(side, success=bool(order_id), order_id=order_id, strategy=strategy)
+    if not order_id:
+        return None
+
+    status, dealt, fill = _confirm_fill(tctx, acc_id, order_id)
+    if dealt <= 0:
+        _cancel_order(tctx, acc_id, order_id)
+        # The cancel can race a fill — re-check before declaring no trade.
+        status, dealt, fill = _confirm_fill(tctx, acc_id, order_id, timeout_s=_CANCEL_RECHECK_S)
+    if dealt > 0 and fill is not None:
+        slip = (fill - intended) / intended * 10000
+        log.info("%-8s [%s] entry fill confirmed %.4f (intended %.4f, slip %+.1f bps)",
+                 symbol, strategy, fill, intended, slip)
+        return order_id, fill, dealt
+
+    log.warning("%-8s [%s] entry order %s not filled (status=%s) — no trade",
+                symbol, strategy, order_id, status)
+    elog.signal_skip("entry_unfilled", score=0, bonus=0, min_score=0, strategy=strategy)
+    return None
+
+
+def _execute_exit(tctx, acc_id: int, symbol: str, position: "PaperPosition",
+                  intended: float, reason: str, elog: "PaperEventLog") -> float | None:
+    """Place a marketable exit limit and wait for the fill.
+
+    Sells slightly below / covers slightly above the candle close so the limit
+    is immediately marketable (the close is minutes stale; a sell above market
+    pends and dies at EOD — proven live 2026-06-04). Returns the actual fill
+    price, or None if the exit could not be executed — the caller must keep
+    the position open and retry on the next poll.
+    """
+    is_short = position.direction == "short"
+    side = "BUY_BACK" if is_short else "SELL"
+    place = _place_cover if is_short else _place_sell
+
+    for buf in _EXIT_BUFFERS:
+        limit = intended * (1 + buf) if is_short else intended * (1 - buf)
+        elog.order_attempt(side, position.qty, limit, strategy=position.strategy)
+        order_id = place(tctx, acc_id, symbol, limit, position.qty)
+        elog.order_result(side, success=bool(order_id), order_id=order_id,
+                          strategy=position.strategy)
+        if not order_id:
+            continue
+        status, dealt, fill = _confirm_fill(tctx, acc_id, order_id)
+        if dealt <= 0:
+            _cancel_order(tctx, acc_id, order_id)
+            status, dealt, fill = _confirm_fill(tctx, acc_id, order_id, timeout_s=_CANCEL_RECHECK_S)
+        if dealt > 0 and fill is not None:
+            if dealt < float(position.qty):
+                log.warning("%-8s [%s] exit PARTIAL fill %.6f/%.6f at %.4f",
+                            symbol, position.strategy, dealt, float(position.qty), fill)
+            return fill
+        log.warning("%-8s [%s] exit order %s not filled (status=%s, buffer=%.1f%%)",
+                    symbol, position.strategy, order_id, status, buf * 100)
+
+    msg = (f"EXIT UNFILLED [{symbol}/{position.strategy}] reason={reason} — "
+           f"position stays open, retrying next poll")
+    log.error(msg)
+    elog.error(f"exit_unfilled reason={reason}", strategy=position.strategy)
+    notify(f"[PAPER] CRITICAL: {msg}")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -586,22 +735,21 @@ def _eval_bb_kdj(
                                         price=close, max_dollars=cap)
                     else:
                         stop = close - cfg.atr_stop_mult * float(last["atr"])
-                        elog.order_attempt("BUY", qty, close, strategy="bb_kdj")
-                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                        elog.order_result("BUY", success=bool(order_id),
-                                          order_id=order_id, strategy="bb_kdj")
-                        if order_id:
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                                "bb_kdj", elog)
+                        if filled:
+                            order_id, fill_price, fill_qty = filled
                             position = PaperPosition(
                                 symbol=symbol, strategy="bb_kdj",
-                                entry_time=candle_ts, entry_price=close,
-                                stop_price=stop, qty=qty, order_id=order_id,
+                                entry_time=candle_ts, entry_price=fill_price,
+                                stop_price=stop, qty=fill_qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="bb_kdj", intended_price=close,
-                                               kdj_cross_age=cross_age)
-                            notify_entry(symbol, close, stop)
+                            elog.position_open(fill_price, stop, fill_qty, strategy="bb_kdj",
+                                               intended_price=close, kdj_cross_age=cross_age)
+                            notify_entry(symbol, fill_price, stop)
                             log.info("%-8s [bb_kdj] OPEN  entry=%.4f stop=%.4f qty=%s",
-                                     symbol, close, stop, qty)
+                                     symbol, fill_price, stop, fill_qty)
         elif core_met:
             log.info("%-8s [bb_kdj] SKIP  bonus=%d < %d", symbol, bonus, cfg.min_signal_score)
             elog.signal_skip("bonus_below_threshold", score=sig.score,
@@ -616,19 +764,19 @@ def _eval_bb_kdj(
             exit_reason = "STOP_LOSS"
 
         if exit_reason:
-            pnl_per_share = close - position.entry_price
-            pnl_total = pnl_per_share * position.qty
-            elog.order_attempt("SELL", position.qty, close, strategy="bb_kdj")
-            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
-            elog.order_result("SELL", success=bool(order_id),
-                              order_id=order_id, strategy="bb_kdj")
+            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
+                                       exit_reason, elog)
+            if fill_price is None:
+                return position  # exit unfilled — keep position, retry next poll
+            pnl_total = (fill_price - position.entry_price) * position.qty
             hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="bb_kdj")
             _clear_position(symbol, "bb_kdj")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars, strategy="bb_kdj", direction="long")
-            notify_exit(symbol, close, exit_reason, pnl_total)
+            elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars,
+                                strategy="bb_kdj", direction="long", intended_price=close)
+            notify_exit(symbol, fill_price, exit_reason, pnl_total)
             log.info("%-8s [bb_kdj] CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, close, pnl_total, exit_reason)
+                     symbol, fill_price, pnl_total, exit_reason)
             position = None
 
     return position
@@ -677,21 +825,21 @@ def _eval_vwap(
                                         price=close, max_dollars=cap)
                     else:
                         stop = close - cfg.vwap_stop_mult * float(last["atr"])
-                        elog.order_attempt("BUY", qty, close, strategy="vwap")
-                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                        elog.order_result("BUY", success=bool(order_id),
-                                          order_id=order_id, strategy="vwap")
-                        if order_id:
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                                "vwap", elog)
+                        if filled:
+                            order_id, fill_price, fill_qty = filled
                             position = PaperPosition(
                                 symbol=symbol, strategy="vwap",
-                                entry_time=candle_ts, entry_price=close,
-                                stop_price=stop, qty=qty, order_id=order_id,
+                                entry_time=candle_ts, entry_price=fill_price,
+                                stop_price=stop, qty=fill_qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="vwap", intended_price=close)
-                            notify_entry(symbol, close, stop)
+                            elog.position_open(fill_price, stop, fill_qty, strategy="vwap",
+                                               intended_price=close)
+                            notify_entry(symbol, fill_price, stop)
                             log.info("%-8s [vwap]   OPEN  entry=%.4f stop=%.4f qty=%s",
-                                     symbol, close, stop, qty)
+                                     symbol, fill_price, stop, fill_qty)
     else:
         from datetime import time as dtime
         exit_reason: str | None = None
@@ -704,19 +852,19 @@ def _eval_vwap(
             exit_reason = "VWAP_STOP"
 
         if exit_reason:
-            pnl_per_share = close - position.entry_price
-            pnl_total = pnl_per_share * position.qty
-            elog.order_attempt("SELL", position.qty, close, strategy="vwap")
-            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
-            elog.order_result("SELL", success=bool(order_id),
-                              order_id=order_id, strategy="vwap")
+            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
+                                       exit_reason, elog)
+            if fill_price is None:
+                return position  # exit unfilled — keep position, retry next poll
+            pnl_total = (fill_price - position.entry_price) * position.qty
             hold_bars_vwap = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="vwap")
             _clear_position(symbol, "vwap")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vwap, strategy="vwap", direction="long")
-            notify_exit(symbol, close, exit_reason, pnl_total)
+            elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars_vwap,
+                                strategy="vwap", direction="long", intended_price=close)
+            notify_exit(symbol, fill_price, exit_reason, pnl_total)
             log.info("%-8s [vwap]   CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, close, pnl_total, exit_reason)
+                     symbol, fill_price, pnl_total, exit_reason)
             position = None
 
     return position
@@ -774,19 +922,19 @@ def _eval_vwap_pb(
             exit_reason = "STOP"
 
         if exit_reason:
-            pnl_per_share = close - position.entry_price
-            pnl_total = pnl_per_share * position.qty
-            elog.order_attempt("SELL", position.qty, close, strategy="vwap_pb")
-            order_id = _place_sell(tctx, acc_id, symbol, close, position.qty)
-            elog.order_result("SELL", success=bool(order_id),
-                              order_id=order_id, strategy="vwap_pb")
+            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
+                                       exit_reason, elog)
+            if fill_price is None:
+                return position  # exit unfilled — keep position, retry next poll
+            pnl_total = (fill_price - position.entry_price) * position.qty
             hold_bars_vp = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="vwap_pb")
             _clear_position(symbol, "vwap_pb")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_vp, strategy="vwap_pb", direction="long")
-            notify_exit(symbol, close, exit_reason, pnl_total)
+            elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars_vp,
+                                strategy="vwap_pb", direction="long", intended_price=close)
+            notify_exit(symbol, fill_price, exit_reason, pnl_total)
             log.info("%-8s [vwap_pb] CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, close, pnl_total, exit_reason)
+                     symbol, fill_price, pnl_total, exit_reason)
             position = None
 
     elif not is_time_stop and bar_clock >= dtime(*cfg.vwap_pb_min_entry_time):
@@ -813,21 +961,21 @@ def _eval_vwap_pb(
                                         price=close, max_dollars=cap)
                     else:
                         stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
-                        elog.order_attempt("BUY", qty, close, strategy="vwap_pb")
-                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                        elog.order_result("BUY", success=bool(order_id),
-                                          order_id=order_id, strategy="vwap_pb")
-                        if order_id:
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                                "vwap_pb", elog)
+                        if filled:
+                            order_id, fill_price, fill_qty = filled
                             position = PaperPosition(
                                 symbol=symbol, strategy="vwap_pb",
-                                entry_time=candle_ts, entry_price=close,
-                                stop_price=stop, qty=qty, order_id=order_id,
+                                entry_time=candle_ts, entry_price=fill_price,
+                                stop_price=stop, qty=fill_qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="vwap_pb", intended_price=close)
-                            notify_entry(symbol, close, stop)
+                            elog.position_open(fill_price, stop, fill_qty, strategy="vwap_pb",
+                                               intended_price=close)
+                            notify_entry(symbol, fill_price, stop)
                             log.info("%-8s [vwap_pb] OPEN  entry=%.4f stop=%.4f qty=%s",
-                                     symbol, close, stop, qty)
+                                     symbol, fill_price, stop, fill_qty)
 
     return position
 
@@ -890,24 +1038,20 @@ def _eval_orb(
             exit_reason = "STOP"
 
         if exit_reason:
-            pnl_per_share = (position.entry_price - close) if is_short else (close - position.entry_price)
+            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
+                                       exit_reason, elog)
+            if fill_price is None:
+                return position  # exit unfilled — keep position, retry next poll
+            pnl_per_share = (position.entry_price - fill_price) if is_short else (fill_price - position.entry_price)
             pnl_total = pnl_per_share * position.qty
-            exit_side = "BUY_BACK" if is_short else "SELL"
-            elog.order_attempt(exit_side, position.qty, close, strategy="orb")
-            order_id = (
-                _place_cover(tctx, acc_id, symbol, close, position.qty)
-                if is_short
-                else _place_sell(tctx, acc_id, symbol, close, position.qty)
-            )
-            elog.order_result(exit_side, success=bool(order_id),
-                              order_id=order_id, strategy="orb")
             hold_bars_orb = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="orb")
             _clear_position(symbol, "orb")
-            elog.position_close(close, exit_reason, pnl_total, hold_bars=hold_bars_orb, strategy="orb", direction=position.direction)
-            notify_exit(symbol, close, exit_reason, pnl_total)
+            elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars_orb,
+                                strategy="orb", direction=position.direction, intended_price=close)
+            notify_exit(symbol, fill_price, exit_reason, pnl_total)
             log.info("%-8s [orb]    CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, position.direction, close, pnl_total, exit_reason)
+                     symbol, position.direction, fill_price, pnl_total, exit_reason)
             position = None
 
     elif or_valid and not is_time_stop and not already_entered:
@@ -952,22 +1096,22 @@ def _eval_orb(
                     else:
                         stop = or_low
                         target = close + cfg.orb_target_mult * or_range
-                        elog.order_attempt("BUY", qty, close, strategy="orb")
-                        order_id = _place_buy(tctx, acc_id, symbol, close, qty)
-                        elog.order_result("BUY", success=bool(order_id),
-                                          order_id=order_id, strategy="orb")
-                        if order_id:
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                                "orb", elog)
+                        if filled:
+                            order_id, fill_price, fill_qty = filled
                             position = PaperPosition(
                                 symbol=symbol, strategy="orb", direction="long",
-                                entry_time=candle_ts, entry_price=close,
+                                entry_time=candle_ts, entry_price=fill_price,
                                 stop_price=stop, target_price=target,
-                                qty=qty, order_id=order_id,
+                                qty=fill_qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="orb", direction="long", intended_price=close)
-                            notify_entry(symbol, close, stop)
+                            elog.position_open(fill_price, stop, fill_qty, strategy="orb",
+                                               direction="long", intended_price=close)
+                            notify_entry(symbol, fill_price, stop)
                             log.info("%-8s [orb]    OPEN  [long]  entry=%.4f stop=%.4f target=%.4f qty=%s",
-                                     symbol, close, stop, target, qty)
+                                     symbol, fill_price, stop, target, fill_qty)
 
         # --- Short entry ---
         elif (after_cutoff and below_low and vol_ok
@@ -991,22 +1135,22 @@ def _eval_orb(
                     else:
                         stop = or_high
                         target = close - cfg.orb_target_mult * or_range
-                        elog.order_attempt("SELL_SHORT", qty, close, strategy="orb")
-                        order_id = _place_short(tctx, acc_id, symbol, close, qty)
-                        elog.order_result("SELL_SHORT", success=bool(order_id),
-                                          order_id=order_id, strategy="orb")
-                        if order_id:
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                                "orb", elog, direction="short")
+                        if filled:
+                            order_id, fill_price, fill_qty = filled
                             position = PaperPosition(
                                 symbol=symbol, strategy="orb", direction="short",
-                                entry_time=candle_ts, entry_price=close,
+                                entry_time=candle_ts, entry_price=fill_price,
                                 stop_price=stop, target_price=target,
-                                qty=qty, order_id=order_id,
+                                qty=fill_qty, order_id=order_id,
                             )
                             _save_position(position)
-                            elog.position_open(close, stop, qty, strategy="orb", direction="short", intended_price=close)
-                            notify_entry(symbol, close, stop)
+                            elog.position_open(fill_price, stop, fill_qty, strategy="orb",
+                                               direction="short", intended_price=close)
+                            notify_entry(symbol, fill_price, stop)
                             log.info("%-8s [orb]    OPEN  [short] entry=%.4f stop=%.4f target=%.4f qty=%s",
-                                     symbol, close, stop, target, qty)
+                                     symbol, fill_price, stop, target, fill_qty)
         elif below_low and after_cutoff and vol_ok and not cfg.orb_shorts_enabled:
             elog.signal_skip("orb_shorts_disabled", score=0, bonus=0, min_score=0, strategy="orb")
         elif below_low and after_cutoff and vol_ok and (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists():
@@ -1153,8 +1297,9 @@ def run_multi(symbols: list[str] | None = None) -> None:
                 _reconcile_counter += 1
                 if _reconcile_counter >= _RECONCILE_EVERY:
                     _reconcile_counter = 0
-                    if any(p is not None for p in positions.values()):
-                        _reconcile_positions(tctx, acc_id, positions, elogs)
+                    # Run even with no local positions — catches orphaned broker
+                    # positions (e.g. an exit the runner believes happened but didn't).
+                    _reconcile_positions(tctx, acc_id, positions, elogs)
 
                 for symbol in symbols:
                     _eval_symbol_all_strategies(

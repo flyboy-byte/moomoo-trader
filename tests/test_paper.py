@@ -35,6 +35,9 @@ def _reload_paper(monkeypatch, env: dict):
     importlib.reload(mm.risk)
     import mm.paper
     importlib.reload(mm.paper)
+    # Unit tests run at any hour — bypass the market-hours order guard.
+    # TestMarketHoursGuard restores the real check explicitly.
+    mm.paper.market_open = lambda: True
     return mm.paper
 
 
@@ -309,3 +312,124 @@ class TestReconcile:
             order_status=None, entry_age_minutes=45)
         paper._reconcile_positions(ctx, 1, positions, {"US.QQQ": MagicMock()})
         assert positions[("US.QQQ", "vwap_pb")] is None
+
+
+# ---------------------------------------------------------------------------
+# Execution layer — fill confirmation (live bugs 2026-06-04/10: orders booked
+# as done without ever filling; PnL recorded at intended price, not actual)
+# ---------------------------------------------------------------------------
+
+def _ctx_with_order(status, dealt_qty=0.0, dealt_price=0.0, place_order_id="111"):
+    """Mock trade ctx: place_order succeeds; order_list_query returns given state."""
+    ctx = MagicMock()
+    ctx.place_order.return_value = (RET_OK, pd.DataFrame({"order_id": [place_order_id]}))
+    ctx.order_list_query.return_value = (RET_OK, pd.DataFrame({
+        "order_status": [status], "dealt_qty": [dealt_qty], "dealt_avg_price": [dealt_price],
+    }))
+    ctx.modify_order.return_value = (RET_OK, None)
+    return ctx
+
+
+class TestConfirmFill:
+
+    def test_filled_returns_actual_price(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        ctx = _ctx_with_order("FILLED_ALL", dealt_qty=1.0, dealt_price=706.67)
+        status, dealt, price = paper._confirm_fill(ctx, 1, "111", timeout_s=1)
+        assert status == "FILLED_ALL"
+        assert dealt == 1.0
+        assert price == 706.67
+
+    def test_cancelled_returns_no_price(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        ctx = _ctx_with_order("CANCELLED_ALL", dealt_qty=0.0)
+        status, dealt, price = paper._confirm_fill(ctx, 1, "111", timeout_s=1)
+        assert status == "CANCELLED_ALL"
+        assert price is None
+
+    def test_pending_times_out(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        monkeypatch.setattr(paper, "_FILL_POLL_S", 0.01)
+        ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
+        status, dealt, price = paper._confirm_fill(ctx, 1, "111", timeout_s=0.05)
+        assert status == "SUBMITTED"
+        assert price is None
+
+
+class TestExecuteEntry:
+
+    def test_filled_entry_returns_actual_fill(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        ctx = _ctx_with_order("FILLED_ALL", dealt_qty=1.0, dealt_price=706.67)
+        result = paper._execute_entry(ctx, 1, "US.QQQ", 1, 707.20, "vwap_pb", MagicMock())
+        assert result is not None
+        order_id, fill, qty = result
+        assert fill == 706.67  # actual, not intended
+        assert qty == 1.0
+
+    def test_unfilled_entry_cancelled_and_no_trade(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        monkeypatch.setattr(paper, "_FILL_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(paper, "_FILL_POLL_S", 0.01)
+        monkeypatch.setattr(paper, "_CANCEL_RECHECK_S", 0.05)
+        ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
+        result = paper._execute_entry(ctx, 1, "US.QQQ", 1, 707.20, "vwap_pb", MagicMock())
+        assert result is None
+        assert ctx.modify_order.called  # stale order cancelled
+
+    def test_failed_placement_returns_none(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        ctx = MagicMock()
+        ctx.place_order.return_value = (1, "rejected")
+        result = paper._execute_entry(ctx, 1, "US.QQQ", 1, 707.20, "vwap_pb", MagicMock())
+        assert result is None
+
+
+class TestExecuteExit:
+
+    def _pos(self, paper, direction="long"):
+        return paper.PaperPosition(
+            symbol="US.QQQ", strategy="vwap_pb", entry_time=pd.Timestamp("2026-06-10 10:05:00"),
+            entry_price=707.20, stop_price=703.95, qty=1, order_id="111", direction=direction)
+
+    def test_filled_exit_returns_actual_price(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        monkeypatch.setattr(paper, "notify", MagicMock())
+        ctx = _ctx_with_order("FILLED_ALL", dealt_qty=1.0, dealt_price=706.10)
+        fill = paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
+        assert fill == 706.10
+
+    def test_sell_limit_is_marketable_below_intended(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        monkeypatch.setattr(paper, "notify", MagicMock())
+        ctx = _ctx_with_order("FILLED_ALL", dealt_qty=1.0, dealt_price=706.10)
+        paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
+        assert _placed_price(ctx) < 706.12  # sell buffered below close
+
+    def test_cover_limit_is_marketable_above_intended(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        monkeypatch.setattr(paper, "notify", MagicMock())
+        ctx = _ctx_with_order("FILLED_ALL", dealt_qty=1.0, dealt_price=706.20)
+        paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper, "short"), 706.12, "STOP", MagicMock())
+        assert _placed_price(ctx) > 706.12  # cover buffered above close
+
+    def test_unfilled_exit_returns_none(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        monkeypatch.setattr(paper, "notify", MagicMock())
+        monkeypatch.setattr(paper, "_FILL_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(paper, "_FILL_POLL_S", 0.01)
+        monkeypatch.setattr(paper, "_CANCEL_RECHECK_S", 0.05)
+        ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
+        fill = paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
+        assert fill is None  # caller must keep the position open
+
+
+class TestMarketHoursGuard:
+
+    def test_order_refused_when_market_closed(self, monkeypatch):
+        paper = _reload_paper(monkeypatch, {})
+        paper.market_open = lambda: False
+        ctx = _mock_ctx_ok()
+        assert paper._place_buy(ctx, 1, "US.SPY", 100.0, 1) == ""
+        assert paper._place_sell(ctx, 1, "US.SPY", 100.0, 1) == ""
+        assert not ctx.place_order.called
