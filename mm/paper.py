@@ -258,11 +258,13 @@ def _reconcile_positions(
         log.warning("Broker reconciliation: position_list_query failed — %s", df)
         return
 
+    # moomoo returns the symbol column as "code" (older versions: "stock_code")
+    sym_col = "code" if "code" in df.columns else "stock_code"
     broker_syms: set[str] = set()
-    if not df.empty and "stock_code" in df.columns:
+    if not df.empty and sym_col in df.columns:
         for _, row in df.iterrows():
             if float(row.get("qty", 0)) != 0:
-                broker_syms.add(str(row["stock_code"]))
+                broker_syms.add(str(row[sym_col]))
 
     now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
 

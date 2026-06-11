@@ -64,9 +64,10 @@ def main() -> None:
         tracked = _tracked_qty()
         print(f"Locally tracked open qty: {tracked or 'none'}\n")
 
+        sym_col = "code" if "code" in pos.columns else "stock_code"
         orders = []
         for _, row in pos.iterrows():
-            sym = str(row["stock_code"])
+            sym = str(row[sym_col])
             qty = float(row["qty"])
             orphan = qty - tracked.get(sym, 0.0)
             price = float(row["nominal_price"])

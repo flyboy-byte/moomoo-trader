@@ -245,7 +245,8 @@ class TestReconcile:
 
         ctx = MagicMock()
         if broker_positions:
-            pos_df = pd.DataFrame({"stock_code": broker_positions,
+            # real moomoo position_list_query uses "code" (not "stock_code")
+            pos_df = pd.DataFrame({"code": broker_positions,
                                    "qty": [1.0] * len(broker_positions)})
         else:
             pos_df = pd.DataFrame()
