@@ -59,6 +59,9 @@ Scripts (all run from project root with venv active):
   python scripts/sweep_session_filter.py [csvs...] [--all]                    # BB+KDJ entry hour filter sweep
   python scripts/replay_paper.py --latest [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--fill touch|instant|never|entry_only]
                                                                                # replay candles through the REAL runner + fake broker
+  python scripts/replay_vs_live.py [--date YYYY-MM-DD]                         # diff live session decisions vs replay (verify.sh step 5)
+  python scripts/weekly_report.py [--dry-run]                                  # Discord gate-progress report
+  python scripts/analyze_orb_hours.py [event_dir]                              # ORB entry-hour edge analysis (replay or live dirs)
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
   python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
@@ -237,6 +240,33 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
     (module namespace), never imported directly — tests reload mm.paper/mm.config and a
     stale cfg binding redirects logs_dir on the wrong object, leaking replay events into
     the real logs/ dir.
+
+18. Replay-vs-live decision diff (2026-06-12): scripts/replay_vs_live.py replays a live
+    session's candles through the harness and diffs decisions. Invariant: the bar of each
+    FIRST entry attempt per (strategy,symbol) must match. Identical logged signal payloads
+    + different decision = code drift (FAIL); differing payloads = vendor candle revision
+    (variance note — live decides on provisional data; e.g. Jun 11 QQQ or_high 700.34→
+    700.38 post-close, vwap cross_count 1→2). Exits strict only when entry fills matched.
+    Runs as verify.sh step 5. Live JSONL ts is the VPS's UTC clock while eval_ts is ET —
+    the ts−eval_ts gap gives the writer's clock offset. Replay window must be DAY-based
+    (CANDLE_LOOKBACK_DAYS, matching live's fetch span): KDJ/ADX/ATR are recursive, so a
+    different warmup span yields different indicator values and false mismatches.
+    Both live sessions (Jun 11, 12) verified: decisions match.
+
+19. ADX short-frame crash (2026-06-12, found BY the replay harness): ta's ADXIndicator
+    raises IndexError when fed <= 2*period bars. Live hit this every morning after a long
+    weekend (3-day fetch spans mostly holiday; len<20 guard passes a 21-28 bar frame) and
+    silently error-looped until ~29 bars accumulated. indicators.adx() now returns NaN on
+    short frames (downstream scoring treats NaN as not-ranging). Deployed.
+
+20. Security hardening (2026-06-12): dashboard login rate-limited (5 fails/IP/15min),
+    constant-time password compare, random per-process session secret (was derived from
+    the password with a public scheme), same-site-only ?next= redirects. DASHBOARD_PASSWORD
+    was previously UNSET on the VPS (dashboard fully open; config editor was fail-closed) —
+    now set in both .envs. VPS host moved out of committed files into .env VPS_HOST=
+    (deploy.sh / sync_logs.sh read it; IP remains in old git history). Dashboard now shows
+    a gate-progress card; scripts/weekly_report.py posts gate progress to Discord
+    (intended VPS cron: 30 21 * * 5 — pending user approval).
 
 13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
     Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5
