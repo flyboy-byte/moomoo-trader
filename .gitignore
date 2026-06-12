@@ -8,3 +8,5 @@ STOP_TRADING.txt
 *.sqlite
 extra-context/
 resume.txt
+replay_out/
+replay_*/

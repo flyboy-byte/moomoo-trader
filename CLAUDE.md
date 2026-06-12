@@ -57,6 +57,8 @@ Scripts (all run from project root with venv active):
   python scripts/backtest_vwap_pb.py [csvs...] [--latest] [--all] [--sweep]
   python scripts/backtest_ema_momentum.py [csvs...] [--latest] [--all] [--sweep] [--entry cross|pullback]
   python scripts/sweep_session_filter.py [csvs...] [--all]                    # BB+KDJ entry hour filter sweep
+  python scripts/replay_paper.py --latest [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--fill touch|instant|never|entry_only]
+                                                                               # replay candles through the REAL runner + fake broker
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
   python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
@@ -123,7 +125,7 @@ Historical data on disk:
   Combined CSVs created by merging old (2022-2025) + fresh fetch (2025-05-31 to 2026-06-03), deduped on time_key.
 
 Tests:
-  python -m pytest tests/           — 141 tests: risk (22), indicators/signals (47), strategy (18), orb (2), +new
+  python -m pytest tests/           — 166 tests: risk (22), indicators/signals (47), strategy (18), orb (2), +new
   python -m pytest tests/ -q        — quiet mode
 
 Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
@@ -216,6 +218,25 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
     Plus: market-hours guard inside _place_* (June 1 history showed after-hours orders
     pending overnight), reconcile runs periodically even when flat (orphan detection),
     scripts/flatten_simulate.py cleans orphaned broker shares. 159 tests.
+
+17. Replay harness (2026-06-12): mm/replay.py + scripts/replay_paper.py drive the REAL
+    paper runner (_eval_symbol_all_strategies — same code path as live: signal eval, order
+    placement, fill confirmation, position persistence, daily limits, ORB once-per-day,
+    reconcile) over historic candles with a FakeBroker. Simulated clock (FakeDateTime/
+    FakeDate/SimTime patched into mm.paper/mm.risk) makes day rollovers, session filters,
+    and reconcile grace ages behave as live; fill-confirm timeouts resolve instantly.
+    Fill modes: touch (fills only if next bar trades the limit — default), instant,
+    never (adversarial), entry_only (June 4 failure shape: entries fill, exits don't).
+    Validation: May 2026 replay = 65 trades, 0 reconcile mismatches; never-mode = 0 trades
+    0 PnL (the old fire-and-forget layer would have booked fiction); entry_only = positions
+    stay open, 0 PnL booked, exit retried every bar. Replay JSONL output is identical in
+    format to live logs — diagnose/analyze scripts work on it unchanged. 7 tests in
+    tests/test_replay.py (invariants incl. PnL == fill-price arithmetic). Also added:
+    exit_unfilled Discord notify throttled to once per stuck position (was: every poll).
+    IMPORTANT for future agents: inside replay(), cfg MUST be referenced as paper.cfg
+    (module namespace), never imported directly — tests reload mm.paper/mm.config and a
+    stale cfg binding redirects logs_dir on the wrong object, leaking replay events into
+    the real logs/ dir.
 
 13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
     Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5

@@ -458,6 +458,8 @@ def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 _FILL_TIMEOUT_S = 20
 _FILL_POLL_S = 2
+# (symbol, strategy) pairs already notified about a stuck exit — cleared on fill
+_exit_unfilled_notified: set[tuple[str, str]] = set()
 _CANCEL_RECHECK_S = 6  # post-cancel re-check window (cancel can race a fill)
 _EXIT_BUFFERS = (0.003, 0.01)  # marketable-limit buffers: first try, aggressive retry
 _TERMINAL_STATUSES = {"CANCELLED_ALL", "CANCELLED_PART", "FAILED", "DISABLED", "DELETED"}
@@ -569,6 +571,7 @@ def _execute_exit(tctx, acc_id: int, symbol: str, position: "PaperPosition",
             if dealt < float(position.qty):
                 log.warning("%-8s [%s] exit PARTIAL fill %.6f/%.6f at %.4f",
                             symbol, position.strategy, dealt, float(position.qty), fill)
+            _exit_unfilled_notified.discard((symbol, position.strategy))
             return fill
         log.warning("%-8s [%s] exit order %s not filled (status=%s, buffer=%.1f%%)",
                     symbol, position.strategy, order_id, status, buf * 100)
@@ -577,7 +580,11 @@ def _execute_exit(tctx, acc_id: int, symbol: str, position: "PaperPosition",
            f"position stays open, retrying next poll")
     log.error(msg)
     elog.error(f"exit_unfilled reason={reason}", strategy=position.strategy)
-    notify(f"[PAPER] CRITICAL: {msg}")
+    # Notify once per stuck position, not on every retry poll
+    key = (symbol, position.strategy)
+    if key not in _exit_unfilled_notified:
+        _exit_unfilled_notified.add(key)
+        notify(f"[PAPER] CRITICAL: {msg}")
     return None
 
 
