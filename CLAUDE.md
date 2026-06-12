@@ -268,6 +268,16 @@ Signal distribution (60 trades at bonus>=2, SPY+QQQ+IWM):
     a gate-progress card; scripts/weekly_report.py posts gate progress to Discord
     (intended VPS cron: 30 21 * * 5 — pending user approval).
 
+21. Risk-normalized sizing built from graveyard (2026-06-12), DARK (RISK_DOLLARS_PER_TRADE=0
+    default = legacy behavior). calc_qty_risk(): qty = risk$/(entry−stop), dollar-capped; all
+    5 entry blocks compute stop before sizing. Replay A/B 2026 YTD ($5/trade vs baseline):
+    total +$65.97 vs +$30.34; ORB PF 1.04→1.16; wide-stop trades refused at qty=0. Enable
+    only after 2+ weeks live fill data (see graveyard).
+    Replay research same day: ORB noon cutoff REJECTED OOS (2026 hours-12+ −$93/75tr vs
+    2022-25 +$65/698tr PF 1.16 — graveyard). BB+KDJ w=0 2026 YTD = PF 0.98 on 10 trades —
+    the 2022-25 w=0 edge (PF 2.13) does not reproduce; treat the bb_kdj gate's "switch to
+    w=0" action with caution (evaluation_criteria amendment 2026-06-12).
+
 13. EMA5/EMA20 momentum breakout research (2026-06): tested, no deployable edge found.
     Tested: cross entry (EMA5 crosses EMA20) and pullback entry (close retraces to EMA5
     while EMA5>EMA20), with ADX filter [20/25/30] and ATR target [0.5/1.0/1.5/2.0×].

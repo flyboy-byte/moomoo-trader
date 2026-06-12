@@ -71,7 +71,13 @@ design to actual stop distance (covers ORB's range-based stops too).
 7 tests, validated end-to-end via the replay harness. DISABLED by default
 (RISK_DOLLARS_PER_TRADE=0 → byte-identical legacy behavior).
 **Enablement gate (unchanged):** 2+ weeks of live fill data, then set RISK_DOLLARS_PER_TRADE
-in .env. See replay A/B (replay_ytd_risk5/) for the YTD comparison.
+in .env.
+**Replay A/B (2026 YTD, touch fills, RISK_DOLLARS_PER_TRADE=5 vs dollar-cap baseline):**
+total +$65.97 vs +$30.34. ORB PF 1.04→1.16 (+$14→+$45): tight-range days get more shares,
+and trades whose stop distance exceeds the $5 risk budget at 1 share are refused outright
+(13 fewer ORB trades — the widest/choppiest setups). bb_kdj loss halved; vwap_pb unchanged
+(already 1-share). Mechanism is risk discipline, not signal change. Caveats: one 5.5-month
+window; SIMULATE fills are optimistic and slippage scales with qty.
 
 ### IWM-Weighted Position Sizing
 **What it is:** `SYMBOL_SIZE_OVERRIDES=US.IWM:300,US.SPY:600,US.QQQ:500` — more capital to IWM given superior edge (61.9% win, 38% stop vs 50–58% for SPY/QQQ).
