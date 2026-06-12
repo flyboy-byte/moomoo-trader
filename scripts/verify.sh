@@ -87,6 +87,20 @@ else
     echo "$PASS  $COMPARE_PASS symbol(s) passed signal agreement check"
 fi
 
+# ── 5. Replay-vs-live decision diff ────────────────────────────────────────
+section "5. REPLAY-VS-LIVE DIFF  ($SESSION_DATE)"
+if [ "$DIAG_FILES" -eq 0 ]; then
+    echo "  No live logs for $SESSION_DATE — skipping"
+else
+    DIFF_OUT=$(python scripts/replay_vs_live.py --date "$SESSION_DATE" 2>/dev/null) \
+        && DIFF_RC=0 || DIFF_RC=$?
+    echo "$DIFF_OUT" | grep -E "✓|✗|SKIP|variance|first entry|exit decisions" || true
+    if [ "$DIFF_RC" -ne 0 ]; then
+        echo "$FAIL  live runner and replay disagree — investigate before next session"
+        OVERALL=1
+    fi
+fi
+
 # ── Summary ────────────────────────────────────────────────────────────────
 section "SUMMARY"
 if [ "$OVERALL" -eq 0 ]; then

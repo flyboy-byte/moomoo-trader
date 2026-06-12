@@ -33,7 +33,10 @@ from .logger import get_logger
 
 log = get_logger("replay")
 
-LOOKBACK_BARS = 600  # ~7.7 sessions of 5-min bars — covers all indicator warmups
+# Candle window fed to each eval must mimic the live runner EXACTLY:
+# live fetches from (now − CANDLE_LOOKBACK_DAYS) date onward. KDJ/ADX/ATR are
+# recursive — a different warmup span gives different indicator values and
+# therefore different marginal decisions, breaking replay-vs-live agreement.
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +195,7 @@ def _load_csv(path: Path, start: str | None, end: str | None) -> pd.DataFrame:
 
 
 def replay(
-    csvs: list[Path],
+    csvs: list[Path] | None,
     strategies: list[str],
     start: str | None = None,
     end: str | None = None,
@@ -200,6 +203,7 @@ def replay(
     out_dir: Path | None = None,
     reconcile_every: int = 15,
     quiet: bool = True,
+    dfs: dict[str, pd.DataFrame] | None = None,
 ) -> dict:
     """Run the real paper runner over historic candles. Returns a summary dict.
 
@@ -217,7 +221,8 @@ def replay(
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
-    dfs = {symbol_from_csv(p): _load_csv(p, start, end) for p in csvs}
+    if dfs is None:
+        dfs = {symbol_from_csv(p): _load_csv(p, start, end) for p in csvs}
     dfs = {s: df for s, df in dfs.items() if not df.empty}
     if not dfs:
         raise SystemExit("No candles in the requested window.")
@@ -278,7 +283,11 @@ def replay(
                 if i is None or i < 30:  # need a minimal indicator warmup
                     continue
                 broker.set_index(sym, i)
-                current_window[sym] = df.iloc[max(0, i - LOOKBACK_BARS + 1): i + 1].reset_index(drop=True)
+                # live: fetch start = (now − N days) at midnight, so the window
+                # begins at the first bar ON that date
+                win_start = (SimClock.now - timedelta(days=paper.CANDLE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+                j = int(df["time_key"].searchsorted(pd.Timestamp(win_start)))
+                current_window[sym] = df.iloc[j: i + 1].reset_index(drop=True)
                 paper._eval_symbol_all_strategies(
                     sym, strategies, broker, 1, positions, elogs, daily,
                     orb_traded=orb_traded,
