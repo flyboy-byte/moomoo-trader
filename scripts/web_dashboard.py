@@ -711,6 +711,18 @@ def _render_market_conditions(
     </div>"""
 
 
+def _render_gate_progress() -> str:
+    """Gate-progress card: confirmed-fill trades vs pre-registered gate samples."""
+    try:
+        from weekly_report import build_report
+        body = build_report().replace("**", "")
+    except Exception as e:
+        body = f"unavailable: {e}"
+    return ('<div class="card"><div class="card-title">GATE PROGRESS '
+            '<span style="color:#555;font-size:11px">(pre-registered, confirmed fills only)</span></div>'
+            f'<pre style="margin:0;color:#aaa;font-size:12px;line-height:1.6">{body}</pre></div>')
+
+
 def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "",
             available_dates: list[date] | None = None) -> str:
     last_eval = evals[-1] if evals else None
@@ -887,6 +899,8 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
   {open_html}
   {trades_html}
   {market_cond_html}
+
+  {_render_gate_progress()}
 
   <div class="card">
     <div class="card-title">SIGNAL FEED (last 20 bars · bb_kdj only)</div>
