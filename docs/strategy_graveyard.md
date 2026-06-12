@@ -101,14 +101,69 @@ window; SIMULATE fills are optimistic and slippage scales with qty.
 **Gate:** Live trades show consistent exit slippage > 0.1% per trade. Current `slippage_bps` field is 0.0 in SIMULATE — need real fill data before this is justified.
 **Revisit when:** slippage_bps readings from live fills show the 60s poll costs real edge.
 
-### paper.py Refactor (Split into Smaller Modules)
-**What it is:** `mm/paper.py` is 1,100+ lines. The strategy evaluation, position state, risk gating, event logging, and main loop are all in one file. Split into:
-- `mm/execution.py` — _place_buy/_sell/_short/_cover, _reconcile_positions
-- `mm/position.py` — PaperPosition, _save/load/clear_position, PaperEventLog
-- `mm/loop.py` — run_multi(), _eval_symbol_all_strategies(), main loop
-- Strategy evals stay in their own files (or mm/eval_bb_kdj.py etc.)
-**Why parked:** Large refactor with no functional benefit right now. Risk of introducing bugs.
-**When:** Before adding a 4th strategy or when paper.py hits a natural split point during feature work.
+### paper.py Refactor (Split into Smaller Modules) — ANALYZED 2026-06-12, READY TO EXECUTE
+**What:** mm/paper.py is 1,414 lines / 45 defs. Split it along its existing comment-divider
+sections. Full recon done; this entry is the execution plan — pull it out and follow it.
+
+**Target layout (with exact current line ranges):**
+| New module | Moves from paper.py | ~Lines |
+|---|---|---|
+| `mm/clock.py` (NEW seam) | nothing moves — new ~40-line module: `now()`, `now_et()`, `today()`, `monotonic()`, `sleep()`, `is_market_open()` | 40 |
+| `mm/events.py` | PaperEventLog (64–141), PaperPosition (148–158), _position_file/_save/_load/_clear_position (164–208), _orb_traded_file/_load/_save_orb_traded (327–351) | 250 |
+| `mm/execution.py` | reconcile block: constants + _orphan_warned + _order_status + _reconcile_positions (210–325); trade_context/_get_simulate_acc_id (354–376); _place_buy/sell/short/cover (378–448); fill-confirm block: constants + _exit_unfilled_notified + _confirm_fill/_cancel_order/_execute_entry/_execute_exit (459–590) | 420 |
+| `mm/evals.py` | _kdj_cross_age (680–694), _eval_bb_kdj (696), _eval_vwap (800), _eval_vwap_pb (888), _eval_orb (998–1179), _entry_attempted dict (600) | 540 |
+| `mm/risk.py` (gains) | _qty (603–625), _position_cap (627–635), _slot_dollars (596) + a `set_slot_dollars()` setter — calc_qty* already lives here, avoids an evals→paper import cycle | 45 |
+| `mm/paper.py` (keeps) | _latest_closed_candles (638–677), _trigger_eod_summary (1181), run_multi (1205), _eval_symbol_all_strategies (1346), run (1411) + **back-compat re-exports** | 230 |
+
+**Why mm/clock.py first (the real risk in this refactor):** tests and mm/replay.py work by
+patching names in mm.paper's namespace (replay patches 9: market_open, datetime, date, time,
+notify×3, _latest_closed_candles; plus mm.risk.date and cfg.logs_dir). After the split,
+datetime.now is called from events.py AND execution.py AND evals.py AND paper.py — patching
+one module no longer covers the others. Route ALL time/market-state access through mm/clock.py
+and the patch surface collapses to one module permanently. (mm.risk.DailyTracker's
+date.today and market_open also route through clock.)
+
+**Shared mutable state homes (verified by grep):**
+- `_entry_attempted` — written by all 5 entry blocks, cleared by run_multi (lines ~1228–1235)
+  → lives in evals.py, run_multi calls `evals.reset_session_state()`.
+- `_orphan_warned` (reconcile only) and `_exit_unfilled_notified` (execute_exit only)
+  → execution.py, private.
+- `_slot_dollars` — set by run_multi at startup, read by _qty/_position_cap
+  → risk.py with set_slot_dollars(); kills the would-be evals→paper cycle.
+
+**Back-compat re-exports in paper.py (verified importers):**
+- scripts/run_paper.py: `from mm.paper import run, run_multi` (stays native)
+- scripts/simulate_paper.py: `from mm.paper import PaperEventLog, PaperPosition` (re-export)
+- tests/test_paper.py + test_orb_shorts.py: call most functions directly — update their
+  imports to the new modules (mechanical); only 1 namespace patch (market_open → clock)
+  and 3 timing-constant monkeypatches (_FILL_TIMEOUT_S/_FILL_POLL_S/_CANCEL_RECHECK_S →
+  execution) need re-targeting.
+- mm/replay.py: rewrite its patch block to target mm.clock (one module) + cfg.logs_dir
+  + paper._latest_closed_candles.
+
+**Import graph (acyclic by construction):**
+clock ← events ← execution ← evals ← paper(loop); risk imports clock only; nothing imports paper.
+
+**Execution order (half-day session, ~3–4h active):**
+1. BEFORE TOUCHING ANYTHING: `python scripts/replay_paper.py --latest --start 2026-01-01
+   --end 2026-06-09 --out replay_cert_before` (~40 min, run in background while step 2–3 happen
+   on a branch). The sim clock makes event streams fully deterministic.
+2. Create mm/clock.py; mechanically reroute datetime/time/market_open/date.today calls in
+   paper.py and risk.py through it; run tests + replay diff — MUST be identical before any
+   code moves. Commit.
+3. Move events.py → execution.py → evals.py → trim paper.py, committing per module,
+   tests green at each step.
+4. Re-target mm/replay.py and test patch points (small: see above). Full suite green.
+5. CERTIFY: same replay → replay_cert_after; `diff -r replay_cert_before replay_cert_after`
+   must be EMPTY (timestamps are sim-clock-derived, so byte-identical is the bar).
+   Also run scripts/replay_vs_live.py for the latest session.
+6. ./deploy.sh AFTER market close only. verify.sh next session.
+
+**Abort criterion:** any non-empty cert diff that isn't explained in one minute of looking
+→ `git reset --hard` to the last green commit. The whole point is zero behavior change.
+
+**When:** Evening session, market closed (deploys restart the runner). Knob freeze makes
+this the ideal window — no parallel strategy changes to collide with.
 
 ---
 
