@@ -63,11 +63,15 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ## On Hold (parked with a gate condition)
 
-### ATR-Normalized Position Sizing
-**What it is:** `share_qty = risk_dollars / (atr × atr_mult)`. Every trade risks the same dollar amount regardless of volatility. Replaces fixed dollar cap.
-**Why parked:** Current fractional approach controls dollar exposure per slot but ignores volatility. A $11 position on a 1% vol day vs 4% vol day risks 4× differently. ATR sizing fixes this.
-**Gate:** After 2+ weeks of live slippage data — need real fill prices before adding sizing complexity.
-**Files to touch:** `mm/config.py` (RISK_DOLLARS_PER_TRADE), `mm/risk.py` (calc_qty_atr), `mm/paper.py` (branch in each _eval_* entry block).
+### Risk-Normalized Position Sizing — BUILT DARK 2026-06-12
+**What it is:** `share_qty = RISK_DOLLARS_PER_TRADE / (entry − stop)`, capped by the dollar cap.
+Every trade risks the same dollars regardless of volatility. Generalizes the original ATR-sizing
+design to actual stop distance (covers ORB's range-based stops too).
+**Status:** Implemented (`mm/risk.py` calc_qty_risk, all 5 entry blocks in `mm/paper.py`),
+7 tests, validated end-to-end via the replay harness. DISABLED by default
+(RISK_DOLLARS_PER_TRADE=0 → byte-identical legacy behavior).
+**Enablement gate (unchanged):** 2+ weeks of live fill data, then set RISK_DOLLARS_PER_TRADE
+in .env. See replay A/B (replay_ytd_risk5/) for the YTD comparison.
 
 ### IWM-Weighted Position Sizing
 **What it is:** `SYMBOL_SIZE_OVERRIDES=US.IWM:300,US.SPY:600,US.QQQ:500` — more capital to IWM given superior edge (61.9% win, 38% stop vs 50–58% for SPY/QQQ).
@@ -103,6 +107,18 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 ---
 
 ## Decided Against (with data/reasoning)
+
+### ORB Afternoon Entry Cutoff (ORB_CUTOFF_HOUR)
+**What it was:** Block ORB entries after 12:00 ET. Motivated by 2026 YTD replay through the
+real runner: hours 12+ = 75 trades, −$93, PF 0.23–0.71, 76% TIME_STOP deaths, while hours
+9–11 = 191 trades, +$107. A noon cutoff would have flipped YTD ORB from +$14 to +$107.
+**Why no (2026-06-12):** Fails OOS cross-validation. 2022–2025 (backtest engine, same
+symbols/windows): hours 12+ = 698 trades, +$64.68, PF 1.16 — profitable, barely below
+mornings (PF 1.22). Hours 13–14 actually outperform (PF 1.32/1.46). The 2026 afternoon
+bleed is this year's regime or 75-trade variance, not structure.
+**If the live ORB gate trips:** slice live trades by entry hour first (scripts/
+analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather than the
+2022–2025 pattern, the cutoff becomes a legitimate pre-registered amendment candidate.
 
 ### VIX 3-Tier Strategy Switching
 **What it was:** ORB when VIX<15, VWAP PB when VIX 15-28, BB+KDJ when VIX>30.

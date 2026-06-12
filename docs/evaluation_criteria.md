@@ -82,6 +82,14 @@ strategy, but most execution-sensitive (breakout fills are competitive).
   Hypothetical managed exit: VWAP_LOST at 10:50 ET @ 706.12 = −$1.08. Not counted either way.
   Fix: reconcile now checks entry-order status (filled → keep; pending within 30-min grace →
   keep; pending past grace → cancel + clear). VWAP PB gate counter remains 0/20.
+- 2026-06-12: Replay-harness research (no gate or knob changes). (1) 2026 YTD through the
+  real runner: vwap_pb PF 1.89 (+$24) — beats backtest expectation; orb PF 1.04 (+$14) —
+  near its PF<1.0 gate line; bb_kdj w=3 PF 0.85 (−$8). (2) BB+KDJ w=0 counterfactual, 2026
+  YTD: 10 trades, PF 0.98 — the 2022–25 w=0 edge (PF 2.13) does NOT reproduce in 2026
+  (sample tiny; treat the gate's "switch to w=0" action with caution if it trips). (3) ORB
+  afternoon cutoff REJECTED OOS: 2026 hours-12+ bleed (−$93/75 trades) contradicted by
+  2022–25 (+$65/698 trades, PF 1.16) — see graveyard. If the ORB gate trips, slice live
+  trades by entry hour as part of the post-mortem (scripts/analyze_orb_hours.py logs/).
 - 2026-06-10 (post-close, audit): ORB trades #1–2 (Jun 4 SPY +$2.92, QQQ +$2.52) reclassified
   as UNVERIFIED — broker history shows neither exit executed (SPY sell cancelled unfilled at
   EOD; QQQ sell order failed outright). Entries and signal logic were valid; recorded PnL is
