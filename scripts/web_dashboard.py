@@ -180,7 +180,7 @@ def login() -> Response | str:
   <h1>moomoo-trader</h1>
   <div class="card" style="max-width:340px">
     <h2>DASHBOARD LOGIN</h2>
-    {{'<div class="msg msg-err">' + error + '</div>' if error else ''}}
+    {('<div class="msg msg-err">' + error + '</div>') if error else ''}
     <form method="POST">
       <input type="password" name="password" placeholder="Password" autofocus style="margin-bottom:10px">
       <button type="submit" style="width:100%">Sign in</button>
