@@ -73,6 +73,27 @@ def calc_qty(price: float, symbol: str | None = None) -> int:
     return math.floor(cap / price)
 
 
+def calc_qty_risk(price: float, stop_price: float, risk_dollars: float,
+                  cap_dollars: float) -> int:
+    """Risk-normalized share count: every trade risks ~risk_dollars to its stop.
+
+        qty = risk_dollars / (entry - stop)   capped by cap_dollars / price
+
+    Tight stops (low-vol days, tight ORB ranges) get more shares; wide stops get
+    fewer — equalizing dollar risk per trade instead of dollar exposure. The
+    dollar cap still bounds total position size. Returns 0 (no trade) when the
+    stop distance is zero/negative or one share already exceeds the cap.
+    """
+    if price <= 0 or risk_dollars <= 0:
+        return 0
+    dist = abs(price - stop_price)
+    if dist <= 0:
+        return 0
+    qty = math.floor(risk_dollars / dist)
+    max_qty = math.floor(cap_dollars / price) if cap_dollars > 0 else qty
+    return max(0, min(qty, max_qty))
+
+
 def calc_qty_fractional(price: float, dollars: float) -> float:
     """Return fractional share count for a given dollar allocation.
 

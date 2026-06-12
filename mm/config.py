@@ -33,6 +33,10 @@ class Config:
     max_trades_per_strategy: int = int(_get("MAX_TRADES_PER_STRATEGY", "0"))
     max_daily_loss: float = float(_get("MAX_DAILY_LOSS", "20"))
     max_position_dollars: float = float(_get("MAX_POSITION_DOLLARS", "50"))
+    # Risk-normalized sizing: qty = risk_dollars / (entry - stop), capped by the
+    # dollar cap above. 0 = disabled (use plain dollar-cap sizing). Infrastructure
+    # knob per docs/evaluation_criteria.md — not a frozen strategy parameter.
+    risk_dollars_per_trade: float = float(_get("RISK_DOLLARS_PER_TRADE", "0"))
     # Per-symbol overrides: "US.IWM:300,US.SPY:600" → {"US.IWM": 300.0, "US.SPY": 600.0}
     # Falls back to max_position_dollars for symbols not listed.
     symbol_size_overrides: dict[str, float] = {

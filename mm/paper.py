@@ -42,7 +42,7 @@ from .data import fetch_candles
 from .indicators import add_all
 from .notifications import notify, notify_entry, notify_exit
 from .orb_strategy import _build_opening_ranges
-from .risk import trading_allowed, calc_qty, calc_qty_fractional, per_slot_dollars, DailyTracker, market_open, seconds_until_open
+from .risk import trading_allowed, calc_qty, calc_qty_fractional, calc_qty_risk, per_slot_dollars, DailyTracker, market_open, seconds_until_open
 from .signals import snapshot as signal_snapshot
 from .strategy import compute_signals
 from .vwap_signals import snapshot_vwap
@@ -600,15 +600,21 @@ _slot_dollars: float = 0.0
 _entry_attempted: dict[tuple[str, str], str] = {}
 
 
-def _qty(price: float, symbol: str) -> int | float:
-    """Return order qty using fractional or whole-share logic.
+def _qty(price: float, symbol: str, stop: float | None = None) -> int | float:
+    """Return order qty using risk-normalized, fractional, or whole-share logic.
 
-    When TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty
+    When RISK_DOLLARS_PER_TRADE is set and the caller provides the stop price:
+    qty = risk_dollars / stop_distance, capped by the position dollar cap —
+    every trade risks the same dollars regardless of volatility.
+
+    Else, when TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty
     derived from the pre-computed per-slot dollar allocation.
     Falls back to whole-share calc_qty() when fractional result < 1 — Moomoo
     rejects sub-share orders with "Invalid quantity" and the trade is silently lost.
     Also falls back when TOTAL_CAPITAL is not set or FRACTIONAL_SHARES=false.
     """
+    if cfg.risk_dollars_per_trade > 0 and stop is not None:
+        return calc_qty_risk(price, stop, cfg.risk_dollars_per_trade, _position_cap(symbol))
     if _slot_dollars > 0 and cfg.fractional_shares:
         qty = calc_qty_fractional(price, _slot_dollars)
         if qty >= 1:
@@ -735,7 +741,8 @@ def _eval_bb_kdj(
                     elog.risk_block("daily_limit_reached", strategy="bb_kdj",
                                     trades=daily.trades, pnl=daily.pnl)
                 else:
-                    qty = _qty(close, symbol)
+                    stop = close - cfg.atr_stop_mult * float(last["atr"])
+                    qty = _qty(close, symbol, stop=stop)
                     cap = _position_cap(symbol)
                     if not qty:
                         log.warning("RISK BLOCK [bb_kdj] %s: price %.2f exceeds cap %.2f",
@@ -743,7 +750,6 @@ def _eval_bb_kdj(
                         elog.risk_block("price_exceeds_max_position", strategy="bb_kdj",
                                         price=close, max_dollars=cap)
                     else:
-                        stop = close - cfg.atr_stop_mult * float(last["atr"])
                         filled = _execute_entry(tctx, acc_id, symbol, qty, close,
                                                 "bb_kdj", elog)
                         if filled:
@@ -825,7 +831,8 @@ def _eval_vwap(
                     elog.risk_block("daily_limit_reached", strategy="vwap",
                                     trades=daily.trades, pnl=daily.pnl)
                 else:
-                    qty = _qty(close, symbol)
+                    stop = close - cfg.vwap_stop_mult * float(last["atr"])
+                    qty = _qty(close, symbol, stop=stop)
                     cap = _position_cap(symbol)
                     if not qty:
                         log.warning("RISK BLOCK [vwap] %s: price %.2f exceeds cap %.2f",
@@ -833,7 +840,6 @@ def _eval_vwap(
                         elog.risk_block("price_exceeds_max_position", strategy="vwap",
                                         price=close, max_dollars=cap)
                     else:
-                        stop = close - cfg.vwap_stop_mult * float(last["atr"])
                         filled = _execute_entry(tctx, acc_id, symbol, qty, close,
                                                 "vwap", elog)
                         if filled:
@@ -961,7 +967,8 @@ def _eval_vwap_pb(
                     elog.risk_block("daily_limit_reached", strategy="vwap_pb",
                                     trades=daily.trades, pnl=daily.pnl)
                 else:
-                    qty = _qty(close, symbol)
+                    stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
+                    qty = _qty(close, symbol, stop=stop)
                     cap = _position_cap(symbol)
                     if not qty:
                         log.warning("RISK BLOCK [vwap_pb] %s: price %.2f exceeds cap %.2f",
@@ -969,7 +976,6 @@ def _eval_vwap_pb(
                         elog.risk_block("price_exceeds_max_position", strategy="vwap_pb",
                                         price=close, max_dollars=cap)
                     else:
-                        stop = close - cfg.vwap_pb_stop_mult * float(last["atr"])
                         filled = _execute_entry(tctx, acc_id, symbol, qty, close,
                                                 "vwap_pb", elog)
                         if filled:
@@ -1095,7 +1101,8 @@ def _eval_orb(
                     elog.risk_block("daily_limit_reached", strategy="orb",
                                     trades=daily.trades, pnl=daily.pnl)
                 else:
-                    qty = _qty(close, symbol)
+                    stop = or_low
+                    qty = _qty(close, symbol, stop=stop)
                     cap = _position_cap(symbol)
                     if not qty:
                         log.warning("RISK BLOCK [orb] %s: price %.2f exceeds cap %.2f",
@@ -1103,7 +1110,6 @@ def _eval_orb(
                         elog.risk_block("price_exceeds_max_position", strategy="orb",
                                         price=close, max_dollars=cap)
                     else:
-                        stop = or_low
                         target = close + cfg.orb_target_mult * or_range
                         filled = _execute_entry(tctx, acc_id, symbol, qty, close,
                                                 "orb", elog)
@@ -1134,7 +1140,8 @@ def _eval_orb(
                     elog.risk_block("daily_limit_reached", strategy="orb",
                                     trades=daily.trades, pnl=daily.pnl)
                 else:
-                    qty = math.floor(_qty(close, symbol))  # Moomoo rejects fractional short orders
+                    stop = or_high
+                    qty = math.floor(_qty(close, symbol, stop=stop))  # Moomoo rejects fractional short orders
                     cap = _position_cap(symbol)
                     if not qty:
                         log.warning("RISK BLOCK [orb-short] %s: price %.2f exceeds cap %.2f",
@@ -1142,7 +1149,6 @@ def _eval_orb(
                         elog.risk_block("price_exceeds_max_position", strategy="orb",
                                         price=close, max_dollars=cap)
                     else:
-                        stop = or_high
                         target = close - cfg.orb_target_mult * or_range
                         filled = _execute_entry(tctx, acc_id, symbol, qty, close,
                                                 "orb", elog, direction="short")

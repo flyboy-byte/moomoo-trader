@@ -276,3 +276,45 @@ class TestFractionalSizing:
         risk = _reload_risk(monkeypatch, {"TOTAL_CAPITAL": "500"})
         dollars = risk.per_slot_dollars(n_symbols=1, n_strategies=1)
         assert abs(dollars - 500.0) < 0.001
+
+
+class TestCalcQtyRisk:
+    """Risk-normalized sizing: qty = risk_dollars / stop_distance, dollar-capped."""
+
+    def test_basic_risk_math(self):
+        from mm.risk import calc_qty_risk
+        # $5 risk, $0.50 stop distance -> 10 shares; cap allows it (10*20=200 < 900)
+        assert calc_qty_risk(price=20.0, stop_price=19.5, risk_dollars=5.0,
+                             cap_dollars=900.0) == 10
+
+    def test_dollar_cap_binds(self):
+        from mm.risk import calc_qty_risk
+        # tight stop wants 50 shares but cap only allows 3 ($900 / $295)
+        assert calc_qty_risk(price=295.0, stop_price=294.9, risk_dollars=5.0,
+                             cap_dollars=900.0) == 3
+
+    def test_wide_stop_fewer_shares(self):
+        from mm.risk import calc_qty_risk
+        # $5 risk, $4 stop distance -> 1 share
+        assert calc_qty_risk(price=700.0, stop_price=696.0, risk_dollars=5.0,
+                             cap_dollars=900.0) == 1
+
+    def test_zero_stop_distance_refuses(self):
+        from mm.risk import calc_qty_risk
+        assert calc_qty_risk(100.0, 100.0, 5.0, 900.0) == 0
+
+    def test_short_direction_uses_abs_distance(self):
+        from mm.risk import calc_qty_risk
+        # short: stop above entry — distance is abs()
+        assert calc_qty_risk(price=100.0, stop_price=101.0, risk_dollars=5.0,
+                             cap_dollars=900.0) == 5
+
+    def test_one_share_exceeds_cap(self):
+        from mm.risk import calc_qty_risk
+        assert calc_qty_risk(price=950.0, stop_price=949.0, risk_dollars=5.0,
+                             cap_dollars=900.0) == 0
+
+    def test_disabled_inputs(self):
+        from mm.risk import calc_qty_risk
+        assert calc_qty_risk(100.0, 99.0, 0.0, 900.0) == 0
+        assert calc_qty_risk(0.0, 99.0, 5.0, 900.0) == 0
