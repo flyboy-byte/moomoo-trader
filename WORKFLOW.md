@@ -1,5 +1,7 @@
 # Operational Workflow
 
+# NOTE: $VPS_HOST below = the VPS ssh target (user@ip). It lives in .env as VPS_HOST= — not committed.
+
 Two environments: **local** (dev + paper trading on laptop) and **VPS** (always-on live runner).
 Code changes always flow: local → GitHub → VPS. Never edit code directly on VPS.
 
@@ -37,12 +39,12 @@ git push
 
 Then deploy to VPS:
 ```bash
-ssh ubuntu@51.81.80.126 'cd ~/moomoo && ./deploy.sh'
+ssh $VPS_HOST 'cd ~/moomoo && ./deploy.sh'
 ```
 
 Or SSH in and run it yourself:
 ```bash
-ssh ubuntu@51.81.80.126
+ssh $VPS_HOST
 cd ~/moomoo && ./deploy.sh
 ```
 
@@ -57,8 +59,8 @@ cd ~/moomoo && ./deploy.sh
 
 When `.env` changes locally, sync to VPS:
 ```bash
-scp /home/logan/projects/moomoo/.env ubuntu@51.81.80.126:~/moomoo/.env
-ssh ubuntu@51.81.80.126 'systemctl --user restart moomoo-paper.service'
+scp /home/logan/projects/moomoo/.env $VPS_HOST:~/moomoo/.env
+ssh $VPS_HOST 'systemctl --user restart moomoo-paper.service'
 ```
 
 ---
@@ -87,7 +89,7 @@ python scripts/fetch_candles.py --symbol US.IWM --start 2025-01-01 --end 2026-06
 
 SSH in and edit the OpenD config with your Moomoo credentials:
 ```bash
-ssh ubuntu@51.81.80.126
+ssh $VPS_HOST
 nano ~/opend/OpenD.xml
 ```
 
@@ -119,7 +121,7 @@ Happens when OpenD restarts after repeated failed logins or Moomoo flags the IP.
 Telnet into OpenD and complete verification via SMS:
 
 ```bash
-ssh ubuntu@51.81.80.126
+ssh $VPS_HOST
 telnet 127.0.0.1 22222
 ```
 
@@ -137,7 +139,7 @@ You should see `Login successful` with your account quota. Paper runner reconnec
 
 **If phone verify says "not available during current period"** — try `req_pic_verify_code` instead.
 It downloads a CAPTCHA image to `/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png`.
-Copy it locally: `scp ubuntu@51.81.80.126:/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png ~/Desktop/captcha.png`
+Copy it locally: `scp $VPS_HOST:/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png ~/Desktop/captcha.png`
 Then: `input_pic_verify_code -code=XXXXXX`
 
 ---
@@ -145,7 +147,7 @@ Then: `input_pic_verify_code -code=XXXXXX`
 ## VPS — Daily Operations
 
 ```bash
-ssh ubuntu@51.81.80.126
+ssh $VPS_HOST
 
 # Check status
 systemctl --user status moomoo-opend.service moomoo-paper.service
@@ -174,7 +176,7 @@ rm ~/moomoo/STOP_TRADING.txt       # resume trading
 
 Pull today's logs from VPS to local for analysis:
 ```bash
-rsync -av ubuntu@51.81.80.126:~/moomoo/logs/ /home/logan/projects/moomoo/logs/
+rsync -av $VPS_HOST:~/moomoo/logs/ /home/logan/projects/moomoo/logs/
 ```
 
 Then run local analysis tools against the synced data.
@@ -195,7 +197,7 @@ Switch and restart:
 # Edit .env: STRATEGY_MODE=strict
 systemctl --user restart moomoo-paper.service
 # Sync to VPS if needed
-scp .env ubuntu@51.81.80.126:~/moomoo/.env && ssh ubuntu@51.81.80.126 'systemctl --user restart moomoo-paper.service'
+scp .env $VPS_HOST:~/moomoo/.env && ssh $VPS_HOST 'systemctl --user restart moomoo-paper.service'
 ```
 
 ---

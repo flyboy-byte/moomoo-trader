@@ -262,7 +262,7 @@ VPS deployment (as of 2026-06-10):
   MAX_POSITION_DOLLARS=900
   MAX_DAILY_LOSS=20
   Services: moomoo-paper.service + moomoo-dashboard.service (Restart=always)
-  Dashboard: http://51.81.80.126:8080 — date picker for history, /config editor (needs DASHBOARD_PASSWORD)
+  Dashboard: http://<VPS-IP>:8080 — date picker for history, /config editor (needs DASHBOARD_PASSWORD)
   Sync logs: ./sync_logs.sh (rsync VPS → local)
 
 What to build next (in priority order):

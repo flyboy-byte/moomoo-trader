@@ -1,6 +1,6 @@
 # VPS Agent Context
 
-This file is for Claude Code running on the VPS (51.81.80.126). Read this before doing anything.
+This file is for Claude Code running on the VPS (<VPS-IP>). Read this before doing anything.
 
 ## Your role
 

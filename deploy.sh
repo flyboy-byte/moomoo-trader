@@ -3,7 +3,9 @@
 # Run from local machine: ./deploy.sh
 set -euo pipefail
 
-VPS="ubuntu@51.81.80.126"
+# VPS host lives in .env (VPS_HOST=user@host) — not committed, repo is public.
+VPS=$(grep -E '^VPS_HOST=' .env | cut -d= -f2-)
+[ -n "$VPS" ] || { echo "VPS_HOST not set in .env"; exit 1; }
 
 echo "=== Pre-deploy checks ==="
 

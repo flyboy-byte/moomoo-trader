@@ -7,11 +7,13 @@ Usage:
     python scripts/web_dashboard.py --date 2026-06-01   # review past session
 """
 import argparse
-import hashlib
+import hmac
 import json
 import re
+import secrets
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -27,11 +29,27 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 
 app = Flask(__name__)
-# Secret key derived from dashboard password; falls back to a fixed dev key if unset.
-app.secret_key = hashlib.sha256(
-    (cfg.dashboard_password or "dev-no-password").encode() + b"moomoo-dash"
-).hexdigest()
+# Random per-process secret: sessions reset on restart (deploys), which is fine.
+# Never derive this from the password — the derivation scheme is public in this
+# repo, so a deterministic key would turn any captured session cookie into
+# offline brute-force material against the password.
+app.secret_key = secrets.token_hex(32)
 _date_override: date | None = None
+
+# In-memory login rate limit: max 5 failed attempts per IP per 15 minutes.
+_LOGIN_MAX_FAILS = 5
+_LOGIN_WINDOW_S = 900
+_login_fails: dict[str, list[float]] = {}
+
+
+def _client_ip() -> str:
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+
+
+def _login_blocked(ip: str) -> bool:
+    fails = [t for t in _login_fails.get(ip, []) if time.time() - t < _LOGIN_WINDOW_S]
+    _login_fails[ip] = fails
+    return len(fails) >= _LOGIN_MAX_FAILS
 
 # ---------------------------------------------------------------------------
 # Auth + config editor support
@@ -141,11 +159,20 @@ def login() -> Response | str:
         return redirect(url_for("index"))
     error = ""
     if request.method == "POST":
-        pw = request.form.get("password", "")
-        if pw == cfg.dashboard_password:
+        ip = _client_ip()
+        if _login_blocked(ip):
+            error = "Too many attempts. Try again in 15 minutes."
+        elif hmac.compare_digest(request.form.get("password", ""), cfg.dashboard_password):
             session["logged_in"] = True
-            return redirect(request.args.get("next") or url_for("index"))
-        error = "Wrong password."
+            _login_fails.pop(ip, None)
+            # only same-site relative redirects (block open-redirect via ?next=)
+            nxt = request.args.get("next", "")
+            if not nxt.startswith("/") or nxt.startswith("//"):
+                nxt = url_for("index")
+            return redirect(nxt)
+        else:
+            _login_fails.setdefault(ip, []).append(time.time())
+            error = "Wrong password."
     return render_template_string(f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Login</title>
 <style>{_CSS_BASE}</style></head>
