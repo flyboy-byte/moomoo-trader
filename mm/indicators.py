@@ -68,6 +68,14 @@ def rsi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
 
 def adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     df = df.copy()
+    # ta's ADXIndicator needs > 2*period bars (its DI series is len-period long
+    # and it seeds from the first `period` of those). Short frames otherwise
+    # raise IndexError — live hits this on mornings after long weekends when
+    # the 3-day candle fetch spans mostly holiday. ADX=NaN means "no regime
+    # signal yet", which downstream scoring already treats as not-ranging.
+    if len(df) <= 2 * period:
+        df["adx"] = float("nan")
+        return df
     df["adx"] = ADXIndicator(df["high"], df["low"], df["close"], window=period).adx()
     return df
 

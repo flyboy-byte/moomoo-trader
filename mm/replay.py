@@ -287,7 +287,12 @@ def replay(
                 # begins at the first bar ON that date
                 win_start = (SimClock.now - timedelta(days=paper.CANDLE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
                 j = int(df["time_key"].searchsorted(pd.Timestamp(win_start)))
-                current_window[sym] = df.iloc[j: i + 1].reset_index(drop=True)
+                window = df.iloc[j: i + 1].reset_index(drop=True)
+                # mirror the live runner's len<20 skip (post-holiday mornings can
+                # leave the 3-day fetch with too few bars for ADX warmup)
+                if len(window) < 20:
+                    continue
+                current_window[sym] = window
                 paper._eval_symbol_all_strategies(
                     sym, strategies, broker, 1, positions, elogs, daily,
                     orb_traded=orb_traded,
