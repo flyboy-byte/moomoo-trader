@@ -410,13 +410,23 @@ def _bb_kdj_signals(records: list[dict], kdj_window: int = 3) -> None:
     print(f"    bb_touch + kdj_w + bonus≥2: {len(would_fire):>4}  ← actual would-fire count")
 
     if would_fire:
-        # Show each would-fire bar and what happened
+        # Show each would-fire bar and what happened.
+        # Checks risk_block AND signal_skip events (e.g. entry_unfilled, already_attempted).
+        # Note: _entry_attempted dedup emits no log event — silence here is normal after
+        # a candle has already been attempted (first poll fires, subsequent polls silent).
         risk_blocks = [r for r in records if r.get("event") == "risk_block"
                        and r.get("strategy") == "bb_kdj"]
-        # Group risk_blocks by (sym, date)
-        blocks_by_sym_date: dict[tuple, list] = defaultdict(list)
-        for rb in risk_blocks:
-            blocks_by_sym_date[(rb.get("_sym", ""), rb.get("ts", "")[:10])].append(rb)
+        bb_skips = [r for r in records if r.get("event") == "signal_skip"
+                    and r.get("strategy") == "bb_kdj"]
+        bb_entries = [r for r in records if r.get("event") == "position_open"
+                      and r.get("strategy") == "bb_kdj"]
+
+        events_by_sym_date: dict[tuple, list] = defaultdict(list)
+        for rb in risk_blocks + bb_skips:
+            events_by_sym_date[(rb.get("_sym", ""), rb.get("ts", "")[:10])].append(rb)
+        entries_by_sym_date: dict[tuple, list] = defaultdict(list)
+        for e in bb_entries:
+            entries_by_sym_date[(e.get("_sym", ""), e.get("ts", "")[:10])].append(e)
 
         print()
         for r in sorted(would_fire, key=lambda x: x.get("ts", "")):
@@ -424,10 +434,16 @@ def _bb_kdj_signals(records: list[dict], kdj_window: int = 3) -> None:
             date = r.get("ts", "")[:10]
             cts = r["candle_ts"]
             bonus = r.get("bonus_score", 0)
-            day_blocks = blocks_by_sym_date.get((sym, date), [])
-            block_reasons = Counter(b.get("reason", "?") for b in day_blocks)
-            block_str = ", ".join(f"{k}×{v}" for k, v in block_reasons.items()) if block_reasons else "no block logged"
-            print(f"    {date} {sym:<8} {cts}  bonus={bonus}  blocked_by=[{block_str}]")
+            day_events = events_by_sym_date.get((sym, date), [])
+            reasons = Counter(b.get("reason") or b.get("event", "?") for b in day_events)
+            day_entries = entries_by_sym_date.get((sym, date), [])
+            if day_entries:
+                entry_str = f"ENTERED at {day_entries[0].get('entry')}"
+            elif reasons:
+                entry_str = ", ".join(f"{k}×{v}" for k, v in reasons.items())
+            else:
+                entry_str = "no entry/block/skip logged (_entry_attempted dedup?)"
+            print(f"    {date} {sym:<8} {cts}  bonus={bonus}  → [{entry_str}]")
 
     # Overall risk_block summary for bb_kdj
     all_blocks = [r for r in records if r.get("event") == "risk_block" and r.get("strategy") == "bb_kdj"]
