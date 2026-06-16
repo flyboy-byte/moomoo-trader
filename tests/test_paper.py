@@ -18,7 +18,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _reload_paper(monkeypatch, env: dict):
-    """Reload mm.config, mm.risk, mm.paper with patched env vars."""
+    """Reload mm.config, mm.risk, mm.evals, mm.paper with patched env vars."""
     base = {
         "TRD_ENV": "SIMULATE",
         "LIVE_TRADING_ENABLED": "false",
@@ -35,6 +35,8 @@ def _reload_paper(monkeypatch, env: dict):
     importlib.reload(mm.risk)
     import mm.clock
     importlib.reload(mm.clock)
+    import mm.evals
+    importlib.reload(mm.evals)
     import mm.paper
     importlib.reload(mm.paper)
     # Unit tests run at any hour — bypass the market-hours order guard.
@@ -133,14 +135,14 @@ class TestQtyFallback:
 
     def test_whole_share_mode_returns_int(self, monkeypatch):
         p = _reload_paper(monkeypatch, {"MAX_POSITION_DOLLARS": "900"})
-        p._slot_dollars = 0.0
+        import mm.risk; mm.risk._slot_dollars = 0.0
         qty = p._qty(500.0, "US.SPY")
         assert isinstance(qty, int)
         assert qty == 1
 
     def test_fractional_large_capital_returns_float_above_one(self, monkeypatch):
         p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "900"})
-        p._slot_dollars = 5000.0
+        import mm.risk; mm.risk._slot_dollars = 5000.0
         qty = p._qty(100.0, "US.SPY")
         assert qty >= 1.0
         assert isinstance(qty, float)
@@ -148,27 +150,27 @@ class TestQtyFallback:
     def test_fractional_sub_one_falls_back_to_whole_share(self, monkeypatch):
         """$12.50 slot at $720/share → 0.017 fractional → must fall back to qty=1."""
         p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "900"})
-        p._slot_dollars = 12.50
+        import mm.risk; mm.risk._slot_dollars = 12.50
         qty = p._qty(720.0, "US.SPY")
         assert qty >= 1
         assert isinstance(qty, int)
 
     def test_fractional_exactly_one_not_fallen_back(self, monkeypatch):
         p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "900"})
-        p._slot_dollars = 720.0
+        import mm.risk; mm.risk._slot_dollars = 720.0
         qty = p._qty(720.0, "US.SPY")
         assert qty >= 1.0
 
     def test_fallback_still_respects_position_cap(self, monkeypatch):
         """Whole-share fallback returns 0 when even 1 share exceeds the dollar cap."""
         p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "500"})
-        p._slot_dollars = 12.50
+        import mm.risk; mm.risk._slot_dollars = 12.50
         qty = p._qty(720.0, "US.SPY")
         assert qty == 0
 
     def test_zero_slot_dollars_uses_whole_share(self, monkeypatch):
         p = _reload_paper(monkeypatch, {"MAX_POSITION_DOLLARS": "900"})
-        p._slot_dollars = 0.0
+        import mm.risk; mm.risk._slot_dollars = 0.0
         qty = p._qty(300.0, "US.IWM")
         assert isinstance(qty, int)
         assert qty == 3

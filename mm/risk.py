@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from . import clock
+from . import config as _config
 from .clock import is_market_open as market_open, seconds_until_open
 from .config import cfg
 from .logger import get_logger
@@ -160,3 +161,42 @@ class DailyTracker:
         log.info("Daily stats: trades=%d/%d  pnl=%.4f/%.4f  strategy_trades=%s",
                  self._trades, cfg.max_trades_per_day, self._pnl, -cfg.max_daily_loss,
                  self._strategy_trades)
+
+
+# ---------------------------------------------------------------------------
+# Per-position sizing — set at run_multi() startup, read by evals
+# ---------------------------------------------------------------------------
+
+# Set at startup from TOTAL_CAPITAL / (n_symbols * n_strategies). 0 = not set.
+_slot_dollars: float = 0.0
+
+
+def _position_cap(symbol: str) -> float:
+    """Dollar cap for a single position — slot dollars if capital mode, else per-symbol cap."""
+    if _slot_dollars > 0:
+        return _slot_dollars
+    return _config.cfg.symbol_size_overrides.get(symbol, _config.cfg.max_position_dollars)
+
+
+def _qty(price: float, symbol: str, stop: float | None = None) -> int | float:
+    """Return order qty using risk-normalized, fractional, or whole-share logic.
+
+    When RISK_DOLLARS_PER_TRADE is set and the caller provides the stop price:
+    qty = risk_dollars / stop_distance, capped by the position dollar cap —
+    every trade risks the same dollars regardless of volatility.
+
+    Else, when TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty
+    derived from the pre-computed per-slot dollar allocation.
+    Falls back to whole-share calc_qty() when fractional result < 1 — Moomoo
+    rejects sub-share orders with "Invalid quantity" and the trade is silently lost.
+    Also falls back when TOTAL_CAPITAL is not set or FRACTIONAL_SHARES=false.
+    """
+    if _config.cfg.risk_dollars_per_trade > 0 and stop is not None:
+        return calc_qty_risk(price, stop, _config.cfg.risk_dollars_per_trade, _position_cap(symbol))
+    if _slot_dollars > 0 and _config.cfg.fractional_shares:
+        qty = calc_qty_fractional(price, _slot_dollars)
+        if qty >= 1:
+            return qty
+        log.warning("Fractional qty %.6f < 1 for %s at %.2f — falling back to whole-share",
+                    qty, symbol, price)
+    return calc_qty(price, symbol)
