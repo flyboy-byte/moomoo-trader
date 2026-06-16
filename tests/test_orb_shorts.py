@@ -76,7 +76,7 @@ def test_load_position_restores_direction():
     with tempfile.TemporaryDirectory() as tmpdir:
         pos_file = Path(tmpdir) / "paper_US_SPY_orb_position.json"
         pos_file.write_text(json.dumps(d))
-        with patch("mm.paper._position_file", return_value=pos_file):
+        with patch("mm.events._position_file", return_value=pos_file):
             loaded = _load_position("US.SPY", "orb")
 
     assert loaded is not None

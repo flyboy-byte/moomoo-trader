@@ -432,7 +432,7 @@ class TestMarketHoursGuard:
     def test_order_refused_when_market_closed(self, monkeypatch):
         paper = _reload_paper(monkeypatch, {})
         import mm.clock
-        mm.clock.is_market_open = lambda: False
+        monkeypatch.setattr(mm.clock, "is_market_open", lambda: False)
         ctx = _mock_ctx_ok()
         assert paper._place_buy(ctx, 1, "US.SPY", 100.0, 1) == ""
         assert paper._place_sell(ctx, 1, "US.SPY", 100.0, 1) == ""
