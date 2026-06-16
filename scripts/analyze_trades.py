@@ -562,18 +562,26 @@ def main() -> None:
     parser.add_argument("--date", help="YYYY-MM-DD")
     parser.add_argument("--all", action="store_true", help="All available dates (default when no --date)")
     parser.add_argument("--from", dest="from_date", metavar="YYYY-MM-DD",
-                        help="Exclude logs before this date (default: 2026-06-10, the confirmed-fill era)")
+                        help="Exclude logs before this date (default: 2026-06-10 for live logs)")
     parser.add_argument("--symbol", help="Filter to one symbol, e.g. US.SPY")
     parser.add_argument("--strategy", help="Filter to one strategy, e.g. vwap_pb")
+    parser.add_argument("--dir", dest="logs_dir", metavar="PATH",
+                        help="Log directory (default: logs/). Use replay_out/ for replay data.")
     args = parser.parse_args()
 
     # Default to --all when no date specified
     all_dates = args.all or not args.date
 
-    # Default: exclude pre-confirmed-fill-era logs (fire-and-forget, duplicate events)
-    from_date = args.from_date if args.from_date is not None else ("2026-06-10" if all_dates else None)
+    logs_dir = Path(args.logs_dir) if args.logs_dir else Path(__file__).parent.parent / "logs"
 
-    logs_dir = Path(__file__).parent.parent / "logs"
+    # For live logs, default to excluding pre-confirmed-fill era. For custom dirs (replay), no default cutoff.
+    if args.from_date is not None:
+        from_date = args.from_date
+    elif args.logs_dir:
+        from_date = None  # replay dirs don't need the era cutoff
+    else:
+        from_date = "2026-06-10" if all_dates else None
+
     paths = _find_logs(logs_dir, args.date, args.symbol, all_dates, from_date)
 
     if not paths:
