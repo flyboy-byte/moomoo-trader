@@ -352,7 +352,8 @@ class TestConfirmFill:
 
     def test_pending_times_out(self, monkeypatch):
         paper = _reload_paper(monkeypatch, {})
-        monkeypatch.setattr(paper, "_FILL_POLL_S", 0.01)
+        import mm.execution
+        monkeypatch.setattr(mm.execution, "_FILL_POLL_S", 0.01)
         ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
         status, dealt, price = paper._confirm_fill(ctx, 1, "111", timeout_s=0.05)
         assert status == "SUBMITTED"
@@ -372,9 +373,10 @@ class TestExecuteEntry:
 
     def test_unfilled_entry_cancelled_and_no_trade(self, monkeypatch):
         paper = _reload_paper(monkeypatch, {})
-        monkeypatch.setattr(paper, "_FILL_TIMEOUT_S", 0.05)
-        monkeypatch.setattr(paper, "_FILL_POLL_S", 0.01)
-        monkeypatch.setattr(paper, "_CANCEL_RECHECK_S", 0.05)
+        import mm.execution
+        monkeypatch.setattr(mm.execution, "_FILL_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(mm.execution, "_FILL_POLL_S", 0.01)
+        monkeypatch.setattr(mm.execution, "_CANCEL_RECHECK_S", 0.05)
         ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
         result = paper._execute_entry(ctx, 1, "US.QQQ", 1, 707.20, "vwap_pb", MagicMock())
         assert result is None
@@ -418,10 +420,11 @@ class TestExecuteExit:
 
     def test_unfilled_exit_returns_none(self, monkeypatch):
         paper = _reload_paper(monkeypatch, {})
+        import mm.execution
         monkeypatch.setattr(paper, "notify", MagicMock())
-        monkeypatch.setattr(paper, "_FILL_TIMEOUT_S", 0.05)
-        monkeypatch.setattr(paper, "_FILL_POLL_S", 0.01)
-        monkeypatch.setattr(paper, "_CANCEL_RECHECK_S", 0.05)
+        monkeypatch.setattr(mm.execution, "_FILL_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(mm.execution, "_FILL_POLL_S", 0.01)
+        monkeypatch.setattr(mm.execution, "_CANCEL_RECHECK_S", 0.05)
         ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
         fill = paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
         assert fill is None  # caller must keep the position open
