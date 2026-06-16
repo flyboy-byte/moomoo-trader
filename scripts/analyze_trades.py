@@ -54,7 +54,8 @@ def _load_jsonl(paths: list[Path]) -> list[dict]:
     return sorted(records, key=lambda r: r.get("ts", ""))
 
 
-def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dates: bool) -> list[Path]:
+def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dates: bool,
+               from_date: str | None = None) -> list[Path]:
     pattern = re.compile(r"paper_(.+)_(\d{4}-\d{2}-\d{2})\.jsonl$")
     results = []
     for p in sorted(logs_dir.glob("paper_*_????-??-??.jsonl")):
@@ -66,6 +67,8 @@ def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dat
         if symbol and sym_dotted != symbol:
             continue
         if date_str and date != date_str:
+            continue
+        if from_date and date < from_date:
             continue
         if not all_dates and not date_str:
             today = datetime.now().strftime("%Y-%m-%d")
@@ -90,9 +93,23 @@ def _to_et(ts_str: str) -> datetime:
 
 
 def _pair_trades(records: list[dict]) -> list[dict]:
-    """Pair position_open with position_close. Returns list of trade dicts."""
-    opens = [r for r in records if r.get("event") == "position_open"]
-    closes = [r for r in records if r.get("event") == "position_close"]
+    """Pair position_open with position_close. Returns list of trade dicts.
+
+    Deduplicates by (symbol, strategy, ts) — old fire-and-forget logs (pre-Jun-10)
+    wrote position_open/close once per poll cycle instead of once on entry/exit.
+    """
+    def _dedup(events: list[dict]) -> list[dict]:
+        seen: set = set()
+        out = []
+        for r in events:
+            key = (r.get("symbol") or r.get("_sym"), r.get("strategy"), r.get("ts"))
+            if key not in seen:
+                seen.add(key)
+                out.append(r)
+        return out
+
+    opens = _dedup([r for r in records if r.get("event") == "position_open"])
+    closes = _dedup([r for r in records if r.get("event") == "position_close"])
     trades = []
     for o in opens:
         sym = o.get("symbol") or o.get("_sym", "?")
@@ -495,9 +512,6 @@ def _concurrency(trades: list[dict]) -> None:
           (f"  (at {peak_at})" if peak_n > 1 else ""))
     print(f"  Peak combined notional:      ${peak_notional:,.0f}")
     print(f"  Entries while ≥1 open:       {stacked_entries}/{len(closed)}")
-    print("\n  Historical context (scripts/analyze_portfolio.py on 2022-2026 backtests):")
-    print("  strategy daily-PnL correlations ≈ 0.04-0.08 (diversified), but 66% of")
-    print("  entries stack and worst combined day was -$27/share across 9 pairs.")
 
 
 def _daily_trend(trades: list[dict]) -> None:
@@ -531,6 +545,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Comprehensive trade analysis from paper JSONL logs.")
     parser.add_argument("--date", help="YYYY-MM-DD")
     parser.add_argument("--all", action="store_true", help="All available dates (default when no --date)")
+    parser.add_argument("--from", dest="from_date", metavar="YYYY-MM-DD",
+                        help="Exclude logs before this date (default: 2026-06-10, the confirmed-fill era)")
     parser.add_argument("--symbol", help="Filter to one symbol, e.g. US.SPY")
     parser.add_argument("--strategy", help="Filter to one strategy, e.g. vwap_pb")
     args = parser.parse_args()
@@ -538,8 +554,11 @@ def main() -> None:
     # Default to --all when no date specified
     all_dates = args.all or not args.date
 
+    # Default: exclude pre-confirmed-fill-era logs (fire-and-forget, duplicate events)
+    from_date = args.from_date if args.from_date is not None else ("2026-06-10" if all_dates else None)
+
     logs_dir = Path(__file__).parent.parent / "logs"
-    paths = _find_logs(logs_dir, args.date, args.symbol, all_dates)
+    paths = _find_logs(logs_dir, args.date, args.symbol, all_dates, from_date)
 
     if not paths:
         hint = args.date or "all dates"
