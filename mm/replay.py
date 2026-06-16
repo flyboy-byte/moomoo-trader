@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 
+import mm.clock as _clock
 import mm.paper as paper
 import mm.risk as risk
 from .logger import get_logger
@@ -40,39 +41,12 @@ log = get_logger("replay")
 
 
 # ---------------------------------------------------------------------------
-# Simulated clock — patched into mm.paper / mm.risk in place of datetime/date/time
+# Simulated clock — patches mm.clock (single seam for the whole package)
 # ---------------------------------------------------------------------------
 
 class SimClock:
     now: datetime = datetime(2022, 1, 1)
     _monotonic: float = 0.0
-
-
-class FakeDateTime(datetime):
-    @classmethod
-    def now(cls, tz=None):  # noqa: ARG003 — runner always strips tzinfo right after
-        n = SimClock.now
-        return cls(n.year, n.month, n.day, n.hour, n.minute, n.second)
-
-
-class FakeDate(date):
-    @classmethod
-    def today(cls):
-        n = SimClock.now
-        return date(n.year, n.month, n.day)
-
-
-class SimTime:
-    """Stands in for the `time` module inside mm.paper: sleeps advance a counter
-    instead of wall time, so fill-confirmation timeouts resolve instantly."""
-
-    @staticmethod
-    def monotonic() -> float:
-        return SimClock._monotonic
-
-    @staticmethod
-    def sleep(seconds: float) -> None:
-        SimClock._monotonic += seconds
 
 
 # ---------------------------------------------------------------------------
@@ -234,11 +208,12 @@ def replay(
 
     saved = {
         "logs_dir": pcfg.logs_dir,
-        "market_open": paper.market_open,
-        "datetime": paper.datetime,
-        "date": paper.date,
-        "time": paper.time,
-        "risk_date": risk.date,
+        "clock_now": _clock.now,
+        "clock_now_et": _clock.now_et,
+        "clock_today": _clock.today,
+        "clock_monotonic": _clock.monotonic,
+        "clock_sleep": _clock.sleep,
+        "clock_is_market_open": _clock.is_market_open,
         "notify": paper.notify,
         "notify_entry": paper.notify_entry,
         "notify_exit": paper.notify_exit,
@@ -250,11 +225,12 @@ def replay(
         paper.log.setLevel(logging.ERROR)
 
     pcfg.logs_dir = out_dir
-    paper.market_open = lambda: True
-    paper.datetime = FakeDateTime
-    paper.date = FakeDate
-    paper.time = SimTime
-    risk.date = FakeDate
+    _clock.now = lambda: SimClock.now
+    _clock.now_et = lambda: SimClock.now
+    _clock.today = lambda: SimClock.now.date()
+    _clock.monotonic = lambda: SimClock._monotonic
+    _clock.sleep = lambda s: setattr(SimClock, "_monotonic", SimClock._monotonic + s)
+    _clock.is_market_open = lambda: True
     paper.notify = lambda *a, **k: None
     paper.notify_entry = lambda *a, **k: None
     paper.notify_exit = lambda *a, **k: None
@@ -303,11 +279,12 @@ def replay(
                 paper._reconcile_positions(broker, 1, positions, elogs)
     finally:
         pcfg.logs_dir = saved["logs_dir"]
-        paper.market_open = saved["market_open"]
-        paper.datetime = saved["datetime"]
-        paper.date = saved["date"]
-        paper.time = saved["time"]
-        risk.date = saved["risk_date"]
+        _clock.now = saved["clock_now"]
+        _clock.now_et = saved["clock_now_et"]
+        _clock.today = saved["clock_today"]
+        _clock.monotonic = saved["clock_monotonic"]
+        _clock.sleep = saved["clock_sleep"]
+        _clock.is_market_open = saved["clock_is_market_open"]
         paper.notify = saved["notify"]
         paper.notify_entry = saved["notify_entry"]
         paper.notify_exit = saved["notify_exit"]

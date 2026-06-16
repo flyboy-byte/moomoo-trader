@@ -19,12 +19,10 @@ is written to logs/paper_SYMBOL_YYYY-MM-DD.jsonl with a strategy tag on each eve
 """
 import json
 import sys
-import time
 from contextlib import contextmanager
 import math
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pandas as pd
@@ -37,12 +35,13 @@ from moomoo import (
     OrderType,
 )
 
+from . import clock
 from .config import cfg, validate_config
 from .data import fetch_candles
 from .indicators import add_all
 from .notifications import notify, notify_entry, notify_exit
 from .orb_strategy import _build_opening_ranges
-from .risk import trading_allowed, calc_qty, calc_qty_fractional, calc_qty_risk, per_slot_dollars, DailyTracker, market_open, seconds_until_open
+from .risk import trading_allowed, calc_qty, calc_qty_fractional, calc_qty_risk, per_slot_dollars, DailyTracker
 from .signals import snapshot as signal_snapshot
 from .strategy import compute_signals
 from .vwap_signals import snapshot_vwap
@@ -75,11 +74,11 @@ class PaperEventLog:
 
     @property
     def _path(self) -> Path:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = clock.now().strftime("%Y-%m-%d")
         return cfg.logs_dir / f"paper_{self._sym_safe}_{date_str}.jsonl"
 
     def _write(self, event: str, strategy: str = "", **fields) -> None:
-        record = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event,
+        record = {"ts": clock.now().isoformat(timespec="seconds"), "event": event,
                   "strategy": strategy, **fields}
         try:
             with open(self._path, "a") as f:
@@ -266,7 +265,7 @@ def _reconcile_positions(
             if float(row.get("qty", 0)) != 0:
                 broker_syms.add(str(row[sym_col]))
 
-    now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    now_et = clock.now_et()
 
     any_local = False
     for (sym, strat), pos in list(positions.items()):
@@ -376,7 +375,7 @@ def _get_simulate_acc_id(ctx: OpenSecTradeContext) -> int:
 
 
 def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
-    if not market_open():
+    if not clock.is_market_open():
         log.error("Order refused (market closed): BUY %s", symbol)
         return ""
     price = round(price, 2)
@@ -394,7 +393,7 @@ def _place_buy(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
-    if not market_open():
+    if not clock.is_market_open():
         log.error("Order refused (market closed): SELL %s", symbol)
         return ""
     price = round(price, 2)
@@ -412,7 +411,7 @@ def _place_sell(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
-    if not market_open():
+    if not clock.is_market_open():
         log.error("Order refused (market closed): SELL_SHORT %s", symbol)
         return ""
     price = round(price, 2)
@@ -430,7 +429,7 @@ def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
 
 
 def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
-    if not market_open():
+    if not clock.is_market_open():
         log.error("Order refused (market closed): BUY_BACK %s", symbol)
         return ""
     price = round(price, 2)
@@ -472,7 +471,7 @@ def _confirm_fill(tctx, acc_id: int, order_id: str,
     Returns (status, dealt_qty, dealt_avg_price). dealt_avg_price is None
     if nothing was filled.
     """
-    deadline = time.monotonic() + (timeout_s if timeout_s is not None else _FILL_TIMEOUT_S)
+    deadline = clock.monotonic() + (timeout_s if timeout_s is not None else _FILL_TIMEOUT_S)
     status: str | None = None
     dealt = 0.0
     price: float | None = None
@@ -489,9 +488,9 @@ def _confirm_fill(tctx, acc_id: int, order_id: str,
                     return status, dealt, price
         except Exception as e:
             log.warning("confirm_fill query failed for order %s: %s", order_id, e)
-        if time.monotonic() >= deadline:
+        if clock.monotonic() >= deadline:
             return status, dealt, price
-        time.sleep(_FILL_POLL_S)
+        clock.sleep(_FILL_POLL_S)
 
 
 def _cancel_order(tctx, acc_id: int, order_id: str) -> bool:
@@ -645,8 +644,8 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
     bar that will actually be evaluated. Checking the forming bar's age is wrong:
     a same-day partial bar has age ~0 but the second-to-last could be from yesterday.
     """
-    end = datetime.now().strftime("%Y-%m-%d")
-    start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    end = clock.now().strftime("%Y-%m-%d")
+    start = (clock.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     df = fetch_candles(symbol=symbol, ktype=cfg.candle_ktype, start=start, end=end)
     if df.empty:
         return df
@@ -660,7 +659,7 @@ def _latest_closed_candles(symbol: str, days: int = CANDLE_LOOKBACK_DAYS) -> pd.
 
     # NOW check staleness of the bar we'll actually evaluate
     last_closed_ts = df.iloc[-1]["time_key"]
-    now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    now_et = clock.now_et()
     age_min = (now_et - pd.Timestamp(last_closed_ts)).total_seconds() / 60
     log.info(
         "Candle check: last_closed=%s  age=%.0fmin",
@@ -701,7 +700,7 @@ def _eval_bb_kdj(
     last = df_signals.iloc[-1]
     candle_ts = last["time_key"]
     close = float(last["close"])
-    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    now = clock.now_et()
 
     sig = signal_snapshot(last)
     bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
@@ -805,7 +804,7 @@ def _eval_vwap(
     last = df_signals.iloc[-1]
     candle_ts = last["time_key"]
     close = float(last["close"])
-    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    now = clock.now_et()
 
     vsig = snapshot_vwap(last)
     atr_val = float(last.get("atr", 1) or 1)
@@ -907,7 +906,7 @@ def _eval_vwap_pb(
     candle_ts = last["time_key"]
     close = float(last["close"])
     vwap = float(last["vwap"]) if not pd.isna(last.get("vwap")) else None
-    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    now = clock.now_et()
 
     if vwap is None:
         return position
@@ -1018,7 +1017,7 @@ def _eval_orb(
     bar_time = pd.Timestamp(candle_ts)
     bar_date = bar_time.date()
     bar_clock = bar_time.time()
-    now = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    now = clock.now_et()
     is_time_stop = bar_clock >= dtime(15, 45)
 
     orb_mins = cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes)
@@ -1190,7 +1189,7 @@ def _trigger_eod_summary() -> None:
             return
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        s = mod.load_summary(date.today())
+        s = mod.load_summary(clock.today())
         log.info("EOD: %d closed trades  pnl=%+.2f", len(s.closed_trades), s.realized_pnl)
         if cfg.discord_webhook_url:
             notify(mod.format_discord(s))
@@ -1254,7 +1253,7 @@ def run_multi(symbols: list[str] | None = None) -> None:
     daily = DailyTracker()
     consecutive_errors = 0
     _was_market_open: bool = False
-    _session_day: date = date.today()
+    _session_day: date = clock.today()
     _reconcile_counter: int = 0
     _RECONCILE_EVERY: int = 15  # poll cycles (~15 min)
 
@@ -1280,8 +1279,8 @@ def run_multi(symbols: list[str] | None = None) -> None:
         log.info("No local positions to reconcile — starting fresh")
 
     while True:
-        _is_market_open = market_open()
-        today = date.today()
+        _is_market_open = clock.is_market_open()
+        today = clock.today()
 
         # New calendar day — heartbeat so you know it's alive
         if today != _session_day:
@@ -1294,14 +1293,14 @@ def run_multi(symbols: list[str] | None = None) -> None:
         _was_market_open = _is_market_open
 
         if not _is_market_open:
-            secs = seconds_until_open()
+            secs = clock.seconds_until_open()
             log.info("Market closed — sleeping %.0f min until near open", secs / 60)
-            time.sleep(max(secs, POLL_SECONDS))
+            clock.sleep(max(secs, POLL_SECONDS))
             continue
 
         if not trading_allowed():
             log.info("Trading blocked — waiting")
-            time.sleep(POLL_SECONDS)
+            clock.sleep(POLL_SECONDS)
             continue
 
         try:
@@ -1334,13 +1333,13 @@ def run_multi(symbols: list[str] | None = None) -> None:
             if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                 log.warning("%d errors — backing off %ds", consecutive_errors, BACKOFF_SECONDS)
                 notify(f"[PAPER] {consecutive_errors} errors, backing off {BACKOFF_SECONDS}s")
-                time.sleep(BACKOFF_SECONDS)
+                clock.sleep(BACKOFF_SECONDS)
                 consecutive_errors = 0
                 continue
         else:
             consecutive_errors = 0
 
-        time.sleep(POLL_SECONDS)
+        clock.sleep(POLL_SECONDS)
 
 
 def _eval_symbol_all_strategies(
@@ -1382,7 +1381,7 @@ def _eval_symbol_all_strategies(
             )
         elif strat == "orb":
             prev_pos = positions[(symbol, strat)]
-            already_entered = (orb_traded or {}).get(symbol) == date.today()
+            already_entered = (orb_traded or {}).get(symbol) == clock.today()
             positions[(symbol, strat)] = _eval_orb(
                 symbol, df_raw, tctx, acc_id,
                 prev_pos, elog, daily,
@@ -1391,8 +1390,8 @@ def _eval_symbol_all_strategies(
             # New position just opened — persist the traded date so restarts can't re-enter
             if prev_pos is None and positions[(symbol, strat)] is not None:
                 if orb_traded is not None:
-                    orb_traded[symbol] = date.today()
-                    _save_orb_traded(symbol, date.today())
+                    orb_traded[symbol] = clock.today()
+                    _save_orb_traded(symbol, clock.today())
         elif strat == "vwap_pb":
             if df_bb is None:
                 df_bb = compute_signals(df_raw)

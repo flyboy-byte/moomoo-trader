@@ -33,11 +33,13 @@ def _reload_paper(monkeypatch, env: dict):
     mm.config.cfg = mm.config.Config()
     import mm.risk
     importlib.reload(mm.risk)
+    import mm.clock
+    importlib.reload(mm.clock)
     import mm.paper
     importlib.reload(mm.paper)
     # Unit tests run at any hour — bypass the market-hours order guard.
     # TestMarketHoursGuard restores the real check explicitly.
-    mm.paper.market_open = lambda: True
+    mm.clock.is_market_open = lambda: True
     return mm.paper
 
 
@@ -429,7 +431,8 @@ class TestMarketHoursGuard:
 
     def test_order_refused_when_market_closed(self, monkeypatch):
         paper = _reload_paper(monkeypatch, {})
-        paper.market_open = lambda: False
+        import mm.clock
+        mm.clock.is_market_open = lambda: False
         ctx = _mock_ctx_ok()
         assert paper._place_buy(ctx, 1, "US.SPY", 100.0, 1) == ""
         assert paper._place_sell(ctx, 1, "US.SPY", 100.0, 1) == ""

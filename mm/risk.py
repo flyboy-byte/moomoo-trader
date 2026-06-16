@@ -1,42 +1,20 @@
 """Safety checks run before any order is placed."""
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+from . import clock
+from .clock import is_market_open as market_open, seconds_until_open
 from .config import cfg
 from .logger import get_logger
+
+# Re-export so existing callers (paper.py, tests) importing from risk still work.
+__all__ = ["market_open", "seconds_until_open"]
 
 log = get_logger("risk")
 
 _KILL_SWITCH = Path(__file__).parent.parent / "STOP_TRADING.txt"
-_ET = ZoneInfo("America/New_York")
-_OPEN = (9, 30)
-_CLOSE = (16, 0)
-
-
-def market_open() -> bool:
-    """Return True if US equity market is currently open (Mon-Fri 9:30-16:00 ET)."""
-    now = datetime.now(_ET)
-    if now.weekday() >= 5:
-        return False
-    t = (now.hour, now.minute)
-    return _OPEN <= t < _CLOSE
-
-
-def seconds_until_open() -> float:
-    """Return seconds until next market open (2 min early warm-up buffer)."""
-    now = datetime.now(_ET)
-    if market_open():
-        return 0.0
-    candidate = now.replace(hour=9, minute=28, second=0, microsecond=0)
-    # Only advance to tomorrow if the market has already opened today
-    if now >= now.replace(hour=9, minute=30, second=0, microsecond=0):
-        candidate += timedelta(days=1)
-    while candidate.weekday() >= 5:
-        candidate += timedelta(days=1)
-    return max(60.0, (candidate - now).total_seconds())
 
 
 def kill_switch_active() -> bool:
@@ -129,13 +107,13 @@ class DailyTracker:
     - Global: MAX_TRADES_PER_DAY across all strategies combined.
     - Per-strategy: MAX_TRADES_PER_STRATEGY per strategy (0 = disabled).
     """
-    _day: date = field(default_factory=date.today)
+    _day: date = field(default_factory=clock.today)
     _trades: int = 0
     _pnl: float = 0.0
     _strategy_trades: dict = field(default_factory=dict)  # {strategy: trade_count}
 
     def _maybe_reset(self) -> None:
-        today = date.today()
+        today = clock.today()
         if today != self._day:
             log.info("New trading day %s — resetting daily counters (prev: %d trades, pnl=%.4f)",
                      today, self._trades, self._pnl)
