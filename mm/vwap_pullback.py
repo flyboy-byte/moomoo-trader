@@ -34,11 +34,11 @@ from .logger import get_logger
 
 log = get_logger("vwap_pullback")
 
-VWAP_PB_STOP_MULT: float = float(os.getenv("VWAP_PB_STOP_MULT", "0.75"))
-VWAP_PB_MAX_CROSSES: int = int(os.getenv("VWAP_PB_MAX_CROSSES", "2"))
+VWAP_PB_STOP_MULT: float = float(os.getenv("VWAP_PB_STOP_MULT", "1.0"))
+VWAP_PB_MAX_CROSSES: int = int(os.getenv("VWAP_PB_MAX_CROSSES", "1"))
 
 _MARKET_OPEN = dtime(9, 30)
-_NO_ENTRY_BEFORE = dtime(9, 45)
+_NO_ENTRY_BEFORE = dtime(10, 0)
 _TIME_STOP = dtime(15, 45)
 
 

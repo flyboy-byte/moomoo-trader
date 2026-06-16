@@ -102,6 +102,23 @@ def _reconcile_positions(
             continue
         any_local = True
         if sym not in broker_syms:
+            # Broker shows zero net for this symbol. Before concluding it's a ghost,
+            # check if another strategy on the same symbol has a FILLED order —
+            # that means offsetting long+short positions net to 0, which is valid
+            # (e.g. BB+KDJ long SPY + ORB short SPY). Clearing either position in
+            # that scenario would leave a stranded unmanaged trade.
+            other_filled = any(
+                p is not None and p.order_id and
+                _order_status(tctx, acc_id, p.order_id) in _FILLED_STATUSES
+                for (osym, ostrat), p in positions.items()
+                if osym == sym and ostrat != strat
+            )
+            if other_filled:
+                log.info("RECONCILE SKIP [%s/%s]: broker net=0 but another strategy on %s "
+                         "has FILLED order — treating as offsetting positions, keeping",
+                         sym, strat, sym)
+                continue
+
             status = _order_status(tctx, acc_id, pos.order_id)
             age_min = (now_et - pd.Timestamp(pos.entry_time).to_pydatetime()).total_seconds() / 60
 

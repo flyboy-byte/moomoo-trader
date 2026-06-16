@@ -26,7 +26,7 @@ from .logger import get_logger
 log = get_logger("orb_strategy")
 
 ORB_MINUTES: int = int(os.getenv("ORB_MINUTES", "30"))        # opening range window
-ORB_TARGET_MULT: float = float(os.getenv("ORB_TARGET_MULT", "1.0"))  # target = mult × range
+ORB_TARGET_MULT: float = float(os.getenv("ORB_TARGET_MULT", "1.5"))  # target = mult × range
 ORB_VOL_MULT: float = float(os.getenv("ORB_VOL_MULT", "1.2"))
 ORB_MIN_RANGE_PCT: float = float(os.getenv("ORB_MIN_RANGE_PCT", "0.001"))  # 0.1% min
 ORB_MAX_RANGE_PCT: float = float(os.getenv("ORB_MAX_RANGE_PCT", "0.008"))  # 0.8% max
