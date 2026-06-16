@@ -63,6 +63,26 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ## On Hold (parked with a gate condition)
 
+### Gap Fade — BUILT 2026-06-16, pending live verification
+**What it is:** Fade the overnight gap when the first 5-min bar (9:35 close) closes against
+the gap direction. Gap up + red first bar → short; gap down + green first bar → long.
+Target: 50% gap fill. Stop: first bar extreme + 0.1%. Time stop: 11:00 ET.
+**Code:** `mm/gap_fade.py`, `scripts/backtest_gap_fade.py`
+**Walk-forward (0.3% min gap, 50% fill target):**
+| Symbol | Train 2022-23 | OOS 2024-25 | 2026 YTD |
+|--------|---------|---------|---------|
+| IWM | PF=1.031, 136 tr | PF=**1.938**, 164 tr, 72%WR | PF=2.163, 33 tr |
+| SPY | PF=1.022, 147 tr | PF=1.326, 108 tr, 60%WR | — |
+| QQQ | PF=1.029, 156 tr | PF=1.022, 143 tr (flat) | excluded |
+**Why training is weak (PF≈1.02):** 2022-2023 was a bear market with large, meaningful overnight
+gaps that don't fade. The OOS improvement is structural (low-volatility 2024-2025 = more
+noise gaps). Regime risk if volatility returns to 2022 levels.
+**Enablement gates:**
+- ORB short must fire live at least once (same SELL_SHORT code path, currently unverified).
+- 15 live paper trades before drawing conclusions.
+- QQQ excluded (flat OOS). SPY optional (PF=1.326 OOS is marginal).
+- Deploy IWM first (strongest and most consistent across parameter sweep).
+
 ### Risk-Normalized Position Sizing — BUILT DARK 2026-06-12
 **What it is:** `share_qty = RISK_DOLLARS_PER_TRADE / (entry − stop)`, capped by the dollar cap.
 Every trade risks the same dollars regardless of volatility. Generalizes the original ATR-sizing
