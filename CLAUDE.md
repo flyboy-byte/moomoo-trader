@@ -16,10 +16,10 @@ Goal:
 Build a practical Python project for AI-assisted stock strategy research and Moomoo paper trading.
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
-Current build state (as of 2026-06-10):
+Current build state (as of 2026-06-16):
 All core infrastructure complete. Multi-strategy paper runner live on VPS (bb_kdj + orb + vwap_pb on SPY/QQQ/IWM).
-6 live trades across 6 sessions (Jun 4–9): ORB 2/2 +$5.44, VWAP PB 0/4 -$9.09. BB+KDJ not yet fired (low freq).
-VWAP PB time filter fixed (9:45→10:00 ET) after all 4 losses were opening-noise entries. Deployed 2026-06-10.
+paper.py refactor complete (6 commits, 2026-06-16): monolithic 1,200-line file split into mm/clock.py, mm/events.py,
+mm/execution.py, mm/evals.py; sizing helpers moved to mm/risk.py. 173/173 tests pass. Cert-diffed (byte-identical replay).
 See docs/ARCHITECTURE.md for system map. Run ./scripts/verify.sh for one-command session health check.
 
 Package layout:
@@ -28,19 +28,26 @@ Package layout:
   mm/connection.py     — quote_context() context manager for OpenD
   mm/health.py         — run_health_check() (socket + quote ping)
   mm/data.py           — fetch_candles(), fetch_and_save()
+  mm/clock.py          — time seam: now(), now_et(), today(), sleep(), is_market_open(), seconds_until_open()
   mm/indicators.py     — bollinger_bands(), atr(), kdj(), rsi(), adx(), vwap(), ema(), add_all()
   mm/signals.py        — score_df(), snapshot() — BB+KDJ signal scoring
   mm/strategy.py       — compute_signals(), run_signals(), Trade, Signal
   mm/backtest.py       — run_backtest(), walk_forward(), print_summary()
   mm/research.py       — compare_variants(), sweep_parameters(), analyze_stop_exits(), sweep_signal_filter()
-  mm/risk.py           — trading_allowed(), calc_qty(), DailyTracker
-  mm/paper.py          — multi-strategy paper trading loop (bb_kdj, orb, vwap_pb, vwap)
+  mm/events.py         — PaperEventLog, PaperPosition, position/ORB file I/O (_load/_save/_clear_position, _load/_save_orb_traded)
+  mm/execution.py      — order placement (_place_buy/sell/short/cover), fill confirmation, _reconcile_positions, trade_context
+  mm/evals.py          — per-strategy eval functions (_eval_bb_kdj, _eval_vwap, _eval_vwap_pb, _eval_orb), _entry_attempted
+  mm/risk.py           — trading_allowed(), calc_qty(), DailyTracker, _qty(), _position_cap(), _slot_dollars
+  mm/paper.py          — loop + _latest_closed_candles + _eval_symbol_all_strategies + run_multi + back-compat re-exports (~340 lines)
   mm/orb_strategy.py   — ORB backtest engine, _build_opening_ranges() (supports per-symbol orb_minutes)
   mm/vwap_pullback.py  — VWAP Pullback (flush-and-reclaim) backtest engine
   mm/vwap_strategy.py  — VWAP crossover strategy (deprecated, PF≈1.0)
   mm/vwap_signals.py   — VWAP signal scoring (used by vwap crossover strategy)
   mm/ema_momentum.py   — EMA5/EMA20 momentum breakout backtest engine (research only, not deployed)
   mm/notifications.py  — Discord webhook (no-ops if URL not set)
+
+  IMPORTANT — module ref pattern: use `from . import config as _config` + `_config.cfg.*` at runtime in any module
+  that replay tests might reload. `from .config import cfg` binds at import time and becomes stale after _reload_paper.
 
 Scripts (all run from project root with venv active):
   python scripts/health_check.py

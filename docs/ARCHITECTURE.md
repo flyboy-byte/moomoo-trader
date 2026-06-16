@@ -15,21 +15,32 @@ mm/data.py  ──  fetch_candles() → DataFrame (time_key, open, high, low, cl
 mm/indicators.py  ──  add_all() adds: bb_upper/middle/lower, atr, kdj_k/d/j,
     │                  rsi, adx, vwap, ema5/ema20, bb_width_pct
     │
-    ├──► mm/strategy.py   ──  compute_signals() → bb_touch, kdj_cross, bonus signals
-    │                          score_df(), run_signals()
+    ├──► mm/strategy.py      ──  compute_signals() → bb_touch, kdj_cross, bonus signals
     │
     ├──► mm/orb_strategy.py  ──  _build_opening_ranges() → or_high, or_low per symbol
     │
     └──► mm/vwap_pullback.py ──  VWAP flush-and-reclaim logic
     │
     ▼
-mm/paper.py  ──  run_multi() main loop (60s poll)
-    │             _eval_bb_kdj(), _eval_orb(), _eval_vwap_pb(), _eval_vwap()
-    │             PaperEventLog → logs/paper_SYMBOL_YYYY-MM-DD.jsonl
-    │             PaperPosition → logs/paper_SYMBOL_STRATEGY_position.json  (restart recovery)
+mm/paper.py  ──  run_multi() main loop (60s poll), _eval_symbol_all_strategies()
+    │             _latest_closed_candles(), back-compat re-exports
     │
-    ├──► mm/risk.py  ──  trading_allowed(), calc_qty(), calc_qty_fractional(),
-    │                     DailyTracker (trade count + daily loss limit)
+    ├──► mm/clock.py     ──  time seam: now(), now_et(), today(), sleep(), is_market_open()
+    │                         single patch point for replay and tests
+    │
+    ├──► mm/evals.py     ──  _eval_bb_kdj(), _eval_orb(), _eval_vwap_pb(), _eval_vwap()
+    │                         _entry_attempted (dedup dict), _kdj_cross_age()
+    │
+    ├──► mm/events.py    ──  PaperEventLog → logs/paper_SYMBOL_YYYY-MM-DD.jsonl
+    │                         PaperPosition → logs/paper_SYMBOL_STRATEGY_position.json
+    │                         _load/_save/_clear_position, _load/_save_orb_traded
+    │
+    ├──► mm/execution.py ──  _place_buy/sell/short/cover, _confirm_fill
+    │                         _execute_entry/_execute_exit, _reconcile_positions
+    │                         trade_context(), _get_simulate_acc_id()
+    │
+    ├──► mm/risk.py      ──  trading_allowed(), calc_qty(), calc_qty_fractional(),
+    │                         DailyTracker, _qty(), _position_cap(), _slot_dollars
     │
     └──► mm/notifications.py  ──  Discord webhook (no-ops if URL unset)
     │
@@ -80,7 +91,7 @@ LIVE_TRADING_ENABLED=false # NEVER change to true
 ## Test & Verify Commands
 
 ```bash
-python -m pytest tests/ -q                           # 115 unit tests
+python -m pytest tests/ -q                           # 173 unit tests
 python scripts/diagnose_logs.py --date YYYY-MM-DD    # session health check
 python scripts/compare_paper_vs_backtest.py logs/paper_US_SPY_YYYY-MM-DD.jsonl
 ./scripts/verify.sh                                  # all-in-one session verify

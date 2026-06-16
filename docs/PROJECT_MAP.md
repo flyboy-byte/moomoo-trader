@@ -1,7 +1,7 @@
 # moomoo-trader: Full Project Map
 
 **AI Context Document** — paste this into any AI session to get full project context without re-deriving.
-Last updated: 2026-06-04.
+Last updated: 2026-06-16.
 
 ---
 
@@ -38,12 +38,21 @@ moomoo-trader/
 │   ├── backtest.py              # run_backtest(), walk_forward(), print_summary()
 │   ├── research.py              # compare_variants(), sweep_parameters(),
 │   │                            #   analyze_stop_exits(), sweep_signal_filter() (599 lines)
+│   ├── clock.py                 # Time seam: now(), now_et(), today(), sleep(),
+│   │                            #   is_market_open(), seconds_until_open() — single patch point
+│   ├── events.py                # PaperEventLog, PaperPosition, position/ORB file I/O
+│   │                            #   _load/_save/_clear_position, _load/_save_orb_traded
+│   ├── execution.py             # _place_buy/sell/short/cover, _confirm_fill,
+│   │                            #   _execute_entry/_execute_exit, _reconcile_positions,
+│   │                            #   trade_context(), _get_simulate_acc_id()
+│   ├── evals.py                 # _eval_bb_kdj(), _eval_vwap(), _eval_vwap_pb(), _eval_orb()
+│   │                            #   _entry_attempted (dedup dict), _kdj_cross_age()
 │   ├── risk.py                  # trading_allowed(), calc_qty(), calc_qty_fractional(),
-│   │                            #   per_slot_dollars(), DailyTracker (142 lines)
-│   ├── paper.py                 # Multi-strategy paper loop — THE MAIN ENGINE (1056 lines)
-│   │                            #   PaperEventLog, PaperPosition, run_multi()
-│   │                            #   _eval_bb_kdj(), _eval_orb(), _eval_vwap_pb(), _eval_vwap()
-│   │                            #   _latest_closed_candles(), _qty(), _position_cap()
+│   │                            #   per_slot_dollars(), DailyTracker, _qty(), _position_cap(),
+│   │                            #   _slot_dollars
+│   ├── paper.py                 # Loop + candle fetch + back-compat re-exports (~340 lines)
+│   │                            #   run_multi(), _eval_symbol_all_strategies(),
+│   │                            #   _latest_closed_candles(), _trigger_eod_summary()
 │   ├── orb_strategy.py          # ORB backtest engine, _build_opening_ranges() (227 lines)
 │   ├── vwap_pullback.py         # VWAP Pullback (flush-and-reclaim) backtest engine (172 lines)
 │   ├── vwap_strategy.py         # VWAP crossover strategy — DEPRECATED, PF≈1.0 (174 lines)
@@ -85,8 +94,9 @@ moomoo-trader/
 │   ├── test_strategy.py         # 18 tests: signal scoring, bonus signals, walk-forward
 │   ├── test_risk.py             # 29 tests: calc_qty, DailyTracker, fractional sizing,
 │   │                            #   per_slot_dollars, trading_allowed
+│   ├── test_paper.py            # ~100 tests: evals, execution, events, replay, reconcile
 │   └── test_orb_shorts.py       # 21 tests: ORB long/short entry, exit, PnL, restart recovery
-│                                # Total: 115 tests
+│                                # Total: 173 tests
 │
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
@@ -211,9 +221,9 @@ qty = floor(cap / price)
 ```
 
 ### Daily Guards (`DailyTracker` in `mm/risk.py`)
-- `MAX_TRADES_PER_DAY=3` — global cap across ALL strategies combined
-- `MAX_TRADES_PER_STRATEGY=0` — per-strategy cap (0 = disabled). Set to 1 to prevent ORB consuming all 3 global slots and starving BB+KDJ/VWAP PB.
-- `MAX_DAILY_LOSS=5` — daily P&L floor; trips if cumulative loss ≥ $5. Both limits checked on every `can_open(strategy=...)` call.
+- `MAX_TRADES_PER_DAY=5` — global cap across ALL strategies combined
+- `MAX_TRADES_PER_STRATEGY=0` — per-strategy cap (0 = disabled). Set to 1 to prevent ORB consuming all global slots and starving BB+KDJ/VWAP PB.
+- `MAX_DAILY_LOSS=20` — daily P&L floor; trips if cumulative loss ≥ $20. Both limits checked on every `can_open(strategy=...)` call.
 
 ### Startup Safety (`mm/config.py` → `mm/paper.py`)
 - `validate_config()` runs before the main loop — fails fast on bad `.env` (wrong TRD_ENV, unknown strategies, invalid numerics). CRITICAL errors abort; warnings log and continue.
@@ -275,7 +285,7 @@ Open positions survive process restarts via JSON files:
 ./scripts/verify.sh --date 2026-06-04  # past session
 ./scripts/verify.sh --no-sync          # skip VPS sync
 ```
-Runs: pytest (115 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols).
+Runs: pytest (173 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols).
 
 ### `scripts/diagnose_logs.py` — Session health
 ```bash
@@ -342,8 +352,8 @@ VWAP_PB_SYMBOLS=US.SPY,US.QQQ
 VWAP_PB_MAX_CROSSES=1
 TOTAL_CAPITAL=100
 FRACTIONAL_SHARES=true
-MAX_TRADES_PER_DAY=3
-MAX_DAILY_LOSS=5
+MAX_TRADES_PER_DAY=5
+MAX_DAILY_LOSS=20
 ```
 
 ### Deployment Workflow
@@ -374,12 +384,13 @@ Stored in `logs/` (gitignored). Combined CSV = deduped merge of 2022–2025 data
 
 ---
 
-## Test Suite (115 tests)
+## Test Suite (173 tests)
 
 ```bash
-python -m pytest tests/ -q              # all 115
+python -m pytest tests/ -q              # all 173
 python -m pytest tests/test_risk.py    # risk + sizing (29)
 python -m pytest tests/test_orb_shorts.py  # ORB shorts (21)
+python -m pytest tests/test_paper.py   # evals, execution, events, replay, reconcile (~100)
 ```
 
 Coverage by area:
@@ -387,6 +398,7 @@ Coverage by area:
 - **Strategy/Signals** (18): BB+KDJ scoring, bonus signals, walk-forward
 - **Risk** (29): calc_qty, DailyTracker, fractional sizing, per_slot_dollars
 - **ORB Shorts** (21): long/short entry, stop/target direction, PnL sign, restart recovery
+- **Paper/Evals/Execution/Replay** (~58): eval functions, fill confirmation, reconcile, replay harness
 
 ---
 
@@ -402,7 +414,7 @@ See `docs/strategy_graveyard.md` for full details with research data and graveya
 | VIX daily regime filter | Graveyard'd | IWM OOS 0.800 vs 1.033 baseline — destroyed edge |
 | Push architecture (WebSocket exits) | Deferred | slippage_bps shows 60s poll costs real edge |
 | ORB short live verification | Waiting | First short order in JSONL needed |
-| paper.py refactor (split 1,100-line file) | On hold | Large project, no functional gain yet |
+| paper.py refactor (split 1,200-line file) | **COMPLETE** 2026-06-16 | 6 commits, cert-diffed, 173/173 tests |
 
 ---
 

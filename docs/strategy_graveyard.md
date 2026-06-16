@@ -41,22 +41,22 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 | Feature | Code | Notes |
 |---------|------|-------|
-| BB+KDJ mean reversion | `mm/strategy.py`, `mm/paper.py` | MIN_SCORE=2, KDJ_WINDOW=3, PF=1.843 |
-| ORB long + short | `mm/orb_strategy.py`, `mm/paper.py` | 30-min IWM, 15-min SPY/QQQ. Shorts 2026-06-04. |
-| VWAP Pullback | `mm/vwap_pullback.py`, `mm/paper.py` | SPY/QQQ only. PF=1.655 SPY, 1.072 QQQ OOS. |
-| Fractional sizing | `mm/risk.py`, `mm/paper.py` | TOTAL_CAPITAL / (symbols × strategies) per slot |
-| JSONL event logging | `mm/paper.py` (PaperEventLog) | bar_eval, signal_skip, position_open/close, slippage_bps |
+| BB+KDJ mean reversion | `mm/strategy.py`, `mm/evals.py` | MIN_SCORE=2, KDJ_WINDOW=3, PF=1.843 |
+| ORB long + short | `mm/orb_strategy.py`, `mm/evals.py` | 30-min IWM, 15-min SPY/QQQ. Shorts 2026-06-04. |
+| VWAP Pullback | `mm/vwap_pullback.py`, `mm/evals.py` | SPY/QQQ only. PF=1.655 SPY, 1.072 QQQ OOS. |
+| Fractional sizing | `mm/risk.py` (_qty, _slot_dollars) | TOTAL_CAPITAL / (symbols × strategies) per slot |
+| JSONL event logging | `mm/events.py` (PaperEventLog) | bar_eval, signal_skip, position_open/close, slippage_bps |
 | Web dashboard | `scripts/web_dashboard.py` | Flask :8080 — Market Conditions card, slippage column |
 | TUI dashboard | `scripts/dashboard.py` | Textual, past session replay |
 | diagnose_logs.py | `scripts/diagnose_logs.py` | 5-section session health report |
 | verify.sh | `scripts/verify.sh` | pytest + sync + diagnose + compare in one command |
 | compare_paper_vs_backtest | `scripts/compare_paper_vs_backtest.py` | BB+KDJ signal engine agreement check |
 | Startup config validation | `mm/config.py` (validate_config) | Fails fast on bad .env before touching broker |
-| Broker position reconciliation | `mm/paper.py` (_reconcile_positions) | On restart, clears stale local state if broker disagrees |
+| Broker position reconciliation | `mm/execution.py` (_reconcile_positions) | On restart, clears stale local state if broker disagrees |
 | Per-strategy trade limits | `mm/risk.py` (DailyTracker) | MAX_TRADES_PER_STRATEGY config, prevents ORB starving BB+KDJ |
-| Order price rounding | `mm/paper.py` (_place_buy/sell/short/cover) | round(price, 2) — Moomoo rejects >2 dp (caught June 4, 8) |
-| Entry retry dedup | `mm/paper.py` (_entry_attempted dict) | One attempt per candle per (symbol, strategy) — prevents storm |
-| Fractional qty fallback | `mm/paper.py` (_qty()) | qty < 1 → whole-share fallback instead of silently rejecting |
+| Order price rounding | `mm/execution.py` (_place_buy/sell/short/cover) | round(price, 2) — Moomoo rejects >2 dp (caught June 4, 8) |
+| Entry retry dedup | `mm/evals.py` (_entry_attempted dict) | One attempt per candle per (symbol, strategy) — prevents storm |
+| Fractional qty fallback | `mm/risk.py` (_qty()) | qty < 1 → whole-share fallback instead of silently rejecting |
 | Daily loss limit | `mm/config.py`, `mm/risk.py` | MAX_DAILY_LOSS raised to $20 — $5 killed full day after 1 VWAP PB loss |
 
 ---
@@ -67,7 +67,7 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 **What it is:** `share_qty = RISK_DOLLARS_PER_TRADE / (entry − stop)`, capped by the dollar cap.
 Every trade risks the same dollars regardless of volatility. Generalizes the original ATR-sizing
 design to actual stop distance (covers ORB's range-based stops too).
-**Status:** Implemented (`mm/risk.py` calc_qty_risk, all 5 entry blocks in `mm/paper.py`),
+**Status:** Implemented (`mm/risk.py` calc_qty_risk, all 5 entry blocks in `mm/evals.py`),
 7 tests, validated end-to-end via the replay harness. DISABLED by default
 (RISK_DOLLARS_PER_TRADE=0 → byte-identical legacy behavior).
 **Enablement gate (unchanged):** 2+ weeks of live fill data, then set RISK_DOLLARS_PER_TRADE
@@ -101,69 +101,29 @@ window; SIMULATE fills are optimistic and slippage scales with qty.
 **Gate:** Live trades show consistent exit slippage > 0.1% per trade. Current `slippage_bps` field is 0.0 in SIMULATE — need real fill data before this is justified.
 **Revisit when:** slippage_bps readings from live fills show the 60s poll costs real edge.
 
-### paper.py Refactor (Split into Smaller Modules) — ANALYZED 2026-06-12, READY TO EXECUTE
-**What:** mm/paper.py is 1,414 lines / 45 defs. Split it along its existing comment-divider
-sections. Full recon done; this entry is the execution plan — pull it out and follow it.
+### paper.py Refactor (Split into Smaller Modules) — COMPLETE 2026-06-16
 
-**Target layout (with exact current line ranges):**
-| New module | Moves from paper.py | ~Lines |
-|---|---|---|
-| `mm/clock.py` (NEW seam) | nothing moves — new ~40-line module: `now()`, `now_et()`, `today()`, `monotonic()`, `sleep()`, `is_market_open()` | 40 |
-| `mm/events.py` | PaperEventLog (64–141), PaperPosition (148–158), _position_file/_save/_load/_clear_position (164–208), _orb_traded_file/_load/_save_orb_traded (327–351) | 250 |
-| `mm/execution.py` | reconcile block: constants + _orphan_warned + _order_status + _reconcile_positions (210–325); trade_context/_get_simulate_acc_id (354–376); _place_buy/sell/short/cover (378–448); fill-confirm block: constants + _exit_unfilled_notified + _confirm_fill/_cancel_order/_execute_entry/_execute_exit (459–590) | 420 |
-| `mm/evals.py` | _kdj_cross_age (680–694), _eval_bb_kdj (696), _eval_vwap (800), _eval_vwap_pb (888), _eval_orb (998–1179), _entry_attempted dict (600) | 540 |
-| `mm/risk.py` (gains) | _qty (603–625), _position_cap (627–635), _slot_dollars (596) + a `set_slot_dollars()` setter — calc_qty* already lives here, avoids an evals→paper import cycle | 45 |
-| `mm/paper.py` (keeps) | _latest_closed_candles (638–677), _trigger_eod_summary (1181), run_multi (1205), _eval_symbol_all_strategies (1346), run (1411) + **back-compat re-exports** | 230 |
+**What was done:** mm/paper.py (1,200 lines / ~45 defs) split into 4 new modules + mm/risk.py gains.
+6 commits on master, 173/173 tests pass, cert-diffed (byte-identical replay before/after).
 
-**Why mm/clock.py first (the real risk in this refactor):** tests and mm/replay.py work by
-patching names in mm.paper's namespace (replay patches 9: market_open, datetime, date, time,
-notify×3, _latest_closed_candles; plus mm.risk.date and cfg.logs_dir). After the split,
-datetime.now is called from events.py AND execution.py AND evals.py AND paper.py — patching
-one module no longer covers the others. Route ALL time/market-state access through mm/clock.py
-and the patch surface collapses to one module permanently. (mm.risk.DailyTracker's
-date.today and market_open also route through clock.)
+**Final layout:**
+| Module | Contents |
+|---|---|
+| `mm/clock.py` | now(), now_et(), today(), sleep(), is_market_open(), seconds_until_open() |
+| `mm/events.py` | PaperEventLog, PaperPosition, position/ORB file I/O |
+| `mm/execution.py` | _place_buy/sell/short/cover, _confirm_fill, _execute_entry/exit, _reconcile_positions |
+| `mm/evals.py` | _eval_bb_kdj, _eval_vwap, _eval_vwap_pb, _eval_orb, _entry_attempted |
+| `mm/risk.py` (gains) | _qty, _position_cap, _slot_dollars (sizing helpers; avoids evals→paper cycle) |
+| `mm/paper.py` (trimmed) | loop + _latest_closed_candles + run_multi + back-compat re-exports (~340 lines) |
 
-**Shared mutable state homes (verified by grep):**
-- `_entry_attempted` — written by all 5 entry blocks, cleared by run_multi (lines ~1228–1235)
-  → lives in evals.py, run_multi calls `evals.reset_session_state()`.
-- `_orphan_warned` (reconcile only) and `_exit_unfilled_notified` (execute_exit only)
-  → execution.py, private.
-- `_slot_dollars` — set by run_multi at startup, read by _qty/_position_cap
-  → risk.py with set_slot_dollars(); kills the would-be evals→paper cycle.
+**Key architectural invariants discovered:**
+- Use `from . import config as _config` + `_config.cfg.*` at runtime in any module replay might
+  reload — `from .config import cfg` goes stale after `_reload_paper` replaces mm.config.cfg.
+- `_slot_dollars` is a float; tests must set `mm.risk._slot_dollars` not `paper._slot_dollars`.
+- `_reload_paper` must reload `mm.evals` so `_entry_attempted` resets between tests.
+- `TestMarketHoursGuard` must use `monkeypatch.setattr(mm.clock, ...)` not direct assignment.
 
-**Back-compat re-exports in paper.py (verified importers):**
-- scripts/run_paper.py: `from mm.paper import run, run_multi` (stays native)
-- scripts/simulate_paper.py: `from mm.paper import PaperEventLog, PaperPosition` (re-export)
-- tests/test_paper.py + test_orb_shorts.py: call most functions directly — update their
-  imports to the new modules (mechanical); only 1 namespace patch (market_open → clock)
-  and 3 timing-constant monkeypatches (_FILL_TIMEOUT_S/_FILL_POLL_S/_CANCEL_RECHECK_S →
-  execution) need re-targeting.
-- mm/replay.py: rewrite its patch block to target mm.clock (one module) + cfg.logs_dir
-  + paper._latest_closed_candles.
-
-**Import graph (acyclic by construction):**
-clock ← events ← execution ← evals ← paper(loop); risk imports clock only; nothing imports paper.
-
-**Execution order (half-day session, ~3–4h active):**
-1. BEFORE TOUCHING ANYTHING: `python scripts/replay_paper.py --latest --start 2026-01-01
-   --end 2026-06-09 --out replay_cert_before` (~40 min, run in background while step 2–3 happen
-   on a branch). The sim clock makes event streams fully deterministic.
-2. Create mm/clock.py; mechanically reroute datetime/time/market_open/date.today calls in
-   paper.py and risk.py through it; run tests + replay diff — MUST be identical before any
-   code moves. Commit.
-3. Move events.py → execution.py → evals.py → trim paper.py, committing per module,
-   tests green at each step.
-4. Re-target mm/replay.py and test patch points (small: see above). Full suite green.
-5. CERTIFY: same replay → replay_cert_after; `diff -r replay_cert_before replay_cert_after`
-   must be EMPTY (timestamps are sim-clock-derived, so byte-identical is the bar).
-   Also run scripts/replay_vs_live.py for the latest session.
-6. ./deploy.sh AFTER market close only. verify.sh next session.
-
-**Abort criterion:** any non-empty cert diff that isn't explained in one minute of looking
-→ `git reset --hard` to the last green commit. The whole point is zero behavior change.
-
-**When:** Evening session, market closed (deploys restart the runner). Knob freeze makes
-this the ideal window — no parallel strategy changes to collide with.
+**Deploy:** `./deploy.sh` after market close. Refactor is behavior-identical (cert-diffed).
 
 ---
 
