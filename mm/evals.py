@@ -468,7 +468,8 @@ def _eval_orb(
                                         price=close, max_dollars=cap)
                     else:
                         target = close + cfg.orb_target_mult * or_range
-                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                        entry_limit = round(close * 1.001, 2)
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, entry_limit,
                                                 "orb", elog)
                         if filled:
                             order_id, fill_price, fill_qty = filled
@@ -507,7 +508,8 @@ def _eval_orb(
                                         price=close, max_dollars=cap)
                     else:
                         target = close - cfg.orb_target_mult * or_range
-                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                        entry_limit = round(close * 0.999, 2)
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, entry_limit,
                                                 "orb", elog, direction="short")
                         if filled:
                             order_id, fill_price, fill_qty = filled
