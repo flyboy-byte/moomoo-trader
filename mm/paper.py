@@ -17,40 +17,43 @@ the process. Remove the file to resume.
 Structured event log: every signal check, risk block, order attempt, fill, and exit
 is written to logs/paper_SYMBOL_YYYY-MM-DD.jsonl with a strategy tag on each event.
 """
-import json
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
 
 from . import clock
+from . import risk as _risk
 from .config import cfg, validate_config
-from .events import (
-    PaperEventLog, PaperPosition,
-    _position_file, _save_position, _load_position, _clear_position,
-    _orb_traded_file, _load_orb_traded, _save_orb_traded,
-)
-from .evals import (
-    _entry_attempted, _kdj_cross_age,
-    _eval_bb_kdj, _eval_vwap, _eval_vwap_pb, _eval_orb,
-)
-from .execution import (
-    _orphan_warned, _order_status, _reconcile_positions,
-    trade_context, _get_simulate_acc_id,
-    _place_buy, _place_sell, _place_short, _place_cover,
-    _exit_unfilled_notified, _confirm_fill, _cancel_order,
-    _execute_entry, _execute_exit,
-)
 from .data import fetch_candles
 from .notifications import notify, notify_entry, notify_exit
-from . import risk as _risk
-from .risk import (
-    trading_allowed, calc_qty, calc_qty_fractional, calc_qty_risk, per_slot_dollars,
-    DailyTracker, _slot_dollars, _qty, _position_cap,
-)
+from .risk import trading_allowed, per_slot_dollars, DailyTracker
 from .strategy import compute_signals
-from .vwap_strategy import compute_vwap_signals, VWAPSignal
+from .vwap_strategy import compute_vwap_signals
 from .logger import get_logger
+
+# ---------------------------------------------------------------------------
+# Back-compat re-exports — external callers (tests, scripts, replay) import
+# these via mm.paper; the canonical locations are the modules below.
+# ---------------------------------------------------------------------------
+from .events import (        # noqa: F401
+    PaperEventLog, PaperPosition,
+    _load_position, _load_orb_traded, _save_orb_traded,
+    _clear_position,
+)
+from .evals import (         # noqa: F401
+    _entry_attempted,
+    _eval_bb_kdj, _eval_vwap, _eval_vwap_pb, _eval_orb,
+)
+from .execution import (     # noqa: F401
+    _orphan_warned,
+    _reconcile_positions, trade_context, _get_simulate_acc_id,
+    _place_buy, _place_sell, _place_short, _place_cover,
+    _confirm_fill, _execute_entry, _execute_exit,
+)
+from .risk import (          # noqa: F401
+    _qty, _position_cap, _slot_dollars,
+)
 
 log = get_logger("paper")
 
