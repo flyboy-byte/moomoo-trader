@@ -3,10 +3,15 @@
 Aggregates confirmed-fill trades (the era starting 2026-06-11, when the
 fill-confirmation execution layer was deployed; earlier records are
 unverified, see docs/evaluation_criteria.md) and reports each strategy's
-sample progress toward its pre-registered evaluation gate.
+sample progress toward its pre-registered evaluation gate. Also reports this
+week's Gap Fade pre-market characteristics from the VPS's own rolling
+archive (see scripts/fetch_daily_archive.py) — descriptive only, not a
+backtest re-run; the full historical study stays a manual, local
+scripts/research_premarket_gap.py run.
 
-Intended to run from cron on the VPS every Friday after close:
-  30 21 * * 5  cd ~/moomoo && .venv/bin/python scripts/weekly_report.py
+Intended to run from cron on the VPS every Saturday 00:30 UTC (= Friday
+~20:30 ET during EDT, after that day's daily-archive fetch has run):
+  30 0 * * 6  cd ~/moomoo && .venv/bin/python scripts/weekly_report.py
 
 Run with --dry-run to print without posting to Discord.
 """
@@ -17,9 +22,14 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm.config import cfg  # noqa: E402
+from mm.gap_fade import _build_day_map  # noqa: E402
+from mm.premarket import premarket_session, premarket_fill_pct, premarket_volume_ratio, \
+    build_premarket_volume_history  # noqa: E402
 
 # First session with broker-confirmed fills — gates evaluate from here only.
 CONFIRMED_FILL_ERA = "2026-06-11"
@@ -100,12 +110,67 @@ def build_report() -> str:
     return "\n".join(lines)
 
 
+def _premarket_section() -> str:
+    """Descriptive-only: this week's gap days per symbol from the VPS's own
+    rolling RTH + extended-hours archive. Skips a symbol gracefully if its
+    archive doesn't exist yet (e.g. fetch_daily_archive.py hasn't run/caught
+    up yet)."""
+    week_ago_date = (datetime.now() - timedelta(days=7)).date()
+    lines = ["", "**Premarket (this week)**"]
+    any_data = False
+
+    for symbol in cfg.symbols:
+        safe = symbol.replace(".", "_")
+        rth_path = cfg.logs_dir / f"{safe}_K_5M_combined.csv"
+        ext_path = cfg.logs_dir / f"{safe}_K_5M_EXT_combined.csv"
+        if not rth_path.exists() or not ext_path.exists():
+            lines.append(f"  {symbol}: archive not built yet")
+            continue
+
+        df_rth = pd.read_csv(rth_path)
+        df_rth["time_key"] = pd.to_datetime(df_rth["time_key"])
+        df_ext = pd.read_csv(ext_path)
+        df_ext["time_key"] = pd.to_datetime(df_ext["time_key"])
+
+        day_map = _build_day_map(df_rth)
+        sessions = premarket_session(df_ext)
+        if not sessions:
+            lines.append(f"  {symbol}: no premarket sessions in archive yet")
+            continue
+
+        vol_history = build_premarket_volume_history(sessions)
+        vol_avg20 = vol_history.rolling(20).mean().shift(1)
+
+        week_dates = sorted(d for d in day_map if d in sessions and d >= week_ago_date)
+        if not week_dates:
+            lines.append(f"  {symbol}: no gap days this week")
+            continue
+
+        any_data = True
+        for date in week_dates:
+            info = day_map[date]
+            prev_close, today_open = info["prev_close"], info["open"]
+            gap_pct = (today_open - prev_close) / prev_close
+            fill_pct = premarket_fill_pct(prev_close, today_open, sessions[date])
+            today_vol = float(sessions[date]["volume"].sum())
+            avg20 = vol_avg20.get(pd.Timestamp(date))
+            vol_ratio = premarket_volume_ratio(today_vol, avg20) if avg20 and avg20 > 0 else None
+
+            fp = f"{fill_pct*100:.0f}%" if fill_pct is not None else "n/a"
+            vr = f"{vol_ratio:.2f}x" if vol_ratio is not None else "n/a"
+            lines.append(f"  {symbol} {date}  gap {gap_pct*100:+.2f}%  fill {fp}  vol {vr}")
+
+    if not any_data:
+        lines.append("  (no gap days with full archive coverage this week)")
+    return "\n".join(lines)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="print, don't post")
     args = ap.parse_args()
 
-    report = build_report()
+    report = build_report() + "\n" + _premarket_section()
     print(report)
     if not args.dry_run:
         from mm.notifications import notify

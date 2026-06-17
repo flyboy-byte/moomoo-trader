@@ -14,6 +14,12 @@ rsync -avz --update \
   --exclude="research_*.log" \
   --exclude="multi_backtest_*.log" \
   --exclude="sweep_*.log" \
+  --exclude="*_K_5M_combined.csv" \
+  --exclude="*_K_5M_EXT_combined.csv" \
   "$VPS:~/moomoo/logs/" ./logs/
+# The VPS's own rolling candle archive (scripts/fetch_daily_archive.py) is excluded above —
+# it's small/operational and would otherwise land next to (or be confused with) the much
+# larger local multi-year combined CSVs of the same base name. Pull it manually if ever needed:
+#   rsync "$VPS:~/moomoo/logs/US_IWM_K_5M_EXT_combined.csv" ./logs/US_IWM_K_5M_EXT_vps.csv
 
 echo "Sync complete."

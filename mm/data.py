@@ -89,6 +89,37 @@ def save_candles(df: pd.DataFrame, symbol: str, ktype: str, extended_time: bool 
     return path
 
 
+def update_combined_csv(
+    df_new: pd.DataFrame,
+    symbol: str,
+    ktype: str,
+    extended_time: bool = False,
+) -> Path:
+    """Merge df_new into a running, non-date-stamped combined archive CSV,
+    deduping on time_key (keep="last" — Moomoo may revise a bar after a
+    provisional fetch). Creates the file if it doesn't exist yet."""
+    cfg.logs_dir.mkdir(exist_ok=True)
+    safe_symbol = symbol.replace(".", "_")
+    suffix = "_EXT" if extended_time else ""
+    path = cfg.logs_dir / f"{safe_symbol}_{ktype}{suffix}_combined.csv"
+
+    df_new = df_new.copy()
+    df_new["time_key"] = pd.to_datetime(df_new["time_key"])
+
+    if path.exists():
+        df_old = pd.read_csv(path)
+        df_old["time_key"] = pd.to_datetime(df_old["time_key"])
+        combined = pd.concat([df_old, df_new], ignore_index=True)
+    else:
+        combined = df_new
+
+    combined = combined.drop_duplicates(subset=["time_key"], keep="last")
+    combined = combined.sort_values("time_key").reset_index(drop=True)
+    combined.to_csv(path, index=False)
+    log.info("Updated %s: %d total rows", path, len(combined))
+    return path
+
+
 def fetch_and_save(
     symbol: str | None = None,
     ktype: str | None = None,
