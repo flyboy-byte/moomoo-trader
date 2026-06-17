@@ -21,6 +21,8 @@ def main() -> None:
     parser.add_argument("--ktype", default=cfg.candle_ktype)
     parser.add_argument("--start", default=None, help="YYYY-MM-DD")
     parser.add_argument("--end", default=None, help="YYYY-MM-DD")
+    parser.add_argument("--extended-time", action="store_true",
+                         help="Include pre-market/after-hours candles (US, <=60min timeframes)")
     args = parser.parse_args()
 
     path = fetch_and_save(
@@ -28,6 +30,7 @@ def main() -> None:
         ktype=args.ktype,
         start=args.start,
         end=args.end,
+        extended_time=args.extended_time,
     )
     if path:
         print(f"Saved: {path}")

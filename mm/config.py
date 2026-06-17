@@ -126,6 +126,13 @@ class Config:
     # Short entries for ORB. Disable at runtime by creating STOP_SHORTS.txt in project root.
     orb_shorts_enabled: bool = _bool("ORB_SHORTS_ENABLED", True)
 
+    # Gap Fade pre-market filter (research scaffolding — NOT wired into mm/gap_fade.py yet).
+    # Dark by default, same pattern as RISK_DOLLARS_PER_TRADE: exists so a future validated
+    # filter is a config flip, not a new code path. See scripts/research_premarket_gap.py.
+    gap_premarket_filter_enabled: bool = _bool("GAP_PREMARKET_FILTER_ENABLED", False)
+    gap_premarket_vol_ratio_max: float = float(_get("GAP_PREMARKET_VOL_RATIO_MAX", "1.5"))
+    gap_premarket_fill_pct_max: float = float(_get("GAP_PREMARKET_FILL_PCT_MAX", "0.7"))
+
     # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
     # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.
     # FRACTIONAL_SHARES=true required to trade below one-share price (e.g. $100 / 9 slots).

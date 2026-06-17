@@ -112,6 +112,38 @@ window; SIMULATE fills are optimistic and slippage scales with qty.
 **Why parked:** No hour is universally safe to block. Small sample makes per-hour deltas unreliable.
 **Code ready:** `strategy.py` has `blocked_hours` param. Wire `BLOCKED_HOURS=10,11` in config to activate.
 
+### Gap Fade Pre-Market Features — BUILT 2026-06-16, unvalidated
+**What it is:** `mm/premarket.py` + `scripts/research_premarket_gap.py` derive pre-market
+fill % (how much of the overnight gap was already retraced by ~9:25 ET) and pre-market
+volume ratio (today's premarket volume vs trailing 20-day avg) from Moomoo's
+`extended_time=True` candle fetch (`mm/data.py::fetch_candles`), joined onto existing Gap
+Fade trades. Three independent deep-research passes (Codex/ChatGPT ×2, Claude online — see
+docs/deep/) converged on this as the highest-ROI next step: current `gap_pct` in
+`mm/gap_fade.py` is computed purely from RTH candles, blind to 4:00-9:30am activity, and
+pre-market volume/fill state is the best informational-vs-noise gap discriminator per the
+research, ahead of gap size alone.
+**Status:** Code built, NOT validated — could not test against live OpenD in the building
+session (`moomoo_OpenD.service` was not running). `GAP_PREMARKET_FILTER_ENABLED` config knob
+ships dark (false) in `mm/config.py`; not read anywhere yet — pure scaffolding.
+**Enablement gate:** Run `scripts/research_premarket_gap.py` once OpenD is up, confirm
+extended-hours bars actually return for the 4:00-9:30 window (Moomoo's docs say extended-hours
+history "may be less than 2 years" and don't publish exact session boundaries — unverified).
+If the win-rate/PF breakdown by volume-ratio and fill-% tier shows a clean split on ≥30
+trades, wire the filter into `mm/gap_fade.py::run_gap_fade()` as a new pre-registered rule.
+
+### Inferred Features — NOT BUILT, parked (2026-06-16 deep research pass)
+Five ideas surfaced by the same three research reports that are plausible but premature,
+speculative, or high-effort relative to current trade volume. Logged so future sessions don't
+re-litigate from scratch:
+
+| Idea | Why parked |
+|---|---|
+| Self-computed GEX/regime tag from Moomoo's free option-chain greeks (Σgamma×OI per strike) | Real and free, but only useful after ~100+ live trades across strategies to test whether mean-reversion outperforms in positive-GEX regimes. Premature at current trade count. |
+| Futures pre-open premium (ES/NQ) as gap-fade confirmation | Research itself flags this as small-sample practitioner-only evidence (~30 cases), not peer-reviewed. Moomoo US accounts are quote-only on futures (no trading); exact ES/NQ/RTY quote-symbol strings were never verified by any of the 3 reports. |
+| Order book / tick-data aggressor-side pressure during pre-market | `get_rt_ticker` exposes trade direction but is real-time-only — no historical tick endpoint exists per research. Would need weeks of live data collection before any backtest is possible. |
+| OpEx calendar regime tag (vol-compressed mornings, "gamma cliff" the following Monday) | Plausible and documented (Ni/Pearson/Poteshman pinning effect), but orthogonal to Gap Fade — touches ORB/BB+KDJ regime logic instead. Separate research track. |
+| External vendor backfill (FirstRate Data / Databento) for pre-market history beyond Moomoo's <2yr retention | Not needed yet — test against whatever window Moomoo actually returns first. Revisit only if that window proves too short for a meaningful sample (<30 gap-fade-eligible days). |
+
 ### ORB Short Live Verification
 **Status:** Code deployed, first live short hasn't fired yet.
 **What's needed:** Market must break below OR low with volume. Watch `order_result` event in JSONL for `SELL_SHORT`. Until then, the Moomoo paper API path for shorts is unverified.

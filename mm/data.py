@@ -27,6 +27,7 @@ def fetch_candles(
     start: str | None = None,
     end: str | None = None,
     max_count: int = 1000,
+    extended_time: bool = False,
 ) -> pd.DataFrame:
     symbol = symbol or cfg.symbol
     ktype_str = ktype or cfg.candle_ktype
@@ -37,7 +38,8 @@ def fetch_candles(
     if start is None:
         start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-    log.info("Fetching %s %s candles from %s to %s", symbol, ktype_str, start, end)
+    log.info("Fetching %s %s candles from %s to %s (extended_time=%s)",
+              symbol, ktype_str, start, end, extended_time)
 
     frames: list[pd.DataFrame] = []
     page_key = None
@@ -53,6 +55,7 @@ def fetch_candles(
                 fields=[KL_FIELD.ALL],
                 max_count=max_count,
                 page_req_key=page_key,
+                extended_time=extended_time,
             )
             if ret != RET_OK:
                 log.error("request_history_kline error: %s", data)
@@ -75,11 +78,12 @@ def fetch_candles(
     return df
 
 
-def save_candles(df: pd.DataFrame, symbol: str, ktype: str) -> Path:
+def save_candles(df: pd.DataFrame, symbol: str, ktype: str, extended_time: bool = False) -> Path:
     cfg.logs_dir.mkdir(exist_ok=True)
     safe_symbol = symbol.replace(".", "_")
     date_str = datetime.now().strftime("%Y-%m-%d")
-    path = cfg.logs_dir / f"{safe_symbol}_{ktype}_{date_str}.csv"
+    suffix = "_EXT" if extended_time else ""
+    path = cfg.logs_dir / f"{safe_symbol}_{ktype}{suffix}_{date_str}.csv"
     df.to_csv(path, index=False)
     log.info("Saved %d rows to %s", len(df), path)
     return path
@@ -90,10 +94,11 @@ def fetch_and_save(
     ktype: str | None = None,
     start: str | None = None,
     end: str | None = None,
+    extended_time: bool = False,
 ) -> Path | None:
     symbol = symbol or cfg.symbol
     ktype = ktype or cfg.candle_ktype
-    df = fetch_candles(symbol=symbol, ktype=ktype, start=start, end=end)
+    df = fetch_candles(symbol=symbol, ktype=ktype, start=start, end=end, extended_time=extended_time)
     if df.empty:
         return None
-    return save_candles(df, symbol, ktype)
+    return save_candles(df, symbol, ktype, extended_time=extended_time)
