@@ -126,12 +126,20 @@ class Config:
     # Short entries for ORB. Disable at runtime by creating STOP_SHORTS.txt in project root.
     orb_shorts_enabled: bool = _bool("ORB_SHORTS_ENABLED", True)
 
-    # Gap Fade pre-market filter (research scaffolding — NOT wired into mm/gap_fade.py yet).
-    # Dark by default, same pattern as RISK_DOLLARS_PER_TRADE: exists so a future validated
-    # filter is a config flip, not a new code path. See scripts/research_premarket_gap.py.
+    # Gap Fade pre-market filter — wired into mm/gap_fade.py::run_gap_fade() as an optional,
+    # shadow-logged filter. Dark by default (gap_premarket_filter_enabled=False means it only
+    # logs would_filter_skip telemetry, never actually skips a trade).
+    # NOTE (2026-06-17, per external research review): our 9-month/57-trade sample found
+    # higher fill% is BETTER (>=70% bucket had the best PF), so this is a MIN floor that
+    # rejects the toxic <30% tail — NOT a max cap. A max-cap reading of this value would
+    # silently implement the opposite of the finding. Conservative threshold per that review:
+    # reject the clearly-bad regime (<30%), don't optimize for the best bucket (>=70%) yet —
+    # that thesis stays in shadow mode until it survives fresh forward data.
+    # gap_premarket_vol_ratio_max is intentionally NOT wired anywhere: research found volume
+    # ratio is not monotonic, not trusted as a filter (see strategy_graveyard.md).
     gap_premarket_filter_enabled: bool = _bool("GAP_PREMARKET_FILTER_ENABLED", False)
     gap_premarket_vol_ratio_max: float = float(_get("GAP_PREMARKET_VOL_RATIO_MAX", "1.5"))
-    gap_premarket_fill_pct_max: float = float(_get("GAP_PREMARKET_FILL_PCT_MAX", "0.7"))
+    gap_premarket_fill_pct_min: float = float(_get("GAP_PREMARKET_FILL_PCT_MIN", "0.3"))
 
     # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
     # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.

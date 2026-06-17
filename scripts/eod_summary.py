@@ -208,6 +208,41 @@ def load_summary(session_date: date) -> SessionSummary:
 
 
 # ---------------------------------------------------------------------------
+# VIX shadow log (display-time join only — never touches live trading code).
+# See scripts/fetch_vix_morning.py. Easy to delete: remove this function, its
+# two call sites below, and logs/vix_daily.jsonl. Nothing else depends on it.
+# ---------------------------------------------------------------------------
+
+def _load_vix_shadow(session_date: date) -> dict | None:
+    path = cfg.logs_dir / "vix_daily.jsonl"
+    if not path.exists():
+        return None
+    date_str = session_date.strftime("%Y-%m-%d")
+    try:
+        for line in path.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("date") == date_str:
+                return rec
+    except OSError:
+        return None
+    return None
+
+
+def _vix_shadow_line(s: SessionSummary) -> str | None:
+    rec = _load_vix_shadow(s.session_date)
+    if rec is None:
+        return None
+    blocks = ", ".join(
+        f">={k.rsplit('_', 1)[1]}:{'BLOCK' if v else 'ok'}"
+        for k, v in rec.items() if k.startswith("would_block_")
+    )
+    return f"VIX shadow (not live — observational): prev_close={rec.get('vix_prev_close')}  {blocks}"
+
+
+# ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 
@@ -224,6 +259,9 @@ def format_summary(s: SessionSummary) -> str:
         f"Bars evaluated:{s.bar_evals}",
         "",
     ]
+    vix_line = _vix_shadow_line(s)
+    if vix_line:
+        lines += [vix_line, ""]
 
     if not ct and not s.open_at_close:
         lines += [
@@ -284,10 +322,12 @@ def format_discord(s: SessionSummary) -> str:
     date_str = s.session_date.strftime("%Y-%m-%d")
 
     if not ct and not s.open_at_close:
-        return (
+        msg = (
             f"**moomoo-trader EOD {date_str}** — no trades today  "
             f"({s.signal_skips} skipped, {s.risk_blocks} risk blocks)"
         )
+        vix_line = _vix_shadow_line(s)
+        return f"{msg}\n  _{vix_line}_" if vix_line else msg
 
     win_str = f"{s.wins}/{len(ct)}" if ct else "—"
     lines = [
@@ -295,6 +335,9 @@ def format_discord(s: SessionSummary) -> str:
         f"Trades: {len(ct)}  Win: {win_str}  P&L: **{pnl_str}**",
         f"Targets: {s.targets}  Stops: {s.stops}",
     ]
+    vix_line = _vix_shadow_line(s)
+    if vix_line:
+        lines.append(f"  _{vix_line}_")
     for tr in ct:
         pnl_t = f"+${tr.pnl:.2f}" if tr.pnl >= 0 else f"-${abs(tr.pnl):.2f}"
         icon = "✅" if tr.exit_reason == "target" else "🛑"

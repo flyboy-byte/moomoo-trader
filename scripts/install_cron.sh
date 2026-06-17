@@ -13,6 +13,7 @@ VPS=$(grep -E '^VPS_HOST=' .env | cut -d= -f2-)
 
 DAILY_LINE='15 0 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_daily_archive.py >> logs/cron_premarket.log 2>&1'
 WEEKLY_LINE='30 0 * * 6 cd ~/moomoo && .venv/bin/python scripts/weekly_report.py >> logs/cron_weekly.log 2>&1'
+VIX_LINE='10 13 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_vix_morning.py >> logs/cron_vix.log 2>&1'
 
 echo "=== Installing cron on $VPS ==="
 ssh "$VPS" bash <<REMOTE
@@ -32,6 +33,13 @@ $WEEKLY_LINE"
   echo "Adding weekly report cron line."
 else
   echo "Weekly report cron line already present — skipping."
+fi
+if ! echo "\$CURRENT" | grep -qF "fetch_vix_morning.py"; then
+  NEW="\$NEW
+$VIX_LINE"
+  echo "Adding VIX shadow-logger cron line."
+else
+  echo "VIX shadow-logger cron line already present — skipping."
 fi
 echo "\$NEW" | crontab -
 echo ""
