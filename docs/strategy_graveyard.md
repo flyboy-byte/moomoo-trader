@@ -144,9 +144,27 @@ re-litigate from scratch:
 | OpEx calendar regime tag (vol-compressed mornings, "gamma cliff" the following Monday) | Plausible and documented (Ni/Pearson/Poteshman pinning effect), but orthogonal to Gap Fade — touches ORB/BB+KDJ regime logic instead. Separate research track. |
 | External vendor backfill (FirstRate Data / Databento) for pre-market history beyond Moomoo's <2yr retention | Not needed yet — test against whatever window Moomoo actually returns first. Revisit only if that window proves too short for a meaningful sample (<30 gap-fade-eligible days). |
 
-### ORB Short Live Verification
-**Status:** Code deployed, first live short hasn't fired yet.
-**What's needed:** Market must break below OR low with volume. Watch `order_result` event in JSONL for `SELL_SHORT`. Until then, the Moomoo paper API path for shorts is unverified.
+### ORB Short Live Verification — BLOCKED by our own kill switch, not just unfired (2026-06-16 correction)
+**Status:** Code deployed, first live short hasn't fired. `STOP_SHORTS.txt` is intentionally
+present on the VPS, disabling ORB short entries at runtime (checked in `mm/evals.py`, toggleable
+from the dashboard). So the previous wording in this file ("market must break below OR low with
+volume") was misleading on its own — that condition may well have occurred already; shorts can't
+fire regardless while the kill switch is active. That part is confirmed (file is present, code
+path is gated on it).
+**Why the switch was flipped on:** The "Moomoo blocks shorting on this account" theory was raised
+and then directly checked (2026-06-16) via `OpenSecTradeContext.acctradinginfo_query()` against
+the live SIMULATE account — **disproven**. Result for US.IWM: `max_sell_short: 5705.0` (real
+short-sell capacity available), `max_position_sell: 0.0` (no long position to sell, as expected).
+The account-level `accinfo_query().max_power_short` field showing `N/A` is just an unpopulated
+portfolio-level field (no open shorts exist yet to calculate it from) — not a restriction. So
+shorting IS permitted on this account; the real reason `STOP_SHORTS.txt` was created is unknown
+and needs to come from whoever flipped it on, not from an account-permissions theory.
+**Downstream effect either way:** Gap Fade's short side (gap up → short) can't be live-verified
+while `STOP_SHORTS.txt` stays in place, since its enablement gate depends on ORB short firing first.
+Gap Fade's long side (gap down → long) is unaffected and could be verified independently.
+**To revisit:** Find the actual original reason for `STOP_SHORTS.txt` (not account permissions —
+that's ruled out). If there's no longer a reason to keep it, removing it unblocks both ORB and
+Gap Fade short verification at once.
 
 ### Push Architecture (WebSocket exits)
 **What it is:** Replace 60s polling with `StockQuoteHandlerBase` WebSocket. Intra-bar exits instead of end-of-bar.
