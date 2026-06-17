@@ -41,6 +41,7 @@ class TradeRecord:
     entry_slippage_bps: float = 0.0
     exit_slippage_bps: float = 0.0
     strategy: str = ""
+    direction: str = "long"
 
     @property
     def hold_minutes(self) -> int:
@@ -177,6 +178,7 @@ def load_summary(session_date: date) -> SessionSummary:
                 bonus=last_bonus.get(sym, 0),
                 entry_slippage_bps=evt.get("slippage_bps", 0.0),
                 strategy=strat,
+                direction=evt.get("direction", "long"),
             )
 
         elif etype == "position_close":
@@ -251,8 +253,9 @@ def format_summary(s: SessionSummary) -> str:
                 exit_t = tr.exit_time[11:16] if tr.exit_time else "?"
                 pnl_t = f"+${tr.pnl:.2f}" if tr.pnl >= 0 else f"-${abs(tr.pnl):.2f}"
                 icon = "✓" if tr.exit_reason == "target" else "✗"
+                dir_tag = "[SHORT]" if tr.direction == "short" else "[LONG] "
                 lines.append(
-                    f"  {tr.symbol}  {entry_t}→{exit_t}  "
+                    f"  {dir_tag} {tr.symbol}  {entry_t}→{exit_t}  "
                     f"${tr.entry_price:.2f}→${tr.exit_price:.2f}  "
                     f"{pnl_t}  {icon}{tr.exit_reason}  {tr.hold_minutes}m"
                 )
@@ -261,8 +264,9 @@ def format_summary(s: SessionSummary) -> str:
         lines += ["", "Still open at end of session:"]
         for tr in s.open_at_close:
             entry_t = tr.entry_time[11:16] if tr.entry_time else "?"
+            dir_tag = "[SHORT]" if tr.direction == "short" else "[LONG] "
             lines.append(
-                f"  {tr.symbol}  entered {entry_t} @ ${tr.entry_price:.2f}  "
+                f"  {dir_tag} {tr.symbol}  entered {entry_t} @ ${tr.entry_price:.2f}  "
                 f"stop=${tr.stop_price:.2f}  qty={tr.qty}"
             )
 
@@ -294,7 +298,8 @@ def format_discord(s: SessionSummary) -> str:
     for tr in ct:
         pnl_t = f"+${tr.pnl:.2f}" if tr.pnl >= 0 else f"-${abs(tr.pnl):.2f}"
         icon = "✅" if tr.exit_reason == "target" else "🛑"
-        lines.append(f"  {icon} {tr.symbol} {pnl_t} ({tr.hold_minutes}m)")
+        dir_tag = " (short)" if tr.direction == "short" else ""
+        lines.append(f"  {icon} {tr.symbol}{dir_tag} {pnl_t} ({tr.hold_minutes}m)")
     if s.open_at_close:
         lines.append(f"  ⏳ {len(s.open_at_close)} position(s) still open")
 

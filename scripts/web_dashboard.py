@@ -766,15 +766,19 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     open_html = ""
     if summary.open_at_close:
         tr = summary.open_at_close[0]
+        is_short = tr.direction == "short"
         unrealized = ""
         if last_eval:
-            unreal = (last_eval["close"] - tr.entry_price) * tr.qty
+            unreal = ((tr.entry_price - last_eval["close"]) if is_short
+                      else (last_eval["close"] - tr.entry_price)) * tr.qty
             unrealized = f'<span style="color:{_pnl_color(unreal)}">{_fmt_pnl(unreal)} unrealized</span>'
+        dir_badge = (f'<span style="color:#f44336;font-weight:bold">SHORT</span>' if is_short
+                     else f'<span style="color:#4caf50;font-weight:bold">LONG</span>')
         open_html = f"""
         <div class="card open-pos">
           <div class="card-title">OPEN POSITION</div>
           <table><tr>
-            <td>Symbol</td><td><b>{tr.symbol}</b></td>
+            <td>Symbol</td><td><b>{tr.symbol}</b> {dir_badge}</td>
             <td>Entry</td><td>${tr.entry_price:.3f}</td>
             <td>Stop</td><td>${tr.stop_price:.3f}</td>
             <td>Qty</td><td>{tr.qty}</td>
@@ -797,8 +801,10 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
             slip_col = "#f44336" if slip > 5 else "#ff9800" if slip > 1 else "#555"
             slip_str = f"{slip:+.1f}" if slip != 0.0 else "—"
             strat_short = tr.strategy[:3].upper() if tr.strategy else "?"
+            dir_badge = (' <span style="color:#f44336;font-size:11px" title="short">▼S</span>'
+                         if tr.direction == "short" else "")
             rows += f"""<tr>
-              <td>{tr.symbol.replace("US.", "")} <span style="color:#555;font-size:11px">{strat_short}</span></td>
+              <td>{tr.symbol.replace("US.", "")} <span style="color:#555;font-size:11px">{strat_short}</span>{dir_badge}</td>
               <td>{et}</td><td>{xt}</td>
               <td>${tr.entry_price:.3f}</td><td>${tr.exit_price:.3f}</td>
               <td style="color:{col}"><b>{_fmt_pnl(tr.pnl)}</b></td>

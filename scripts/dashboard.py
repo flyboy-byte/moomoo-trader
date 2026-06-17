@@ -48,6 +48,7 @@ class TradeRecord:
     exit_price: float = 0.0
     exit_reason: str = ""
     pnl: float = 0.0
+    direction: str = "long"
 
     @property
     def hold_minutes(self) -> int:
@@ -166,6 +167,7 @@ def load_state(session_date: date) -> SessionState:
                 stop_price=evt.get("stop", 0.0),
                 qty=evt.get("qty", 0),
                 bonus=last_bonus.get(sym, 0),
+                direction=evt.get("direction", "long"),
             )
 
         elif etype == "position_close":
@@ -352,8 +354,11 @@ class MoomooDashboard(App):
                         et = datetime.fromisoformat(str(pos["entry_time"])).strftime("%H:%M")
                     except ValueError:
                         et = str(pos.get("entry_time", ""))[:16]
+                is_short = pos.get("direction", "long") == "short"
+                sym_label = Text(f"{sym} {'▼SHORT' if is_short else '▲LONG'}",
+                                 style="bold red" if is_short else "bold green")
                 tbl.add_row(
-                    Text(sym, style="bold green"),
+                    sym_label,
                     str(pos.get("qty", 0)),
                     f"${pos.get('entry_price', 0):.2f}",
                     f"${pos.get('stop_price', 0):.2f}",
@@ -410,8 +415,11 @@ class MoomooDashboard(App):
                 else Text(tr.exit_reason, style="dim")
             )
             entered = tr.entry_time[11:16] if tr.entry_time else "?"
+            is_short = tr.direction == "short"
+            sym_cell = Text(f"{tr.symbol} {'▼S' if is_short else ''}",
+                            style="red" if is_short else "")
             tbl.add_row(
-                entered, tr.symbol, str(tr.qty),
+                entered, sym_cell, str(tr.qty),
                 f"${tr.entry_price:.2f}", exit_str,
                 pnl_cell, type_cell, hold, str(tr.bonus),
             )

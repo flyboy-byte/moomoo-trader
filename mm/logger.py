@@ -19,12 +19,13 @@ def get_logger(name: str) -> logging.Logger:
     sh.setLevel(logging.INFO)
     sh.setFormatter(fmt)
 
-    # Rotate at midnight, keep 30 days. Suffix format produces name.log.YYYY-MM-DD.
+    # Rotate at midnight, keep forever (backupCount=0 disables deletion).
+    # Suffix format produces name.log.YYYY-MM-DD.
     fh = TimedRotatingFileHandler(
         filename=cfg.logs_dir / f"{name}.log",
         when="midnight",
         interval=1,
-        backupCount=30,
+        backupCount=0,
         encoding="utf-8",
     )
     fh.setLevel(logging.DEBUG)
