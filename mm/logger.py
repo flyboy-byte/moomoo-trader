@@ -2,10 +2,11 @@ import logging
 import sys
 from logging.handlers import TimedRotatingFileHandler
 
-from .config import cfg
+from . import config as _config
 
 
 def get_logger(name: str) -> logging.Logger:
+    cfg = _config.cfg
     cfg.logs_dir.mkdir(exist_ok=True)
 
     logger = logging.getLogger(name)

@@ -6,8 +6,8 @@ from pathlib import Path
 
 from . import clock
 from . import config as _config
-from .clock import is_market_open as market_open, seconds_until_open
-from .config import cfg
+from .clock import is_market_open as market_open
+from .clock import seconds_until_open
 from .logger import get_logger
 
 # Re-export so existing callers (paper.py, tests) importing from risk still work.
@@ -26,7 +26,7 @@ def kill_switch_active() -> bool:
 
 
 def live_trading_blocked() -> bool:
-    if cfg.live_trading_enabled:
+    if _config.cfg.live_trading_enabled:
         log.error("LIVE_TRADING_ENABLED=true in config — refusing to proceed (set to false)")
         return True
     return False
@@ -48,6 +48,7 @@ def calc_qty(price: float, symbol: str | None = None) -> int:
     """
     if price <= 0:
         return 0
+    cfg = _config.cfg
     cap = cfg.symbol_size_overrides.get(symbol, cfg.max_position_dollars) if symbol else cfg.max_position_dollars
     return math.floor(cap / price)
 
@@ -91,6 +92,7 @@ def per_slot_dollars(n_symbols: int, n_strategies: int) -> float:
     Divides total capital equally across all (symbol, strategy) slots.
     Returns 0.0 if TOTAL_CAPITAL is not set.
     """
+    cfg = _config.cfg
     if cfg.total_capital <= 0:
         return 0.0
     n_slots = max(1, n_symbols * n_strategies)
@@ -136,6 +138,7 @@ class DailyTracker:
     def can_open(self, strategy: str = "") -> bool:
         """Return True if both global and per-strategy limits allow a new entry."""
         self._maybe_reset()
+        cfg = _config.cfg
         if self._trades >= cfg.max_trades_per_day:
             log.warning("Daily trade limit reached (%d/%d) — no new entries",
                         self._trades, cfg.max_trades_per_day)
@@ -154,6 +157,7 @@ class DailyTracker:
 
     def record_trade(self, pnl: float, strategy: str = "") -> None:
         self._maybe_reset()
+        cfg = _config.cfg
         self._trades += 1
         self._pnl += pnl
         if strategy:

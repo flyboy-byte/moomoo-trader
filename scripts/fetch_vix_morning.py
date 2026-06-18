@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import clock  # noqa: E402
 from mm.config import cfg  # noqa: E402
 
 # Same thresholds as scripts/backtest_vix_filter.py — not new, not re-tuned.
@@ -70,7 +71,7 @@ def main() -> None:
     vix_date, vix_close = result
 
     record = {
-        "date": str(date.today()),
+        "date": str(clock.today()),
         "vix_close_date": str(vix_date),
         "vix_prev_close": round(vix_close, 2),
     }

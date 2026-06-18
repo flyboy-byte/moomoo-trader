@@ -233,7 +233,7 @@ def main() -> None:
     paths = _find_logs(logs_dir, args.date, args.symbol, args.all)
 
     if not paths:
-        date_hint = args.date or datetime.now().strftime("%Y-%m-%d")
+        date_hint = args.date or clock.today().strftime("%Y-%m-%d")
         print(f"No log files found for {date_hint}. Try --date YYYY-MM-DD or --all.")
         sys.exit(1)
 

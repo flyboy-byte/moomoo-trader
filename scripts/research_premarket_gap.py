@@ -27,7 +27,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm.data import fetch_candles                       # noqa: E402
-from mm.backtest import load_candles                     # noqa: E402
+from mm.backtest import load_candles, profit_factor      # noqa: E402
 from mm.gap_fade import _build_day_map, run_gap_fade      # noqa: E402
 from mm.premarket import (                                # noqa: E402
     premarket_session, premarket_fill_pct, premarket_volume_ratio,
@@ -144,10 +144,9 @@ def main() -> None:
         if not pnls:
             return "n/a", "n/a", 0
         wins = sum(1 for p in pnls if p > 0)
-        gw = sum(p for p in pnls if p > 0)
-        gl = abs(sum(p for p in pnls if p < 0))
-        pf = f"{gw/gl:.3f}" if gl else "inf"
-        return f"{100*wins/len(pnls):.0f}%", pf, len(pnls)
+        pf = profit_factor(pnls)
+        pf_str = "inf" if pf == float("inf") else f"{pf:.3f}"
+        return f"{100*wins/len(pnls):.0f}%", pf_str, len(pnls)
 
     print("=" * 60)
     print("  Volume-ratio tier breakdown (traded days only)")

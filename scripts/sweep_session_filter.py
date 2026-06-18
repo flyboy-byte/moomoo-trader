@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 
+from mm.backtest import profit_factor
 from mm.indicators import add_all
 from mm.strategy import run_signals, Signal
 
@@ -48,14 +49,11 @@ def run_filter(df: pd.DataFrame, blocked: set[int]) -> dict:
     if not trades:
         return {"trades": 0, "win_pct": 0, "pnl": 0, "pf": 0, "per_trade": 0}
     wins = [p for p in trades if p > 0]
-    losses = [p for p in trades if p <= 0]
-    gw = sum(wins)
-    gl = abs(sum(losses))
     return {
         "trades": len(trades),
         "win_pct": 100 * len(wins) / len(trades),
         "pnl": sum(trades),
-        "pf": gw / gl if gl else 999.0,
+        "pf": profit_factor(trades),
         "per_trade": sum(trades) / len(trades),
     }
 

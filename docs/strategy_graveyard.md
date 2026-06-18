@@ -142,6 +142,82 @@ ET market hours (9:30am-4pm ET). A timezone whose midnight falls inside that win
 would have silently rolled the trading day at the wrong moment. Fixed: `today()` now
 returns `now_et().date()`.
 
+### PaperEventLog ts/Filename Server-Local Time — FOUND & FIXED 2026-06-18
+**What it was:** `mm/events.py`'s `PaperEventLog` wrote the JSONL `ts` field and derived
+the log filename's date from `clock.now()` (naive server-local time — UTC on the VPS),
+not ET. Same bug class as `clock.today()` above, in a different module. A live ORB entry
+at 13:30 ET was logged as `ts="...T17:30:02"` with no timezone label, looking like an
+after-hours trade, and `diagnose_logs.py`'s market-hours staleness check (which compares
+`ts.hour` against 9:30-16:00 assuming ET) was silently checking the wrong window on the
+VPS. Fixed: `_path`/`_write` now use `clock.today()`/`clock.now_et()`.
+
+Caught two follow-on regressions the same day: `scripts/web_dashboard.py`'s
+`_runner_status()` compared the now-ET `ts` against `datetime.now()` (still server-local)
+— would have shown a healthy runner as DEAD during market hours; `scripts/weekly_report.py`,
+`scripts/diagnose_logs.py`, and `scripts/analyze_trades.py` had the same "today" default
+mismatch. All fixed same day (commits `00d17b0`, `8244990`).
+
+### Module-Ref Staleness — 6 more instances — FOUND & FIXED 2026-06-18
+**What it was:** `mm/vwap_strategy.py`, `mm/health.py`, `mm/logger.py`,
+`mm/notifications.py`, `mm/connection.py`, and (partially) `mm/risk.py` still used
+`from .config import cfg` (binds once at import time) instead of the safe
+`from . import config as _config` + runtime `_config.cfg.*` pattern documented in
+CLAUDE.md. `mm/vwap_strategy.py` was not on the live path at the time (the plain VWAP
+crossover strategy is dormant — `STRATEGIES` doesn't include it), so this wasn't an
+active-trading risk, but `mm/risk.py`'s `DailyTracker`/`trading_allowed`/`calc_qty`
+are squarely on the live path. Fixed all 6; added `tests/test_config_staleness.py`
+which simulates a real `mm.config.cfg` reassignment (not just an attribute mutation)
+and would have caught this directly.
+
+### Reimplemented-Metric Drift — 3 more instances — FOUND & FIXED 2026-06-18
+**What it was:** `scripts/sweep_session_filter.py` used a `999.0` no-losses sentinel
+instead of the canonical `mm.backtest.profit_factor()`'s `float("inf")` (the exact
+drift class described in that function's docstring, found again). `scripts/
+research_premarket_gap.py` and `scripts/analyze_orb_hours.py` had their own
+gross-win/gross-loss reimplementations (one used `pnl < 0` for losses instead of the
+canonical `pnl <= 0`). Fixed all 3 to call `profit_factor()`; extended it to accept
+plain pnl numbers (not just objects with `.pnl`) so dict/JSONL-derived callers don't
+need their own wrapper. Added `tests/test_metric_consistency.py` pinning the canonical
+definition.
+
+---
+
+## Bug-Hunting Methodology
+
+Five categories have recurred enough times to be worth naming explicitly (see entries
+above and earlier in this file): day-boundary leaks (rolling windows not grouped by
+calendar day), clock-seam violations (raw `datetime.now()`/`date.today()` instead of
+`mm.clock`), module-ref staleness (`from .config import cfg` instead of runtime
+`_config.cfg.*`), partial-fill/fill-confirmation edge cases in `mm/execution.py`, and
+reimplemented-metric drift (same calc, subtly different definition, in 2+ places).
+
+**Static/regression tests now guard the first three categories directly**
+(`tests/test_clock_seam.py`, `tests/test_config_staleness.py`,
+`tests/test_metric_consistency.py`, plus `tests/test_execution.py`/`tests/test_events.py`
+for the fourth) — run them with the rest of the suite, no special invocation needed.
+
+**For new instances of these (or new categories), use a fork-based parallel adversarial
+audit** (multiple `Agent` calls with `subagent_type:"fork"`, each verifying findings
+against real code/data before reporting — never trust a sub-agent's claim blindly).
+Scope each fork **by category, not by module** — one fork sweeps the whole repo for
+clock-seam violations, one for module-ref staleness, one for partial-fill edge cases,
+one for day-boundary/rolling-window leaks, one for duplicated metric calculations. This
+matches how these bugs actually surfaced (cross-cutting, not module-local) and is more
+likely to catch the *next* instance of a known pattern than reviewing module-by-module.
+
+Trigger an audit on: a refactor touching 3+ modules, before flipping any shadow-mode
+feature to active (e.g. Gap Fade's `GAP_PREMARKET_FILTER_ENABLED`), or a ~4-6 week
+backstop if neither has fired. Log findings as dated entries in this section, not as
+new one-off audit docs — `docs/MASTER_AUDIT_JUNE.md`-style standalone docs tend to mix
+real findings with unactionable "vision" scope creep.
+
+Explicitly out of scope for this project (solo hobby research, not enterprise): a mypy
+migration, property-based/fuzz testing as a first move, a CI/CD pipeline, or a 100%
+test-coverage target. `ruff` is wired into `scripts/verify.sh` but informationally only
+(reports a count, never fails the build) — the existing pre-ruff debt isn't worth a risky
+bulk auto-fix (see `pyproject.toml`'s comment for why `--fix` broke a re-export pattern
+on first attempt).
+
 ---
 
 ## On Hold (parked with a gate condition)

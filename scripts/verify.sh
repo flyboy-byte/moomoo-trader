@@ -43,6 +43,20 @@ else
     OVERALL=1
 fi
 
+# ── 1b. Lint (informational — not a gate) ───────────────────────────────────
+# There's pre-existing debt (mostly line-length and a few unused vars/imports
+# in research/script files) ruff hasn't been run against before; fixing it all
+# in one pass risked breaking re-export patterns (see git history 2026-06-18).
+# Reported but never fails verify.sh — only a real regression in new code
+# should block, and that's caught by the test suite, not this count.
+section "1b. LINT (ruff, informational)"
+if command -v ruff >/dev/null 2>&1; then
+    RUFF_COUNT=$(ruff check . 2>&1 | tail -1)
+    echo "  $RUFF_COUNT"
+else
+    echo "  ruff not installed — skipping"
+fi
+
 # ── 2. Sync logs from VPS ──────────────────────────────────────────────────
 if [ "$SKIP_SYNC" = false ]; then
     section "2. SYNC LOGS"

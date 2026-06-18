@@ -155,9 +155,9 @@ def _sweep_multi(dfs: list[pd.DataFrame], paths: list[Path], window_days: int = 
 
 def _save_trades(all_trades: list[Trade], paths: list[Path]) -> Path:
     """Write trade log to logs/trades_<ktype>_<date>.csv."""
-    from datetime import date
+    from mm import clock
     ktype = _ktype_from_path(paths[0]) if paths else "unknown"
-    out_path = cfg.logs_dir / f"trades_{ktype}_{date.today()}.csv"
+    out_path = cfg.logs_dir / f"trades_{ktype}_{clock.today()}.csv"
     rows = []
     for t in all_trades:
         rows.append({

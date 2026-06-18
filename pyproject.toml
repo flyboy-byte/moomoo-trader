@@ -1,0 +1,22 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+
+[tool.ruff.lint]
+# Minimal ruleset: pyflakes (undefined names, unused imports), pycodestyle
+# errors, isort. Deliberately skip bugbear/annotations/docstrings (B/ANN/D) —
+# the codebase is partially typed and those would mostly generate noise, not
+# catch the bug classes actually seen in this project. Revisit only if/when
+# this set proves too quiet.
+select = ["E", "F", "I"]
+
+# Note (2026-06-18): there's ~150 pre-existing findings (mostly E501 line-length
+# and F401/I001 import-tidiness in research scripts) from before this config
+# existed. Auto-fixing them in bulk on first setup broke a re-export pattern
+# (mm/paper.py re-exporting notify_entry/notify_exit for mm/replay.py) — ruff
+# can't tell "unused in this file" from "re-exported for callers." Caught by
+# the test suite, reverted. Lesson: `ruff check . --fix` is not safe to run
+# unattended across the whole repo here; verify it doesn't remove a noqa'd or
+# re-export-only import before applying. scripts/verify.sh runs `ruff check .`
+# informationally (reports the count, never fails the build) rather than
+# gating on the existing debt.

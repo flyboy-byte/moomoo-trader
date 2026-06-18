@@ -13,6 +13,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from mm.backtest import profit_factor  # noqa: E402
+
 
 def _load(dir_: Path) -> list[dict]:
     events = []
@@ -69,9 +72,7 @@ def main() -> None:
         n = len(ts)
         wins = sum(1 for t in ts if t["pnl"] > 0)
         pnl = sum(t["pnl"] for t in ts)
-        gw = sum(t["pnl"] for t in ts if t["pnl"] > 0)
-        gl = -sum(t["pnl"] for t in ts if t["pnl"] <= 0)
-        pf = gw / gl if gl > 0 else float("inf")
+        pf = profit_factor([t["pnl"] for t in ts])
         reasons = defaultdict(int)
         for t in ts:
             reasons[t["reason"]] += 1

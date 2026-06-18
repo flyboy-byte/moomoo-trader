@@ -15,7 +15,7 @@ from enum import Enum, auto
 
 import pandas as pd
 
-from .config import cfg
+from . import config as _config
 from .indicators import add_all
 from .logger import get_logger
 from .vwap_signals import score_vwap
@@ -79,10 +79,10 @@ def run_vwap_signals(
 ) -> tuple[list[VWAPTrade], pd.DataFrame]:
     """Stateful bar-by-bar pass. Returns (trades, annotated_df).
 
-    stop_mult overrides cfg.vwap_stop_mult — pass explicitly from sweeps so the
-    module-level cfg singleton doesn't silently ignore reloads.
+    stop_mult overrides cfg.vwap_stop_mult — pass explicitly from sweeps that
+    need a value different from whatever's currently in mm.config.
     """
-    _stop_mult = stop_mult if stop_mult is not None else cfg.vwap_stop_mult
+    _stop_mult = stop_mult if stop_mult is not None else _config.cfg.vwap_stop_mult
     df = compute_vwap_signals(df)
     position: VWAPPosition | None = None
     trades: list[VWAPTrade] = []
@@ -161,7 +161,7 @@ def print_vwap_summary(trades: list[VWAPTrade], df: pd.DataFrame | None = None) 
     stops = sum(1 for t in trades if t.exit_reason == "EXIT_STOP")
     time_stops = sum(1 for t in trades if t.exit_reason == "EXIT_TIME")
 
-    print(f"VWAP Strategy Summary")
+    print("VWAP Strategy Summary")
     print(f"  Trades:        {len(trades)}  ({trades_per_day:.1f}/day over {trading_days} days)")
     print(f"  Win rate:      {len(wins)/len(trades)*100:.1f}%  ({len(wins)}W / {len(losses)}L)")
     print(f"  Total PnL:     ${total_pnl:+.2f}")

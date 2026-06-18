@@ -20,7 +20,9 @@ Where the real state lives (read these, not your memory of past sessions):
 - docs/ARCHITECTURE.md      — data flow diagram, deployed strategy table, config reference, kill switches
 - docs/PROJECT_MAP.md       — full file map, strategy specs with backtest numbers, risk/sizing, event log format
 - docs/evaluation_criteria.md — pre-registered gates per strategy (the "knob freeze" — read before touching any strategy parameter)
-- docs/strategy_graveyard.md — every tested/dead/parked feature with the research data and reasoning, plus current "on hold" items
+- docs/strategy_graveyard.md — every tested/dead/parked feature with the research data and reasoning,
+  current "on hold" items, plus a "Bug-Hunting Methodology" section (recurring bug categories, when to
+  run a fork-based audit, what's deliberately out of scope for a solo project)
 This file (CLAUDE.md) intentionally does NOT duplicate that detail. If something here conflicts with
 those docs, the docs win — update this file's pointer, don't re-paste their content back in here.
 

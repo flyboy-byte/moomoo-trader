@@ -66,13 +66,15 @@ def profit_factor(trades) -> float:
     across runs (inf poisons it, 999.0 doesn't). Standardized here on `<= 0`
     (matches this module's own pre-existing print_summary) and `inf` (the
     mathematically correct sentinel). Accepts any list of objects with a
-    `.pnl` attribute — works with Trade, GapFadeTrade, or any other trade
-    dataclass in this project.
+    `.pnl` attribute (Trade, GapFadeTrade, etc.) OR plain pnl numbers —
+    callers working from dicts/JSONL events can pass `[e["pnl"] for e in ...]`
+    directly instead of re-deriving this calc themselves.
     """
     if not trades:
         return float("inf")
-    gross_win = sum(t.pnl for t in trades if t.pnl > 0)
-    gross_loss = abs(sum(t.pnl for t in trades if t.pnl <= 0))
+    pnls = [t.pnl if hasattr(t, "pnl") else t for t in trades]
+    gross_win = sum(p for p in pnls if p > 0)
+    gross_loss = abs(sum(p for p in pnls if p <= 0))
     return gross_win / gross_loss if gross_loss > 0 else float("inf")
 
 

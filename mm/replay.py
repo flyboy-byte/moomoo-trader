@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +30,7 @@ import pandas as pd
 import mm.clock as _clock
 import mm.paper as paper
 import mm.risk as risk
+
 from .logger import get_logger
 
 log = get_logger("replay")

@@ -2,13 +2,14 @@
 import json
 import urllib.request
 
-from .config import cfg
+from . import config as _config
 from .logger import get_logger
 
 log = get_logger("notifications")
 
 
 def _post(payload: dict) -> None:
+    cfg = _config.cfg
     if not cfg.discord_webhook_url:
         return
     from urllib.parse import urlparse

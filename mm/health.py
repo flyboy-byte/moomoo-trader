@@ -1,8 +1,9 @@
 import socket
 import time
+
 from moomoo import RET_OK
 
-from .config import cfg
+from . import config as _config
 from .connection import quote_context
 from .logger import get_logger
 
@@ -10,6 +11,7 @@ log = get_logger("health")
 
 
 def check_socket() -> bool:
+    cfg = _config.cfg
     try:
         with socket.create_connection((cfg.host, cfg.port), timeout=3):
             log.info("OpenD socket reachable at %s:%s", cfg.host, cfg.port)

@@ -4,12 +4,7 @@ Safety-critical tests for mm/risk.py.
 These cover position sizing, daily limits, kill switch, and live-trading blocks.
 All of these paths run in the paper loop before every order — they must be correct.
 """
-import os
 import importlib
-from pathlib import Path
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -226,7 +221,7 @@ class TestLiveTradingBlocked:
         monkeypatch.delenv("LIVE_TRADING_ENABLED", raising=False)
         risk = _reload_risk(monkeypatch, {})
         assert risk.live_trading_blocked() is False  # flag=false means NOT live → not blocked
-        assert risk.cfg.live_trading_enabled is False
+        assert risk._config.cfg.live_trading_enabled is False
 
     def test_blocked_when_enabled_true(self, monkeypatch):
         """If someone sets LIVE_TRADING_ENABLED=true, live_trading_blocked() must catch it."""
