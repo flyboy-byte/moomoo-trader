@@ -30,7 +30,12 @@ def premarket_session(df_ext: pd.DataFrame) -> dict:
     """Slice an extended-hours DataFrame into {date: premarket_bars_df}.
 
     df_ext must have a `time_key` column (as returned by fetch_candles).
-    Only bars in [4:00, 9:30) are kept per day.
+    Bars are end-labeled (5-min bar covering 9:25-9:30 is labeled 9:30:00 —
+    see mm/gap_fade.py's "first bar closes at 9:35" convention), so the
+    premarket window is [4:00, 9:30] INCLUSIVE of the 9:30 label. Using an
+    exclusive upper bound would silently drop the last premarket bar every
+    day (bug fix 2026-06-17) without double-counting into RTH, since RTH's
+    first label is 9:35, not 9:30.
     """
     df = df_ext.copy()
     df["_ts"] = pd.to_datetime(df["time_key"])
@@ -38,7 +43,7 @@ def premarket_session(df_ext: pd.DataFrame) -> dict:
     df["_time"] = df["_ts"].dt.time
 
     sessions: dict = {}
-    mask = (df["_time"] >= _PREMARKET_START) & (df["_time"] < _PREMARKET_END)
+    mask = (df["_time"] >= _PREMARKET_START) & (df["_time"] <= _PREMARKET_END)
     pm = df[mask]
     for date, grp in pm.groupby("_date"):
         sessions[date] = grp.sort_values("_ts").reset_index(drop=True)

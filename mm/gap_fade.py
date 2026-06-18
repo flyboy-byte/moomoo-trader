@@ -41,8 +41,15 @@ GAP_MAX_PCT: float = float(os.getenv("GAP_MAX_PCT", "0.02"))        # 2.0% max (
 GAP_TARGET_FILL_PCT: float = float(os.getenv("GAP_TARGET_FILL_PCT", "0.5"))  # 50% gap fill
 GAP_STOP_BUFFER: float = float(os.getenv("GAP_STOP_BUFFER", "0.001"))        # 0.1% beyond extreme
 GAP_SHORTS_ENABLED: bool = os.getenv("GAP_SHORTS_ENABLED", "true").lower() in ("true", "1", "yes")
-# See mm/config.py's gap_premarket_fill_pct_min comment for why this is a MIN, not a MAX.
+# This is a MIN floor (reject the toxic <30% tail), not a MAX cap — our own 9-month
+# research sample found higher fill% is BETTER. See run_gap_fade()'s docstring.
 GAP_PREMARKET_FILL_PCT_MIN: float = float(os.getenv("GAP_PREMARKET_FILL_PCT_MIN", "0.3"))
+# Dark by default: this only flips run_gap_fade()'s premarket filter from shadow-logging
+# to actually skipping a trade. Stays False until the filter survives fresh forward data
+# (see docs/strategy_graveyard.md) — this is the ONLY thing that controls that, there is
+# no separate cfg.* knob (removed 2026-06-17, was dead code that looked functional but
+# nothing ever read it).
+GAP_PREMARKET_FILTER_ENABLED: bool = os.getenv("GAP_PREMARKET_FILTER_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # 5-min bars are labeled at their END time. First bar of session closes at 9:35.
 _FIRST_BAR_TIME = dtime(9, 35)
@@ -114,7 +121,7 @@ def run_gap_fade(
     shorts_enabled: bool = GAP_SHORTS_ENABLED,
     premarket_sessions: dict | None = None,
     min_premarket_fill_pct: float = GAP_PREMARKET_FILL_PCT_MIN,
-    filter_active: bool = False,
+    filter_active: bool = GAP_PREMARKET_FILTER_ENABLED,
 ) -> list[GapFadeTrade]:
     """Stateful bar-by-bar gap fade pass. Returns list of completed trades.
 

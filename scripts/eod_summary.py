@@ -214,10 +214,14 @@ def load_summary(session_date: date) -> SessionSummary:
 # ---------------------------------------------------------------------------
 
 def _load_vix_shadow(session_date: date) -> dict | None:
+    """No write-side dedup in fetch_vix_morning.py — running it twice in one day
+    appends two lines for the same date. Take the LAST match (most recent run),
+    not the first, so a re-run with corrected/updated data wins."""
     path = cfg.logs_dir / "vix_daily.jsonl"
     if not path.exists():
         return None
     date_str = session_date.strftime("%Y-%m-%d")
+    found: dict | None = None
     try:
         for line in path.read_text().splitlines():
             try:
@@ -225,10 +229,10 @@ def _load_vix_shadow(session_date: date) -> dict | None:
             except json.JSONDecodeError:
                 continue
             if rec.get("date") == date_str:
-                return rec
+                found = rec
     except OSError:
         return None
-    return None
+    return found
 
 
 def _vix_shadow_line(s: SessionSummary) -> str | None:

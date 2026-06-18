@@ -75,11 +75,17 @@ def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
     # Core mean-reversion gate: price at BB lower AND KDJ momentum turning.
     # KDJ_WINDOW_BARS: if > 0, accept a KDJ cross from any of the last N bars (not just same-bar).
     # Sweep on IWM+QQQ 2022-2025 showed w=3 gives 10x more signals while improving OOS PF.
+    # Grouped by calendar day (bug fix 2026-06-17): a plain .rolling() over a multi-day frame
+    # lets the window for the first N bars of a new trading day see KDJ crosses from the tail
+    # end of the PREVIOUS day, firing on a stale cross instead of a same-session one. Per-day
+    # grouping makes the window reset at every session boundary, matching the documented intent
+    # ("KDJ cross within N bars" implicitly means N bars of THIS session).
     if cfg.kdj_window_bars > 0:
+        day_key = pd.to_datetime(df["time_key"]).dt.date
         kdj_in_window = (
             df["sig_kdj_cross"]
-            .rolling(window=cfg.kdj_window_bars + 1, min_periods=1)
-            .max()
+            .groupby(day_key)
+            .transform(lambda s: s.rolling(window=cfg.kdj_window_bars + 1, min_periods=1).max())
             .fillna(False)
             .astype(bool)
         )

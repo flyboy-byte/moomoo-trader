@@ -44,16 +44,21 @@ def main() -> None:
 
     for symbol in symbols:
         for extended_time in (False, True):
-            df = fetch_candles(symbol=symbol, ktype="K_5M", start=start, end=end,
-                                extended_time=extended_time)
-            if df.empty:
-                kind = "extended-hours" if extended_time else "RTH"
-                print(f"{symbol}: no {kind} data returned for {start}..{end}")
-                continue
-            path = update_combined_csv(df, symbol, "K_5M", extended_time=extended_time)
-            out = path.read_text().count("\n") - 1  # rough row count, header excluded
             kind = "EXT" if extended_time else "RTH"
-            print(f"{symbol} [{kind}]: fetched {len(df)} rows, archive now ~{out} rows -> {path}")
+            try:
+                df = fetch_candles(symbol=symbol, ktype="K_5M", start=start, end=end,
+                                    extended_time=extended_time)
+                if df.empty:
+                    print(f"{symbol}: no {kind} data returned for {start}..{end}")
+                    continue
+                path = update_combined_csv(df, symbol, "K_5M", extended_time=extended_time)
+                out = path.read_text().count("\n") - 1  # rough row count, header excluded
+                print(f"{symbol} [{kind}]: fetched {len(df)} rows, archive now ~{out} rows -> {path}")
+            except Exception as e:
+                # One symbol's fetch/write failure shouldn't block the rest — this loop
+                # runs unattended from cron, so a single bad day must not silently stop
+                # every other symbol's archive from updating.
+                print(f"{symbol} [{kind}]: FAILED ({e}) — continuing with remaining symbols")
 
 
 if __name__ == "__main__":

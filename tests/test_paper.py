@@ -403,8 +403,9 @@ class TestExecuteExit:
         paper = _reload_paper(monkeypatch, {})
         monkeypatch.setattr(paper, "notify", MagicMock())
         ctx = _ctx_with_order("FILLED_ALL", dealt_qty=1.0, dealt_price=706.10)
-        fill = paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
+        fill, dealt = paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
         assert fill == 706.10
+        assert dealt == 1.0
 
     def test_sell_limit_is_marketable_below_intended(self, monkeypatch):
         paper = _reload_paper(monkeypatch, {})
@@ -430,6 +431,28 @@ class TestExecuteExit:
         ctx = _ctx_with_order("SUBMITTED", dealt_qty=0.0)
         fill = paper._execute_exit(ctx, 1, "US.QQQ", self._pos(paper), 706.12, "VWAP_LOST", MagicMock())
         assert fill is None  # caller must keep the position open
+
+    def test_partial_fill_returns_actual_dealt_qty(self, monkeypatch):
+        """A partial exit fill must report the actual dealt qty, not the requested qty —
+        callers use this to compute correct PnL and to keep the remainder open instead
+        of clearing the position outright (the bug this guards against: PnL computed on
+        the full position size while the unfilled remainder silently orphans at the broker)."""
+        paper = _reload_paper(monkeypatch, {})
+        import mm.execution
+        monkeypatch.setattr(paper, "notify", MagicMock())
+        monkeypatch.setattr(mm.execution, "_FILL_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(mm.execution, "_FILL_POLL_S", 0.01)
+        monkeypatch.setattr(mm.execution, "_CANCEL_RECHECK_S", 0.05)
+        pos = paper.PaperPosition(
+            symbol="US.QQQ", strategy="vwap_pb", entry_time=pd.Timestamp("2026-06-10 10:05:00"),
+            entry_price=707.20, stop_price=703.95, qty=3, order_id="111", direction="long")
+        ctx = _ctx_with_order("FILLED_PART", dealt_qty=2.0, dealt_price=706.10)
+        result = paper._execute_exit(ctx, 1, "US.QQQ", pos, 706.12, "VWAP_LOST", MagicMock())
+        assert result is not None
+        fill, dealt = result
+        assert fill == 706.10
+        assert dealt == 2.0
+        assert dealt < pos.qty  # caller must detect this and keep the remaining 1 share open
 
 
 class TestMarketHoursGuard:

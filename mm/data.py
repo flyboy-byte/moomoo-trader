@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -107,15 +108,29 @@ def update_combined_csv(
     df_new["time_key"] = pd.to_datetime(df_new["time_key"])
 
     if path.exists():
-        df_old = pd.read_csv(path)
-        df_old["time_key"] = pd.to_datetime(df_old["time_key"])
-        combined = pd.concat([df_old, df_new], ignore_index=True)
+        try:
+            df_old = pd.read_csv(path)
+            df_old["time_key"] = pd.to_datetime(df_old["time_key"])
+            combined = pd.concat([df_old, df_new], ignore_index=True)
+        except Exception as e:
+            # A crash mid-write (VPS restart, OOM) can leave this file truncated/corrupt.
+            # Don't propagate forever — log loudly and rebuild from this fetch onward
+            # rather than permanently breaking every future update + anything that reads it.
+            log.error("Existing archive %s unreadable (%s) — rebuilding from this fetch", path, e)
+            combined = df_new
     else:
         combined = df_new
 
     combined = combined.drop_duplicates(subset=["time_key"], keep="last")
     combined = combined.sort_values("time_key").reset_index(drop=True)
-    combined.to_csv(path, index=False)
+
+    # Atomic write: a crash mid-write to the real path would corrupt it for every
+    # future read. Write to a temp file in the same directory, then os.replace()
+    # (atomic on POSIX) so the destination is always either the old version or the
+    # complete new one, never a partial write.
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    combined.to_csv(tmp_path, index=False)
+    os.replace(tmp_path, path)
     log.info("Updated %s: %d total rows", path, len(combined))
     return path
 

@@ -15,32 +15,42 @@ DAILY_LINE='15 0 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_daily_arc
 WEEKLY_LINE='30 0 * * 6 cd ~/moomoo && .venv/bin/python scripts/weekly_report.py >> logs/cron_weekly.log 2>&1'
 VIX_LINE='10 13 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_vix_morning.py >> logs/cron_vix.log 2>&1'
 
+# Bug fix 2026-06-17: the old idempotency check matched on script filename
+# substring only, not the full line. If a line's schedule/args were ever
+# hand-edited on the VPS, re-running this would see the filename match and
+# silently skip re-adding the corrected line, leaving the stale one in
+# place — this already happened once this session (weekly_report.py's
+# wrong UTC-vs-ET schedule had to be fixed via raw crontab editing because
+# the installer wouldn't touch it). Now: exact-line match = skip (already
+# correct); filename match but different line = remove the stale line and
+# install the corrected one (self-heal); no match = add.
 echo "=== Installing cron on $VPS ==="
 ssh "$VPS" bash <<REMOTE
 set -euo pipefail
 CURRENT=\$(crontab -l 2>/dev/null || true)
 NEW="\$CURRENT"
-if ! echo "\$CURRENT" | grep -qF "fetch_daily_archive.py"; then
+
+update_line() {
+  pattern="\$1"
+  newline="\$2"
+  if echo "\$NEW" | grep -qF "\$newline"; then
+    echo "  exact line already present — skipping: \$pattern"
+    return
+  fi
+  if echo "\$NEW" | grep -qF "\$pattern"; then
+    echo "  stale line found for \$pattern — replacing with corrected schedule/args"
+    NEW=\$(echo "\$NEW" | grep -vF "\$pattern")
+  else
+    echo "  adding new line for \$pattern"
+  fi
   NEW="\$NEW
-$DAILY_LINE"
-  echo "Adding daily archive cron line."
-else
-  echo "Daily archive cron line already present — skipping."
-fi
-if ! echo "\$CURRENT" | grep -qF "weekly_report.py"; then
-  NEW="\$NEW
-$WEEKLY_LINE"
-  echo "Adding weekly report cron line."
-else
-  echo "Weekly report cron line already present — skipping."
-fi
-if ! echo "\$CURRENT" | grep -qF "fetch_vix_morning.py"; then
-  NEW="\$NEW
-$VIX_LINE"
-  echo "Adding VIX shadow-logger cron line."
-else
-  echo "VIX shadow-logger cron line already present — skipping."
-fi
+\$newline"
+}
+
+update_line "fetch_daily_archive.py" "$DAILY_LINE"
+update_line "weekly_report.py" "$WEEKLY_LINE"
+update_line "fetch_vix_morning.py" "$VIX_LINE"
+
 echo "\$NEW" | crontab -
 echo ""
 echo "=== Final crontab ==="

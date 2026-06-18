@@ -360,14 +360,18 @@ def _execute_entry(tctx, acc_id: int, symbol: str, qty: int | float, intended: f
 
 
 def _execute_exit(tctx, acc_id: int, symbol: str, position: "PaperPosition",
-                  intended: float, reason: str, elog: "PaperEventLog") -> float | None:
+                  intended: float, reason: str, elog: "PaperEventLog"
+                  ) -> tuple[float, float] | None:
     """Place a marketable exit limit and wait for the fill.
 
     Sells slightly below / covers slightly above the candle close so the limit
     is immediately marketable (the close is minutes stale; a sell above market
-    pends and dies at EOD — proven live 2026-06-04). Returns the actual fill
-    price, or None if the exit could not be executed — the caller must keep
-    the position open and retry on the next poll.
+    pends and dies at EOD — proven live 2026-06-04). Returns (fill_price,
+    dealt_qty) on any nonzero fill — dealt_qty may be less than position.qty
+    on a partial fill, and the caller MUST use dealt_qty (not position.qty)
+    for PnL and must keep the remainder open rather than clearing the position.
+    Returns None if nothing filled at all — the caller must keep the position
+    open and retry on the next poll.
     """
     is_short = position.direction == "short"
     side = "BUY_BACK" if is_short else "SELL"
@@ -390,7 +394,7 @@ def _execute_exit(tctx, acc_id: int, symbol: str, position: "PaperPosition",
                 log.warning("%-8s [%s] exit PARTIAL fill %.6f/%.6f at %.4f",
                             symbol, position.strategy, dealt, float(position.qty), fill)
             _exit_unfilled_notified.discard((symbol, position.strategy))
-            return fill
+            return fill, dealt
         log.warning("%-8s [%s] exit order %s not filled (status=%s, buffer=%.1f%%)",
                     symbol, position.strategy, order_id, status, buf * 100)
 

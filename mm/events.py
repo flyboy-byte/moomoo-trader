@@ -90,12 +90,14 @@ class PaperEventLog:
 
     def position_close(self, exit_price: float, reason: str, pnl: float,
                        hold_bars: int = 0, strategy: str = "",
-                       direction: str = "long", intended_price: float = 0.0) -> None:
+                       direction: str = "long", intended_price: float = 0.0,
+                       **extra) -> None:
         intended = intended_price if intended_price > 0 else exit_price
         slippage_bps = round((exit_price - intended) / intended * 10000, 1)
         self._write("position_close", strategy=strategy, symbol=self._sym,
                     exit=round(exit_price, 4), reason=reason, pnl=round(pnl, 4),
-                    hold_bars=hold_bars, direction=direction, slippage_bps=slippage_bps)
+                    hold_bars=hold_bars, direction=direction, slippage_bps=slippage_bps,
+                    **extra)
 
     def error(self, message: str, strategy: str = "") -> None:
         self._write("error", strategy=strategy, message=message)

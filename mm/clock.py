@@ -28,8 +28,19 @@ def now_et() -> datetime:
 
 
 def today() -> date:
-    """Current local date."""
-    return date.today()
+    """Current ET trading-day date (NOT local system date).
+
+    Bug fix 2026-06-17: this used to return date.today() (local system date).
+    Every caller (DailyTracker's day-reset, ORB once-per-day, session-rollover
+    detection, EOD-summary date) is keyed to the ET trading day, not local
+    wall-clock date — using the wrong basis is the same bug class as the
+    KDJ window day-boundary leak (mm/strategy.py), just dormant today because
+    both UTC (VPS) and America/Denver (local dev) happen to have their
+    midnight fall outside ET market hours (9:30am-4pm ET). A timezone whose
+    midnight falls inside that window would silently roll the trading day at
+    the wrong moment.
+    """
+    return now_et().date()
 
 
 def monotonic() -> float:

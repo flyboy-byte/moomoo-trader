@@ -82,8 +82,15 @@ def _eval_bb_kdj(
         else:
             effective_window = cfg.kdj_window_overrides.get(symbol, cfg.kdj_window_bars)
             if effective_window > 0:
+                # Restrict the lookback to bars from the SAME calendar day as the current
+                # candle (bug fix 2026-06-17): df_signals spans multiple fetched days, so a
+                # plain tail-slice could pick up a KDJ cross from the tail end of the
+                # previous trading day for the first few bars of a new session.
                 window = min(effective_window + 1, len(df_signals))
-                kdj_met = bool(df_signals["kdj_golden_cross"].iloc[-window:].any())
+                candle_date = pd.Timestamp(candle_ts).date()
+                tail = df_signals.iloc[-window:]
+                same_day = pd.to_datetime(tail["time_key"]).dt.date == candle_date
+                kdj_met = bool((tail["kdj_golden_cross"] & same_day).any())
             else:
                 kdj_met = bool(last["sig_kdj_cross"])
             core_met = bool(last["sig_bb_touch"]) and kdj_met
@@ -136,20 +143,28 @@ def _eval_bb_kdj(
             exit_reason = "STOP_LOSS"
 
         if exit_reason:
-            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
-                                       exit_reason, elog)
-            if fill_price is None:
+            result = _execute_exit(tctx, acc_id, symbol, position, close, exit_reason, elog)
+            if result is None:
                 return position
-            pnl_total = (fill_price - position.entry_price) * position.qty
+            fill_price, dealt_qty = result
+            pnl_total = (fill_price - position.entry_price) * dealt_qty
             hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="bb_kdj")
-            _clear_position(symbol, "bb_kdj")
+            partial = dealt_qty < float(position.qty)
             elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars,
-                                strategy="bb_kdj", direction="long", intended_price=close)
+                                strategy="bb_kdj", direction="long", intended_price=close,
+                                partial_fill=partial, dealt_qty=dealt_qty)
             notify_exit(symbol, fill_price, exit_reason, pnl_total)
-            log.info("%-8s [bb_kdj] CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, fill_price, pnl_total, exit_reason)
-            position = None
+            if partial:
+                position.qty = position.qty - dealt_qty
+                _save_position(position)
+                log.warning("%-8s [bb_kdj] PARTIAL CLOSE exit=%.4f pnl=%+.4f reason=%s remaining_qty=%s",
+                            symbol, fill_price, pnl_total, exit_reason, position.qty)
+            else:
+                _clear_position(symbol, "bb_kdj")
+                log.info("%-8s [bb_kdj] CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                         symbol, fill_price, pnl_total, exit_reason)
+                position = None
 
     return position
 
@@ -224,20 +239,28 @@ def _eval_vwap(
             exit_reason = "VWAP_STOP"
 
         if exit_reason:
-            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
-                                       exit_reason, elog)
-            if fill_price is None:
+            result = _execute_exit(tctx, acc_id, symbol, position, close, exit_reason, elog)
+            if result is None:
                 return position
-            pnl_total = (fill_price - position.entry_price) * position.qty
+            fill_price, dealt_qty = result
+            pnl_total = (fill_price - position.entry_price) * dealt_qty
             hold_bars_vwap = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="vwap")
-            _clear_position(symbol, "vwap")
+            partial = dealt_qty < float(position.qty)
             elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars_vwap,
-                                strategy="vwap", direction="long", intended_price=close)
+                                strategy="vwap", direction="long", intended_price=close,
+                                partial_fill=partial, dealt_qty=dealt_qty)
             notify_exit(symbol, fill_price, exit_reason, pnl_total)
-            log.info("%-8s [vwap]   CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, fill_price, pnl_total, exit_reason)
-            position = None
+            if partial:
+                position.qty = position.qty - dealt_qty
+                _save_position(position)
+                log.warning("%-8s [vwap]   PARTIAL CLOSE exit=%.4f pnl=%+.4f reason=%s remaining_qty=%s",
+                            symbol, fill_price, pnl_total, exit_reason, position.qty)
+            else:
+                _clear_position(symbol, "vwap")
+                log.info("%-8s [vwap]   CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                         symbol, fill_price, pnl_total, exit_reason)
+                position = None
 
     return position
 
@@ -294,20 +317,28 @@ def _eval_vwap_pb(
             exit_reason = "STOP"
 
         if exit_reason:
-            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
-                                       exit_reason, elog)
-            if fill_price is None:
+            result = _execute_exit(tctx, acc_id, symbol, position, close, exit_reason, elog)
+            if result is None:
                 return position
-            pnl_total = (fill_price - position.entry_price) * position.qty
+            fill_price, dealt_qty = result
+            pnl_total = (fill_price - position.entry_price) * dealt_qty
             hold_bars_vp = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="vwap_pb")
-            _clear_position(symbol, "vwap_pb")
+            partial = dealt_qty < float(position.qty)
             elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars_vp,
-                                strategy="vwap_pb", direction="long", intended_price=close)
+                                strategy="vwap_pb", direction="long", intended_price=close,
+                                partial_fill=partial, dealt_qty=dealt_qty)
             notify_exit(symbol, fill_price, exit_reason, pnl_total)
-            log.info("%-8s [vwap_pb] CLOSE exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, fill_price, pnl_total, exit_reason)
-            position = None
+            if partial:
+                position.qty = position.qty - dealt_qty
+                _save_position(position)
+                log.warning("%-8s [vwap_pb] PARTIAL CLOSE exit=%.4f pnl=%+.4f reason=%s remaining_qty=%s",
+                            symbol, fill_price, pnl_total, exit_reason, position.qty)
+            else:
+                _clear_position(symbol, "vwap_pb")
+                log.info("%-8s [vwap_pb] CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                         symbol, fill_price, pnl_total, exit_reason)
+                position = None
 
     elif not is_time_stop and bar_clock >= dtime(*cfg.vwap_pb_min_entry_time):
         wick_below = float(last["low"]) < vwap
@@ -410,21 +441,29 @@ def _eval_orb(
             exit_reason = "STOP"
 
         if exit_reason:
-            fill_price = _execute_exit(tctx, acc_id, symbol, position, close,
-                                       exit_reason, elog)
-            if fill_price is None:
+            result = _execute_exit(tctx, acc_id, symbol, position, close, exit_reason, elog)
+            if result is None:
                 return position
+            fill_price, dealt_qty = result
             pnl_per_share = (position.entry_price - fill_price) if is_short else (fill_price - position.entry_price)
-            pnl_total = pnl_per_share * position.qty
+            pnl_total = pnl_per_share * dealt_qty
             hold_bars_orb = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
             daily.record_trade(pnl_total, strategy="orb")
-            _clear_position(symbol, "orb")
+            partial = dealt_qty < float(position.qty)
             elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars_orb,
-                                strategy="orb", direction=position.direction, intended_price=close)
+                                strategy="orb", direction=position.direction, intended_price=close,
+                                partial_fill=partial, dealt_qty=dealt_qty)
             notify_exit(symbol, fill_price, exit_reason, pnl_total)
-            log.info("%-8s [orb]    CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s",
-                     symbol, position.direction, fill_price, pnl_total, exit_reason)
-            position = None
+            if partial:
+                position.qty = position.qty - dealt_qty
+                _save_position(position)
+                log.warning("%-8s [orb]    PARTIAL CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s remaining_qty=%s",
+                            symbol, position.direction, fill_price, pnl_total, exit_reason, position.qty)
+            else:
+                _clear_position(symbol, "orb")
+                log.info("%-8s [orb]    CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s",
+                         symbol, position.direction, fill_price, pnl_total, exit_reason)
+                position = None
 
     elif or_valid and not is_time_stop and not already_entered:
         or_high = or_info["high"]
