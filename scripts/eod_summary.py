@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import clock
 from mm.config import cfg
 from mm.notifications import notify
 
@@ -42,6 +43,7 @@ class TradeRecord:
     exit_slippage_bps: float = 0.0
     strategy: str = ""
     direction: str = "long"
+    orphaned: bool = False  # position_close with no matching position_open in this day's window
 
     @property
     def hold_minutes(self) -> int:
@@ -96,7 +98,10 @@ class SessionSummary:
 
     @property
     def avg_hold_minutes(self) -> float:
-        ct = self.closed_trades
+        # Excludes orphaned trades (bug fix 2026-06-18): their entry_time is
+        # unknown, so hold_minutes is hardcoded to 0 — including them here
+        # would silently understate the average with a fake zero, not a real one.
+        ct = [t for t in self.closed_trades if not t.orphaned]
         if not ct:
             return 0.0
         return sum(t.hold_minutes for t in ct) / len(ct)
@@ -185,13 +190,25 @@ def load_summary(session_date: date) -> SessionSummary:
             sym = evt.get("symbol", sym)
             key = (sym, strat)
             tr = pending.pop(key, None)
-            if tr:
-                tr.exit_time = evt.get("ts", "")
-                tr.exit_price = evt.get("exit", 0.0)
-                tr.exit_reason = evt.get("reason", "")
-                tr.pnl = evt.get("pnl", 0.0)
-                tr.exit_slippage_bps = evt.get("slippage_bps", 0.0)
-                trades.append(tr)
+            if tr is None:
+                # Bug fix 2026-06-18: this used to be silently dropped — the real,
+                # already-executed PnL from this exit was excluded from
+                # realized_pnl entirely, not just hidden from display. Happens
+                # when a position_open lands in a PREVIOUS day's JSONL file (e.g.
+                # a stuck exit_unfilled retry that finally fills after midnight).
+                # Entry fields are unknown here (that event is in a different
+                # day's file) — mark it clearly rather than guessing.
+                tr = TradeRecord(
+                    symbol=sym, entry_time="", entry_price=0.0, stop_price=0.0,
+                    qty=0, strategy=strat,
+                    direction=evt.get("direction", "long"), orphaned=True,
+                )
+            tr.exit_time = evt.get("ts", "")
+            tr.exit_price = evt.get("exit", 0.0)
+            tr.exit_reason = evt.get("reason", "")
+            tr.pnl = evt.get("pnl", 0.0)
+            tr.exit_slippage_bps = evt.get("slippage_bps", 0.0)
+            trades.append(tr)
 
     open_at_close = list(pending.values())
 
@@ -296,10 +313,11 @@ def format_summary(s: SessionSummary) -> str:
                 pnl_t = f"+${tr.pnl:.2f}" if tr.pnl >= 0 else f"-${abs(tr.pnl):.2f}"
                 icon = "✓" if tr.exit_reason == "target" else "✗"
                 dir_tag = "[SHORT]" if tr.direction == "short" else "[LONG] "
+                orphan_tag = " [ORPHANED — entry was in a previous day's log]" if tr.orphaned else ""
                 lines.append(
                     f"  {dir_tag} {tr.symbol}  {entry_t}→{exit_t}  "
                     f"${tr.entry_price:.2f}→${tr.exit_price:.2f}  "
-                    f"{pnl_t}  {icon}{tr.exit_reason}  {tr.hold_minutes}m"
+                    f"{pnl_t}  {icon}{tr.exit_reason}  {tr.hold_minutes}m{orphan_tag}"
                 )
 
     if s.open_at_close:
@@ -346,7 +364,8 @@ def format_discord(s: SessionSummary) -> str:
         pnl_t = f"+${tr.pnl:.2f}" if tr.pnl >= 0 else f"-${abs(tr.pnl):.2f}"
         icon = "✅" if tr.exit_reason == "target" else "🛑"
         dir_tag = " (short)" if tr.direction == "short" else ""
-        lines.append(f"  {icon} {tr.symbol}{dir_tag} {pnl_t} ({tr.hold_minutes}m)")
+        orphan_tag = " ⚠️orphaned-entry" if tr.orphaned else ""
+        lines.append(f"  {icon} {tr.symbol}{dir_tag} {pnl_t} ({tr.hold_minutes}m){orphan_tag}")
     if s.open_at_close:
         lines.append(f"  ⏳ {len(s.open_at_close)} position(s) still open")
 
@@ -362,7 +381,7 @@ def main() -> None:
                         help="Post summary to Discord webhook (requires DISCORD_WEBHOOK_URL in .env)")
     args = parser.parse_args()
 
-    session_date = date.today()
+    session_date = clock.today()  # ET trading-day date, not local system date
     if args.date:
         session_date = date.fromisoformat(args.date)
 

@@ -58,6 +58,8 @@ Package layout:
 
   IMPORTANT — module ref pattern: use `from . import config as _config` + `_config.cfg.*` at runtime in any module
   that replay tests might reload. `from .config import cfg` binds at import time and becomes stale after _reload_paper.
+  Bug fix 2026-06-18: mm/strategy.py, mm/backtest.py, mm/research.py were violating this (found via a new test
+  exposing stale cfg across reloads) — all three now correctly re-fetch `cfg = _config.cfg` inside each function.
 
 Scripts (all run from project root with venv active):
   python scripts/health_check.py
@@ -114,8 +116,11 @@ strategy, a doc cleanup). Don't treat this list as a gate against doing other us
   vwap_pb) — most "what does the data say" questions need more samples before they're answerable.
   See docs/evaluation_criteria.md for the actual pre-registered sample-size gates per strategy.
 - Gap Fade (mm/gap_fade.py) is research-only, not in live STRATEGIES. Premarket fill% filter
-  validated empirically (9-month sample, see strategy_graveyard.md) but not yet wired into the
-  entry logic — dark config knobs exist in mm/config.py, unread by anything yet.
+  validated empirically (9-month sample, see strategy_graveyard.md) and wired into
+  run_gap_fade() as of 2026-06-18 — but shadow-mode only (filter_active=GAP_PREMARKET_FILTER_ENABLED,
+  defaults False, logs would_filter_skip without ever blocking a trade). Knobs are
+  self-contained module constants in mm/gap_fade.py, not cfg.* (that file deliberately
+  doesn't import cfg).
 - docs/codex-ai-size.md / codex-ai-size-remedies.md — repo doc-hierarchy analysis, explicitly
   parked for a future dedicated session, not in progress.
 

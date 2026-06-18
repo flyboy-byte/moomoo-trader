@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import cfg
+from . import config as _config
 from .strategy import run_signals, Signal, Trade
 from .logger import get_logger
 
@@ -21,6 +21,7 @@ def load_candles(path: str | Path) -> pd.DataFrame:
 
 def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], pd.DataFrame]:
     """Return completed trades and the signal-annotated DataFrame."""
+    cfg = _config.cfg  # re-fetched at call time — see mm/strategy.py for why
     df = run_signals(df)
 
     trades: list[Trade] = []
@@ -50,6 +51,29 @@ def run_backtest(df: pd.DataFrame) -> tuple[list[Trade], pd.DataFrame]:
                 open_entry = None
 
     return trades, df
+
+
+def profit_factor(trades) -> float:
+    """Canonical PF calc — gross win / gross loss, inf if no losses.
+
+    Bug fix 2026-06-18: this metric used to be independently reimplemented in
+    at least 5 places across the codebase (mm/research.py, backtest_orb.py,
+    backtest_vwap_pb.py, backtest_ema_momentum.py, sweep_vwap.py) with two
+    inconsistent conventions that had silently drifted apart: a pnl==0 trade
+    counted as a loss in some places (`pnl <= 0`) and as neither win nor loss
+    in others (`pnl < 0`); the no-losses sentinel was `999.0` in some and
+    `float("inf")` in others, which are NOT interchangeable in any sum/average
+    across runs (inf poisons it, 999.0 doesn't). Standardized here on `<= 0`
+    (matches this module's own pre-existing print_summary) and `inf` (the
+    mathematically correct sentinel). Accepts any list of objects with a
+    `.pnl` attribute — works with Trade, GapFadeTrade, or any other trade
+    dataclass in this project.
+    """
+    if not trades:
+        return float("inf")
+    gross_win = sum(t.pnl for t in trades if t.pnl > 0)
+    gross_loss = abs(sum(t.pnl for t in trades if t.pnl <= 0))
+    return gross_win / gross_loss if gross_loss > 0 else float("inf")
 
 
 def print_summary(trades: list[Trade]) -> None:

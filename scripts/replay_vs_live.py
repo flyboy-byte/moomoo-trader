@@ -160,7 +160,11 @@ def main() -> None:
             pass
     except OSError as e:
         print(f"{YELLOW}SKIP: OpenD not reachable at {cfg.host}:{cfg.port} ({e}){RESET}")
-        sys.exit(0)
+        # Bug fix 2026-06-18: exit(0) here meant verify.sh's step 5 reported clean
+        # "All checks passed" even though the replay-vs-live diff never actually ran.
+        # Exit 2 = "could not run the check" (env/data problem), distinct from 0=agree,
+        # 1=decisions disagree, so verify.sh can flag it instead of silently passing.
+        sys.exit(2)
 
     try:
         from mm.data import fetch_candles
@@ -173,7 +177,8 @@ def main() -> None:
             dfs[sym] = df
     except Exception as e:
         print(f"{YELLOW}SKIP: candle fetch failed ({e}){RESET}")
-        sys.exit(0)
+        # See the OSError handler above for why this is exit(2), not exit(0).
+        sys.exit(2)
 
     # --- replay through the real runner ---
     from mm.replay import replay

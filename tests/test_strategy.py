@@ -196,8 +196,11 @@ class TestStopLoss:
 class TestKDJDeathCrossExit:
     def test_death_cross_fires_when_enabled(self, monkeypatch):
         import mm.strategy
-        # Patch cfg directly — avoids module reload / stale Signal class issues
-        monkeypatch.setattr(mm.strategy.cfg, "exit_on_kdj_death", True)
+        from mm.config import cfg
+        # Patch the live cfg singleton directly — avoids module reload / stale
+        # Signal class issues. mm/strategy.py re-fetches cfg at call time
+        # (mm.strategy._config.cfg), so patching the singleton here is correct.
+        monkeypatch.setattr(cfg, "exit_on_kdj_death", True)
         df = _make_bars(10, entry_at=2, death_at=6)
         monkeypatch.setattr(mm.strategy, "compute_signals", lambda d: df.copy())
         out = mm.strategy.run_signals(df)
@@ -205,7 +208,8 @@ class TestKDJDeathCrossExit:
 
     def test_death_cross_ignored_when_disabled(self, monkeypatch):
         import mm.strategy
-        monkeypatch.setattr(mm.strategy.cfg, "exit_on_kdj_death", False)
+        from mm.config import cfg
+        monkeypatch.setattr(cfg, "exit_on_kdj_death", False)
         df = _make_bars(10, entry_at=2, death_at=6)
         monkeypatch.setattr(mm.strategy, "compute_signals", lambda d: df.copy())
         out = mm.strategy.run_signals(df)
@@ -246,6 +250,79 @@ class TestComputeSignals:
         # It is valid to have zero entries on flat synthetic data
         entries = (out["signal"] == Signal.ENTRY).sum()
         assert entries >= 0  # no crash; value is dataset-dependent
+
+
+class TestKDJDayBoundaryFix:
+    """Regression test for the 2026-06-17 bug fix: KDJ_WINDOW_BARS lookback
+    used to leak across calendar-day boundaries. Verified on real data that
+    30-39% of historical entries were contaminated (see
+    docs/strategy_graveyard.md). This test isolates just the day-grouping
+    mechanism — score_df/add_all are stubbed out so it doesn't depend on
+    reverse-engineering real KDJ/BB math to trigger a cross deterministically.
+    """
+
+    def test_kdj_window_does_not_leak_across_day_boundary(self, monkeypatch):
+        import mm.strategy as strat
+        from mm.config import cfg
+
+        monkeypatch.setattr(cfg, "kdj_window_bars", 3)
+        monkeypatch.setattr(cfg, "min_signal_score", 0)
+        monkeypatch.setattr(strat, "add_all", lambda d: d)
+        monkeypatch.setattr(strat, "score_df", lambda d: d)
+
+        # Day 1: 5 bars, KDJ cross on the LAST bar only.
+        # Day 2: 5 bars, bb_touch True on the first 3 bars, NO cross anywhere in day 2.
+        # With a 3-bar window applied naively (no day grouping), day 2's bars 0-2
+        # would incorrectly "see" day 1's cross and fire.
+        day1 = pd.Timestamp("2024-01-01 15:30")
+        day2 = pd.Timestamp("2024-01-02 09:30")
+        times = [day1 + pd.Timedelta(minutes=5 * i) for i in range(5)] + \
+                [day2 + pd.Timedelta(minutes=5 * i) for i in range(5)]
+        kdj_cross = [False, False, False, False, True] + [False] * 5
+        bb_touch = [False] * 5 + [True, True, True, False, False]
+
+        df = pd.DataFrame({
+            "time_key": times,
+            "sig_kdj_cross": kdj_cross,
+            "sig_bb_touch": bb_touch,
+            "sig_rsi_oversold": [False] * 10,
+            "sig_ranging": [False] * 10,
+            "sig_volume_spike": [False] * 10,
+        })
+
+        out = strat.compute_signals(df)
+        entries = out["signal"] == strat.Signal.ENTRY
+
+        assert not entries.iloc[5:8].any(), (
+            "KDJ window leaked across the day boundary — day 2's bb_touch bars "
+            "fired on day 1's stale cross"
+        )
+
+    def test_kdj_window_still_fires_within_the_same_day(self, monkeypatch):
+        """Sanity check the fix didn't break the legitimate same-day case."""
+        import mm.strategy as strat
+        from mm.config import cfg
+
+        monkeypatch.setattr(cfg, "kdj_window_bars", 3)
+        monkeypatch.setattr(cfg, "min_signal_score", 0)
+        monkeypatch.setattr(strat, "add_all", lambda d: d)
+        monkeypatch.setattr(strat, "score_df", lambda d: d)
+
+        day1 = pd.Timestamp("2024-01-01 09:30")
+        times = [day1 + pd.Timedelta(minutes=5 * i) for i in range(5)]
+        # Cross on bar 1, bb_touch on bar 3 — within the 3-bar window, same day.
+        df = pd.DataFrame({
+            "time_key": times,
+            "sig_kdj_cross": [False, True, False, False, False],
+            "sig_bb_touch": [False, False, False, True, False],
+            "sig_rsi_oversold": [False] * 5,
+            "sig_ranging": [False] * 5,
+            "sig_volume_spike": [False] * 5,
+        })
+
+        out = strat.compute_signals(df)
+        entries = out["signal"] == strat.Signal.ENTRY
+        assert entries.iloc[3], "same-day in-window cross should still fire"
 
 
 # ---------------------------------------------------------------------------

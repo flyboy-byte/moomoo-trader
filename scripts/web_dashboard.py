@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from flask import Flask, Response, redirect, render_template_string, request, session, url_for
+from mm import clock
 from mm.config import cfg
 from eod_summary import SessionSummary, load_summary
 
@@ -380,8 +381,11 @@ def _session_date() -> date:
         if d_str:
             return date.fromisoformat(d_str)
     except RuntimeError:
-        pass
-    return date.today()
+        pass  # no Flask request context (e.g. called outside a request)
+    except ValueError:
+        pass  # malformed ?date= — bug fix 2026-06-18: this used to 500 the
+              # request instead of falling back to today
+    return clock.today()  # ET trading-day date, not local system date
 
 
 def _available_dates() -> list[date]:
@@ -730,7 +734,7 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     now_str = datetime.now().strftime("%H:%M:%S")
     sess_date = _session_date()
     date_str = sess_date.strftime("%Y-%m-%d (%A)")
-    is_today = sess_date == date.today()
+    is_today = sess_date == clock.today()
 
     # Date nav
     avail = available_dates or []

@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mm.backtest import load_candles
+from mm.backtest import load_candles, profit_factor
 from mm.indicators import add_all
 from mm.orb_strategy import run_orb_signals, print_orb_summary, ORB_VOL_MULT, ORB_TARGET_MULT
 
@@ -26,9 +26,7 @@ def _row(trades: list, label: str) -> str:
         return f"{label:<18}  {'0':>7}  {'—':>6}  {'—':>9}  {'—':>7}"
     wins = sum(1 for t in trades if t.pnl > 0)
     pnl = sum(t.pnl for t in trades)
-    gw = sum(t.pnl for t in trades if t.pnl > 0)
-    gl = abs(sum(t.pnl for t in trades if t.pnl <= 0))
-    pf = gw / gl if gl else 999.0
+    pf = profit_factor(trades)
     return (f"{label:<18}  {len(trades):>7}  "
             f"{100*wins/len(trades):>5.1f}%  {pnl:>+9.2f}  {pf:>7.3f}")
 

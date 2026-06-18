@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import clock
 from mm.config import cfg
 
 from rich.text import Text
@@ -72,7 +73,7 @@ class SessionState:
     updated_at: datetime
     kill_switch: bool
     jsonl_files: list[Path]
-    open_positions: dict[str, dict]   # symbol -> position dict
+    open_positions: dict[tuple[str, str], dict]   # (symbol, strategy) -> position dict
     trades: list[TradeRecord]
     signal_events: list[dict]
     raw_events: list[dict]
@@ -146,33 +147,43 @@ def load_state(session_date: date) -> SessionState:
 
     all_events.sort(key=lambda e: e.get("ts", ""))
 
-    # Reconstruct trade pairs from events
-    pending: dict[str, TradeRecord] = {}
+    # Reconstruct trade pairs from events. Keyed by (symbol, strategy) — bug fix
+    # 2026-06-18: this used to key by symbol only, but the deployed config runs
+    # multiple strategies on the same symbol concurrently. A symbol-only key let
+    # a second strategy's position_open silently overwrite the first's pending
+    # entry, then attach the wrong exit price/reason/PnL to it when its close
+    # event arrived. scripts/eod_summary.py already got this right; this was an
+    # independent, incorrect reimplementation.
+    pending: dict[tuple[str, str], TradeRecord] = {}
     trades: list[TradeRecord] = []
-    last_bonus: dict[str, int] = {}
+    last_bonus: dict[tuple[str, str], int] = {}
 
     for evt in all_events:
         etype = evt.get("event", "")
         sym = evt.get("symbol") or evt.get("_symbol", "")
+        strat = evt.get("strategy", "")
+        key = (sym, strat)
 
         if etype == "bar_eval":
-            last_bonus[sym] = evt.get("bonus_score", 0)
+            last_bonus[key] = evt.get("bonus_score", 0)
 
         elif etype == "position_open":
             sym = evt.get("symbol", sym)
-            pending[sym] = TradeRecord(
+            key = (sym, strat)
+            pending[key] = TradeRecord(
                 symbol=sym,
                 entry_time=evt.get("ts", ""),
                 entry_price=evt.get("entry", 0.0),
                 stop_price=evt.get("stop", 0.0),
                 qty=evt.get("qty", 0),
-                bonus=last_bonus.get(sym, 0),
+                bonus=last_bonus.get(key, 0),
                 direction=evt.get("direction", "long"),
             )
 
         elif etype == "position_close":
             sym = evt.get("symbol", sym)
-            tr = pending.pop(sym, None)
+            key = (sym, strat)
+            tr = pending.pop(key, None)
             if tr:
                 tr.exit_time = evt.get("ts", "")
                 tr.exit_price = evt.get("exit", 0.0)
@@ -194,15 +205,21 @@ def load_state(session_date: date) -> SessionState:
             and e.get("bonus_score", 0) >= 1)
     ]
 
-    # Open positions from persisted JSON files (authoritative source)
-    open_positions: dict[str, dict] = {}
+    # Open positions from persisted JSON files (authoritative source). Keyed by
+    # (symbol, strategy) — bug fix 2026-06-18: this used to key by symbol only,
+    # silently hiding one strategy's open position whenever two strategies held
+    # a position on the same symbol at once (a real scenario in the deployed
+    # config). Position files on disk are already per-(symbol, strategy)
+    # (mm/events.py::_position_file) — the dict just wasn't matching that.
+    open_positions: dict[tuple[str, str], dict] = {}
     if cfg.logs_dir.exists():
         for pf in cfg.logs_dir.glob("paper_US_*_position.json"):
             try:
                 pos = json.loads(pf.read_text())
                 sym = pos.get("symbol", "")
+                strat = pos.get("strategy", "")
                 if sym:
-                    open_positions[sym] = pos
+                    open_positions[(sym, strat)] = pos
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -311,7 +328,7 @@ class MoomooDashboard(App):
 
     def _setup_tables(self) -> None:
         pos = self.query_one("#pos_table", DataTable)
-        pos.add_columns("Symbol", "Qty", "Entry $", "Stop $", "Entered", "Bonus")
+        pos.add_columns("Symbol", "Strategy", "Qty", "Entry $", "Stop $", "Entered", "Bonus")
 
         tr = self.query_one("#trades_table", DataTable)
         tr.add_columns("Entered", "Symbol", "Qty", "Entry $", "Exit $", "P&L", "Type", "Hold", "Bonus")
@@ -342,32 +359,43 @@ class MoomooDashboard(App):
             f"Kill switch: {ks}   Market: {mkt}   {files}   [dim]updated {ts}[/]"
         )
 
-        # Positions: one row per configured symbol
+        # Positions: one row per (symbol, strategy) — bug fix 2026-06-18: used to
+        # be one row per symbol only, which could only ever show ONE strategy's
+        # position when multiple strategies held a position on the same symbol
+        # at once (a real scenario in the deployed multi-strategy config).
         tbl = self.query_one("#pos_table", DataTable)
         tbl.clear()
         for sym in cfg.symbols:
-            pos = s.open_positions.get(sym)
-            if pos:
-                et = ""
-                if pos.get("entry_time"):
-                    try:
-                        et = datetime.fromisoformat(str(pos["entry_time"])).strftime("%H:%M")
-                    except ValueError:
-                        et = str(pos.get("entry_time", ""))[:16]
-                is_short = pos.get("direction", "long") == "short"
-                sym_label = Text(f"{sym} {'▼SHORT' if is_short else '▲LONG'}",
-                                 style="bold red" if is_short else "bold green")
-                tbl.add_row(
-                    sym_label,
-                    str(pos.get("qty", 0)),
-                    f"${pos.get('entry_price', 0):.2f}",
-                    f"${pos.get('stop_price', 0):.2f}",
-                    et,
-                    "—",
-                )
-            else:
-                tbl.add_row(Text(sym, style="dim"), "—", Text("flat", style="dim"),
-                            "—", "—", "—")
+            for strat in cfg.active_strategies:
+                # Bug fix 2026-06-18: skip combos that can structurally never
+                # trade (e.g. vwap_pb restricted to a symbol subset via
+                # cfg.vwap_pb_symbols) — otherwise this always renders a
+                # confusing "flat" row implying a position is possible there.
+                if strat == "vwap_pb" and cfg.vwap_pb_symbols and sym not in cfg.vwap_pb_symbols:
+                    continue
+                pos = s.open_positions.get((sym, strat))
+                if pos:
+                    et = ""
+                    if pos.get("entry_time"):
+                        try:
+                            et = datetime.fromisoformat(str(pos["entry_time"])).strftime("%H:%M")
+                        except ValueError:
+                            et = str(pos.get("entry_time", ""))[:16]
+                    is_short = pos.get("direction", "long") == "short"
+                    sym_label = Text(f"{sym} {'▼SHORT' if is_short else '▲LONG'}",
+                                     style="bold red" if is_short else "bold green")
+                    tbl.add_row(
+                        sym_label,
+                        strat,
+                        str(pos.get("qty", 0)),
+                        f"${pos.get('entry_price', 0):.2f}",
+                        f"${pos.get('stop_price', 0):.2f}",
+                        et,
+                        "—",
+                    )
+                else:
+                    tbl.add_row(Text(sym, style="dim"), Text(strat, style="dim"),
+                                "—", Text("flat", style="dim"), "—", "—", "—")
 
         # Stats
         ct = s.closed_trades
@@ -532,7 +560,7 @@ def main() -> None:
     parser.add_argument("--date", help="Session date YYYY-MM-DD (default: today)")
     args = parser.parse_args()
 
-    session_date = date.today()
+    session_date = clock.today()  # ET trading-day date, not local system date
     if args.date:
         session_date = date.fromisoformat(args.date)
 

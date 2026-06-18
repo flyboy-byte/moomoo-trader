@@ -1,7 +1,7 @@
 # moomoo-trader
 
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
-![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen)
 ![Trading](https://img.shields.io/badge/trading-paper%20only-orange)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -47,7 +47,7 @@ A systematic strategy research and paper-trading platform built on the [Moomoo A
 
 ### BB+KDJ Mean Reversion
 
-Enters when price touches the lower Bollinger Band with a KDJ golden cross, targeting a return to the BB midline. A signal confluence engine requires 2 of 3 bonus conditions to filter noise. `KDJ_WINDOW_BARS` allows the cross to have occurred in the N prior bars, increasing signal frequency 10× while maintaining out-of-sample edge on IWM and QQQ.
+Enters when price touches the lower Bollinger Band with a KDJ golden cross, targeting a return to the BB midline. A signal confluence engine requires 2 of 3 bonus conditions to filter noise. `KDJ_WINDOW_BARS` allows the cross to have occurred in the N prior bars (grouped by calendar day — a day-boundary leak bug here was found and fixed 2026-06-18, see `docs/strategy_graveyard.md`), increasing signal frequency ~6.7-7.7× while maintaining out-of-sample edge on IWM and QQQ.
 
 ```
 Entry:  close ≤ BB lower(20,2)
@@ -185,7 +185,7 @@ python scripts/dashboard.py         # terminal dashboard in a second window
 | `MAX_DAILY_LOSS` | `20` | Daily loss limit in dollars |
 | `ATR_STOP_MULT` | `1.0` | BB+KDJ stop multiplier (1.0 validated optimal) |
 | `MIN_SIGNAL_SCORE` | `2` | Bonus signals required for BB+KDJ entry (0–3) |
-| `KDJ_WINDOW_BARS` | `0` | Look back N bars for KDJ cross at BB touch (3 = 10× more signals) |
+| `KDJ_WINDOW_BARS` | `0` | Look back N bars for KDJ cross at BB touch, grouped by day (3 = ~6.7-7.7× more signals) |
 | `ORB_MINUTES` | `15` | Opening range window in minutes |
 | `ORB_MINUTES_OVERRIDES` | _(empty)_ | Per-symbol OR window: `US.IWM:30,US.QQQ:15` |
 | `ORB_TARGET_MULT` | `1.5` | ORB target = entry + N × range height |
@@ -228,7 +228,7 @@ python scripts/web_dashboard.py    # http://localhost:8080
 | Best BB+KDJ symbol | **IWM** — 61.9% win, 38% stop rate, 132 min avg hold |
 | KDJ death cross exit | **Disabled** — re-enabling flips SPY PnL from +$2.34 → −$0.83 |
 | Optimal regime filter | **ADX < 25** — 7 alternatives tested, ADX ranging is best |
-| KDJ window bars | **w=3** — 10× more signals on IWM/QQQ, OOS PF > 1.1; SPY fails at w > 0 |
+| KDJ window bars | **w=3** — ~6.7-7.7× more signals on IWM/QQQ, OOS PF > 1.1; SPY fails at w > 0. A day-boundary leak in the lookback (fixed 2026-06-18) had been contaminating 30-39% of entries — corrected numbers are *better*, not worse, see strategy_graveyard.md |
 | VWAP Pullback | **Deployed** — OOS PF 1.655 (SPY), 1.072 (QQQ); IWM excluded (fails OOS) |
 | VWAP crossover | **Abandoned** — PF ≈ 1.0, avg hold = 1 bar (structural noise issue) |
 | EMA5/EMA20 momentum | **No edge** — cross entry uniformly negative; pullback stop inert (EMA20 always breaks first before ATR stop) |
@@ -250,15 +250,22 @@ python scripts/web_dashboard.py    # http://localhost:8080
 ```
 mm/                        core package
   config.py                .env loading, typed config singleton
+  clock.py                 time seam — now()/now_et()/today()/is_market_open(), single patch point for tests/replay
   indicators.py            BB, ATR, KDJ, RSI, ADX, VWAP, EMA, BB width percentile
   signals.py               BB+KDJ signal scoring engine
-  strategy.py              BB+KDJ entry/exit state machine
+  strategy.py              BB+KDJ entry/exit state machine (backtest engine)
   orb_strategy.py          ORB signal engine and backtest helpers
   vwap_pullback.py         VWAP Pullback backtest engine
   vwap_strategy.py         VWAP crossover (deprecated, PF ≈ 1.0)
   ema_momentum.py          EMA5/EMA20 momentum research (not deployed)
-  paper.py                 multi-strategy paper-trading loop
-  backtest.py              backtester, walk-forward, print_summary
+  gap_fade.py              Gap Fade backtest engine (research only, not in live STRATEGIES)
+  premarket.py             pre-market fill%/volume-ratio helpers (research, not live-wired)
+  paper.py                 multi-strategy paper-trading loop (run_multi, candle fetch)
+  events.py                PaperEventLog (JSONL), PaperPosition, position/ORB-tracker persistence
+  execution.py             order placement, fill confirmation, broker reconciliation
+  evals.py                 per-strategy live eval functions (_eval_bb_kdj, _eval_orb, _eval_vwap_pb)
+  replay.py                replay harness — drives the real live code path against historical candles
+  backtest.py              backtester, walk-forward, print_summary, canonical profit_factor()
   research.py              parameter sweeps, variant comparison
   risk.py                  kill switch, daily limits, position sizing
   notifications.py         Discord webhook alerts
@@ -269,15 +276,26 @@ scripts/
   backtest_orb.py          ORB backtest
   backtest_vwap_pb.py      VWAP Pullback backtest (--sweep, --all)
   backtest_ema_momentum.py EMA momentum research (--sweep, --entry cross|pullback)
+  research_premarket_gap.py  Gap Fade pre-market fill% research (not live)
   walk_forward.py          walk-forward validation
   sweep.py                 ATR stop + entry parameter grid search
   sweep_signals.py         regime filter comparison
   multi_backtest.py        compare across multiple symbols / timeframes
   simulate_paper.py        replay historical CSV through paper logic
+  replay_paper.py          drive the REAL paper runner against historic candles + a fake broker
+  replay_vs_live.py        diff a live session's decisions against a replay of the same day
   compare_paper_vs_backtest.py  validate paper runner vs backtester
+  diagnose_logs.py         session health: uptime gaps, signal rates, staleness, why-no-entry
+  analyze_trades.py / analyze_portfolio.py / analyze_orb_hours.py  post-hoc trade analysis
   eod_summary.py           end-of-day session recap (+ Discord post)
+  weekly_report.py         weekly gate-progress + premarket Discord report (VPS cron)
+  fetch_daily_archive.py   VPS daily rolling candle archive builder (cron)
+  fetch_vix_morning.py     daily VIX shadow-logger (observational only, cron)
+  flatten_simulate.py      clean orphaned SIMULATE broker shares
   dashboard.py             terminal TUI (Textual)
   web_dashboard.py         web dashboard (Flask, :8080)
+  install_cron.sh          idempotent VPS cron installer
+  verify.sh                one-command session health check (pytest + sync + diagnose + compare)
   fetch_candles.py / health_check.py / run_paper.py
 
 start.sh                   start OpenD + paper runner
@@ -291,5 +309,6 @@ sync_logs.sh               rsync VPS logs → local logs/
 ## Tests
 
 ```bash
-python -m pytest tests/ -q    # 141 tests: risk, indicators, signals, strategy, orb
+python -m pytest tests/ -q    # 182 tests: risk, indicators, signals, strategy, orb,
+                               # clock, data, paper/evals/execution/replay
 ```

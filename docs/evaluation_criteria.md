@@ -35,9 +35,12 @@ Backtest expectation: SPY OOS PF=1.655, QQQ OOS PF=1.072.
 
 ## BB+KDJ (IWM/QQQ at w=3, SPY at w=0)
 
-Backtest expectation at w=3: 41.7% win, PF=1.107 — a *thin* edge. The KDJ dilution finding
-(2026-06-10) showed w=3 is barely above the no-KDJ baseline (PF 1.069), while w=0 is the
-real signal (PF 2.131, but ~20 trades/yr combined).
+Backtest expectation at w=3 (corrected 2026-06-18, see amendment log): combined 44.5% win,
+PF=1.195, 434 trades on the full dataset — better than the previous "thin edge" framing,
+not worse. The w=3 lookback had a day-boundary leak bug (fixed); the old 41.7%/PF=1.107
+figure below included contaminated trades. w=0 is still the strongest-validated signal
+(PF 2.131 on the original 2022-2025 window, ~20 trades/yr combined) — that finding is
+unaffected by the bug (w=0 has no rolling window to leak).
 
 | Gate | Sample | Action |
 |------|--------|--------|
@@ -95,3 +98,18 @@ strategy, but most execution-sensitive (breakout fills are competitive).
   EOD; QQQ sell order failed outright). Entries and signal logic were valid; recorded PnL is
   model PnL, not executed PnL. ORB gate counter resets to 0/30 effective with the
   fill-confirmation deploy (2026-06-10). All gates now evaluate on confirmed-fill PnL only.
+- 2026-06-18: BB+KDJ w=3 backtest expectation corrected. Found via systematic adversarial
+  audit (not live data): KDJ_WINDOW_BARS lookback didn't respect calendar-day boundaries,
+  letting the first 1-3 bars of a new trading day fire on a KDJ cross from the previous
+  day's close. Verified 30-39% of historical w=3 entries (SPY 30%, QQQ 38%, IWM 39%) were
+  contaminated. Fixed in mm/strategy.py/mm/evals.py (grouped by day now). Old-buggy vs
+  new-fixed on full dataset: combined 627→434 trades, 41.8%→44.5% win, PF 1.136→1.195 —
+  the contaminated trades were lower quality, not a wash. The w=0 finding (PF=2.131) is
+  completely unaffected (no rolling window to leak at w=0) — re-verified exact match to
+  the original number on the original data window. No live config changed; this is a
+  backtest-expectation correction only. Full numbers in docs/strategy_graveyard.md
+  "KDJ Day-Boundary Signal Leak". Does NOT reset the live gate counter — confirmed-fill
+  PnL recorded live was computed by the (also-buggy) entry logic at the time, so live
+  trades since 2026-06-11 may include some contaminated entries; not retroactively
+  reclassified since the live decision was a legitimate consequence of the code as it
+  existed then, unlike the Jun 4 ORB case above which was an execution-layer fiction.

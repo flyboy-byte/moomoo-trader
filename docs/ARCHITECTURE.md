@@ -54,7 +54,7 @@ logs/*.jsonl  ──  structured events: bar_eval, signal_skip, risk_block,
     └──► scripts/compare_paper_vs_backtest.py  ──  BB+KDJ signal engine agreement check
 ```
 
-## Active Strategies (VPS, as of 2026-06-04)
+## Active Strategies (VPS, as of 2026-06-18)
 
 | Strategy   | Entry condition                          | Exit                         | Symbols        |
 |------------|------------------------------------------|------------------------------|----------------|
@@ -73,6 +73,7 @@ ATR_STOP_MULT=1.0
 ORB_MINUTES=15             # opening range window; IWM overridden to 30
 ORB_MINUTES_OVERRIDES=US.IWM:30
 ORB_SHORTS_ENABLED=true    # kill switch: create STOP_SHORTS.txt to disable at runtime
+                            # STOP_SHORTS.txt removed 2026-06-17 — shorts are live now
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ
 TOTAL_CAPITAL=100          # total bankroll; divided across symbol×strategy slots
 FRACTIONAL_SHARES=true
@@ -86,12 +87,12 @@ LIVE_TRADING_ENABLED=false # NEVER change to true
 | File                   | Effect                                    |
 |------------------------|-------------------------------------------|
 | `STOP_TRADING.txt`     | Pauses all entries (exits still fire)     |
-| `STOP_SHORTS.txt`      | Disables ORB short entries only           |
+| `STOP_SHORTS.txt`      | Disables ORB short entries only — currently NOT present (removed 2026-06-17) |
 
 ## Test & Verify Commands
 
 ```bash
-python -m pytest tests/ -q                           # 173 unit tests
+python -m pytest tests/ -q                           # 182 unit tests
 python scripts/diagnose_logs.py --date YYYY-MM-DD    # session health check
 python scripts/compare_paper_vs_backtest.py logs/paper_US_SPY_YYYY-MM-DD.jsonl
 ./scripts/verify.sh                                  # all-in-one session verify

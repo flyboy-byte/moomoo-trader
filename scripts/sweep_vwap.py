@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-from mm.backtest import load_candles
+from mm.backtest import load_candles, profit_factor
 from mm.vwap_strategy import run_vwap_signals
 
 BAND_MULTS = [0.25, 0.5, 0.75, 1.0]
@@ -40,11 +40,8 @@ def _run_combo(dfs: list[pd.DataFrame], band: float, stop: float, rsi: float) ->
                 "trades_day": 0, "win_pct": 0, "pnl": 0, "pf": 0, "avg_hold": 0}
 
     wins = [t for t in all_trades if t.pnl > 0]
-    losses = [t for t in all_trades if t.pnl <= 0]
     total_pnl = sum(t.pnl for t in all_trades)
-    gross_win = sum(t.pnl for t in wins)
-    gross_loss = abs(sum(t.pnl for t in losses))
-    pf = gross_win / gross_loss if gross_loss else float("inf")
+    pf = profit_factor(all_trades)
     avg_hold = sum(
         (t.exit_time - t.entry_time).total_seconds() / 60 for t in all_trades
     ) / len(all_trades)

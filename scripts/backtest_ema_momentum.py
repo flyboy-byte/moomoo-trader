@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 
+from mm.backtest import profit_factor
 from mm.indicators import add_all
 from mm.ema_momentum import run_ema_momentum, print_ema_summary
 
@@ -45,9 +46,7 @@ def sweep(df: pd.DataFrame, days: int, sym: str, entry_type: str) -> None:
                     continue
                 wins = sum(1 for t in trades if t.pnl > 0)
                 pnl = sum(t.pnl for t in trades)
-                gw = sum(t.pnl for t in trades if t.pnl > 0)
-                gl = abs(sum(t.pnl for t in trades if t.pnl <= 0))
-                pf = gw / gl if gl else 999.0
+                pf = profit_factor(trades)
                 print(f"{target_m:>8.1f}  {stop_m:>6.2f}  {adx_min:>5.0f}  "
                       f"{len(trades):>7}  {100*wins/len(trades):>5.1f}%  "
                       f"{pnl:>+9.2f}  {pf:>7.3f}")

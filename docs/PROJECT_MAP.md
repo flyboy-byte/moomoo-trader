@@ -91,12 +91,16 @@ moomoo-trader/
 │
 ├── tests/
 │   ├── test_indicators.py       # 47 tests: BB, ATR, KDJ, RSI, ADX, VWAP, EMA, bb_width_pct
-│   ├── test_strategy.py         # 18 tests: signal scoring, bonus signals, walk-forward
-│   ├── test_risk.py             # 29 tests: calc_qty, DailyTracker, fractional sizing,
+│   ├── test_strategy.py         # 20 tests: signal scoring, bonus signals, walk-forward,
+│   │                            #   KDJ day-boundary regression (added 2026-06-18)
+│   ├── test_risk.py             # 43 tests: calc_qty, DailyTracker, fractional sizing,
 │   │                            #   per_slot_dollars, trading_allowed
-│   ├── test_paper.py            # ~100 tests: evals, execution, events, replay, reconcile
-│   └── test_orb_shorts.py       # 21 tests: ORB long/short entry, exit, PnL, restart recovery
-│                                # Total: 173 tests
+│   ├── test_paper.py            # 40 tests: evals, execution, events, reconcile
+│   ├── test_orb_shorts.py       # 19 tests: ORB long/short entry, exit, PnL, restart recovery
+│   ├── test_clock.py            # 2 tests: today() ET-date regression (added 2026-06-18)
+│   ├── test_data.py             # 4 tests: combined-archive merge/dedup
+│   └── test_replay.py           # 7 tests: replay harness invariants
+│                                # Total: 182 tests
 │
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
@@ -127,7 +131,7 @@ moomoo-trader/
 
 ---
 
-## Deployed Strategies (VPS, 2026-06-04)
+## Deployed Strategies (VPS, as of 2026-06-18)
 
 ### 1. BB+KDJ Mean Reversion (`bb_kdj`)
 **Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM.
@@ -306,7 +310,7 @@ Open positions survive process restarts via JSON files:
 ./scripts/verify.sh --date 2026-06-04  # past session
 ./scripts/verify.sh --no-sync          # skip VPS sync
 ```
-Runs: pytest (173 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols).
+Runs: pytest (182 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
 
 ### `scripts/diagnose_logs.py` — Session health
 ```bash
@@ -394,32 +398,38 @@ MAX_DAILY_LOSS=20
 ## Historical Data
 
 Stored in `logs/` (gitignored). Combined CSV = deduped merge of 2022–2025 data + fresh fetch.
+Row counts/date ranges below are a snapshot (2026-06-18) — these grow continuously via
+manual `fetch_candles.py` runs and (on the VPS) `scripts/fetch_daily_archive.py`'s cron;
+don't trust this table as exact, just directionally current. Check `wc -l` if it matters.
 
-| File | Candles | Date Range |
+| File | Candles (snapshot) | Date Range (snapshot) |
 |------|---------|------------|
-| `US_SPY_K_5M_combined.csv` | 86,100 | 2022-01-03 → 2026-06-03 |
-| `US_QQQ_K_5M_combined.csv` | 86,100 | 2022-01-03 → 2026-06-03 |
-| `US_IWM_K_5M_combined.csv` | 86,100 | 2022-01-03 → 2026-06-03 |
+| `US_SPY_K_5M_combined.csv` | 86,412 | 2022-01-03 → 2026-06-09 |
+| `US_QQQ_K_5M_combined.csv` | 86,412 | 2022-01-03 → 2026-06-09 |
+| `US_IWM_K_5M_combined.csv` | 86,724 | 2022-01-03 → 2026-06-16 |
 | `US_*_K_15M_*.csv` | 22,158 | 2022-01-03 → 2025-05-30 |
 | `US_*_K_60M_*.csv` | 5,967 | 2022-01-03 → 2025-05-30 |
 
 ---
 
-## Test Suite (173 tests)
+## Test Suite (182 tests)
 
 ```bash
-python -m pytest tests/ -q              # all 173
-python -m pytest tests/test_risk.py    # risk + sizing (29)
-python -m pytest tests/test_orb_shorts.py  # ORB shorts (21)
-python -m pytest tests/test_paper.py   # evals, execution, events, replay, reconcile (~100)
+python -m pytest tests/ -q              # all 182
+python -m pytest tests/test_risk.py    # risk + sizing (43)
+python -m pytest tests/test_orb_shorts.py  # ORB shorts (19)
+python -m pytest tests/test_paper.py   # evals, execution, events, reconcile (40)
 ```
 
 Coverage by area:
 - **Indicators** (47): BB, ATR, KDJ, RSI, ADX, VWAP, EMA, bb_width_pct edge cases
-- **Strategy/Signals** (18): BB+KDJ scoring, bonus signals, walk-forward
-- **Risk** (29): calc_qty, DailyTracker, fractional sizing, per_slot_dollars
-- **ORB Shorts** (21): long/short entry, stop/target direction, PnL sign, restart recovery
-- **Paper/Evals/Execution/Replay** (~58): eval functions, fill confirmation, reconcile, replay harness
+- **Strategy/Signals** (20): BB+KDJ scoring, bonus signals, walk-forward, KDJ day-boundary regression
+- **Risk** (43): calc_qty, DailyTracker, fractional sizing, per_slot_dollars
+- **ORB Shorts** (19): long/short entry, stop/target direction, PnL sign, restart recovery
+- **Paper/Evals/Execution** (40): eval functions, fill confirmation, reconcile
+- **Clock** (2): today() ET-date regression
+- **Data** (4): combined-archive merge/dedup
+- **Replay** (7): replay harness invariants
 
 ---
 
@@ -434,7 +444,7 @@ See `docs/strategy_graveyard.md` for full details with research data and graveya
 | Session filter (BLOCKED_HOURS) | Swept, no universal benefit | Data is definitive |
 | VIX daily regime filter | Graveyard'd | IWM OOS 0.800 vs 1.033 baseline — destroyed edge |
 | Push architecture (WebSocket exits) | Deferred | slippage_bps shows 60s poll costs real edge |
-| ORB short live verification | Waiting | First short order in JSONL needed |
+| ORB short live verification | Kill switch removed 2026-06-17, shorts live, awaiting first fill | See strategy_graveyard.md |
 | paper.py refactor (split 1,200-line file) | **COMPLETE** 2026-06-16 | 6 commits, cert-diffed, 173/173 tests |
 
 ---

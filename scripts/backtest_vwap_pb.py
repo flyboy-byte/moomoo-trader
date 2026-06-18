@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 
+from mm.backtest import profit_factor
 from mm.indicators import add_all
 from mm.vwap_pullback import run_vwap_pullback, print_vwap_pb_summary
 
@@ -33,9 +34,7 @@ def _row(trades: list, label: str) -> str:
         return f"{label:<22}  {'—':>7}  {'—':>6}  {'—':>9}  {'—':>7}"
     wins = sum(1 for t in trades if t.pnl > 0)
     pnl = sum(t.pnl for t in trades)
-    gw = sum(t.pnl for t in trades if t.pnl > 0)
-    gl = abs(sum(t.pnl for t in trades if t.pnl <= 0))
-    pf = gw / gl if gl else 999.0
+    pf = profit_factor(trades)
     return (f"{label:<22}  {len(trades):>7}  "
             f"{100*wins/len(trades):>5.1f}%  {pnl:>+9.2f}  {pf:>7.3f}")
 

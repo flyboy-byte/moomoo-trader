@@ -95,7 +95,13 @@ else
     DIFF_OUT=$(python scripts/replay_vs_live.py --date "$SESSION_DATE" 2>/dev/null) \
         && DIFF_RC=0 || DIFF_RC=$?
     echo "$DIFF_OUT" | grep -E "✓|✗|SKIP|variance|first entry|exit decisions" || true
-    if [ "$DIFF_RC" -ne 0 ]; then
+    # exit 2 = the check couldn't run at all (OpenD unreachable / candle fetch failed)
+    # — bug fix 2026-06-18: this used to be exit(0), so a verification that never
+    # ran was silently reported as "passed" instead of flagged.
+    if [ "$DIFF_RC" -eq 2 ]; then
+        echo "$FAIL  replay-vs-live check could not run — see SKIP reason above"
+        OVERALL=1
+    elif [ "$DIFF_RC" -ne 0 ]; then
         echo "$FAIL  live runner and replay disagree — investigate before next session"
         OVERALL=1
     fi

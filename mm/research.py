@@ -18,8 +18,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import config as _config
 from .indicators import add_all
-from .backtest import run_backtest, WindowResult, walk_forward, print_walk_forward
+from .backtest import run_backtest, WindowResult, walk_forward, print_walk_forward, profit_factor
 from .logger import get_logger
 from .strategy import Signal, Trade
 
@@ -44,6 +45,7 @@ def _run_variant(df: pd.DataFrame, entry_mask: pd.Series) -> list[Trade]:
     """Generic backtester: uses a custom entry mask but standard exits."""
     from .strategy import Position
 
+    cfg = _config.cfg  # re-fetched at call time — see mm/strategy.py for why
     df = add_all(df.copy())
     trades: list[Trade] = []
     position: Position | None = None
@@ -58,7 +60,7 @@ def _run_variant(df: pd.DataFrame, entry_mask: pd.Series) -> list[Trade]:
                     entry_idx=i,
                     entry_time=row["time_key"],
                     entry_price=row["close"],
-                    stop_price=row["close"] - row["atr"],
+                    stop_price=row["close"] - cfg.atr_stop_mult * row["atr"],
                 )
         else:
             exit_reason: str | None = None
@@ -194,6 +196,7 @@ def _run_exit_variant(
     """Like _run_variant but with configurable exit conditions."""
     from .strategy import Position
 
+    cfg = _config.cfg  # re-fetched at call time — see mm/strategy.py for why
     df = add_all(df.copy())
     trades: list[Trade] = []
     position: Position | None = None
@@ -209,7 +212,7 @@ def _run_exit_variant(
                     entry_idx=i,
                     entry_time=row["time_key"],
                     entry_price=row["close"],
-                    stop_price=row["close"] - row["atr"],
+                    stop_price=row["close"] - cfg.atr_stop_mult * row["atr"],
                 )
                 bars_held = 0
         else:
@@ -318,9 +321,10 @@ def _run_parametric(
 
 
 def _profit_factor(trades: list[Trade]) -> float:
-    gross_win = sum(t.pnl for t in trades if t.pnl > 0)
-    gross_loss = abs(sum(t.pnl for t in trades if t.pnl < 0))
-    return gross_win / gross_loss if gross_loss > 0 else float("inf")
+    # Delegates to the canonical implementation (mm/backtest.py::profit_factor) —
+    # bug fix 2026-06-18, see that function's docstring for why this used to be
+    # an independent (and inconsistent-with-the-rest-of-the-codebase) reimpl.
+    return profit_factor(trades)
 
 
 def sweep_parameters(
@@ -369,6 +373,11 @@ def sweep_parameters(
                 "worst": round(min(pnls), 4),
             })
 
+    if not rows:
+        raise ValueError(
+            "sweep_parameters: no parameter combination produced any trades — "
+            "check the date range and entry conditions before trusting an empty sweep"
+        )
     result_df = pd.DataFrame(rows).sort_values("profit_factor", ascending=False)
     log.info("=== Parameter sweep: entry=%s ===", entry_key)
     log.info("%-8s  %-6s  %6s  %6s  %+9s  %+8s  %6s  %+7s  %+7s",
@@ -487,6 +496,11 @@ def sweep_walk_forward(
             "consistency_pct": round(consistency, 1),
         })
 
+    if not rows:
+        raise ValueError(
+            "sweep_walk_forward: no ATR multiplier produced any trades across any "
+            "window — check the date range before trusting an empty sweep"
+        )
     result_df = pd.DataFrame(rows).sort_values("consistency_pct", ascending=False)
     log.info("=== Walk-forward ATR sweep: entry=%s  window=%dd ===", entry_key, window_days)
     log.info("%-8s  %6s  %6s  %+9s  %+8s  %6s  %10s",
@@ -565,6 +579,11 @@ def sweep_signal_filter(
                 "targets":       len(targets),
             })
 
+    if not rows:
+        raise ValueError(
+            "sweep_signal_filter: no regime filter / min_bonus combination produced "
+            "any trades — check the date range before trusting an empty sweep"
+        )
     result_df = pd.DataFrame(rows).sort_values("profit_factor", ascending=False)
     log.info("=== Signal filter sweep (BB_PCT_WINDOW=%d) ===", BB_PERCENTILE_WINDOW)
     log.info("%-18s  %5s  %6s  %6s  %+9s  %+8s  %6s  %5s/%5s",

@@ -15,7 +15,7 @@ from enum import Enum, auto
 
 import pandas as pd
 
-from .config import cfg
+from . import config as _config
 from .indicators import add_all
 from .signals import score_df
 from .logger import get_logger
@@ -69,6 +69,11 @@ def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
     Input must have: open, high, low, close, volume columns.
     Returns df enriched with all indicator, sig_*, signal_score, and signal columns.
     """
+    # Bug fix 2026-06-18: must re-fetch cfg at call time (module ref pattern, see
+    # CLAUDE.md) — `from .config import cfg` would bind once at import and go
+    # stale after any test/replay reload of mm.config. mm/evals.py already does
+    # this correctly; this module didn't, until a new test caught the staleness.
+    cfg = _config.cfg
     df = add_all(df)
     df = score_df(df)
 
@@ -112,6 +117,7 @@ def run_signals(df: pd.DataFrame, blocked_hours: set[int] | None = None) -> pd.D
     Exits always fire regardless of time — only entries are filtered.
     Returns df with 'signal' column updated to reflect exit reasons as well.
     """
+    cfg = _config.cfg  # see compute_signals() for why this is re-fetched at call time
     df = compute_signals(df)
     position: Position | None = None
 
