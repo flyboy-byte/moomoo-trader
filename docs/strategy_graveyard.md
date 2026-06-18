@@ -41,7 +41,7 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 | Feature | Code | Notes |
 |---------|------|-------|
-| BB+KDJ mean reversion | `mm/strategy.py`, `mm/evals.py` | MIN_SCORE=2, KDJ_WINDOW=3, PF=1.843 |
+| BB+KDJ mean reversion | `mm/strategy.py`, `mm/evals.py` | MIN_SCORE=2. PF=1.843 is the w=0 baseline (60 trades); live deployed config (SPY w=0, QQQ/IWM w=3) is PF=1.195 combined, 434 trades — see "KDJ Day-Boundary Signal Leak" below for the corrected w=3 numbers. |
 | ORB long + short | `mm/orb_strategy.py`, `mm/evals.py` | 30-min IWM, 15-min SPY/QQQ. Shorts 2026-06-04. |
 | VWAP Pullback | `mm/vwap_pullback.py`, `mm/evals.py` | SPY/QQQ only. PF=1.655 SPY, 1.072 QQQ OOS. |
 | Fractional sizing | `mm/risk.py` (_qty, _slot_dollars) | TOTAL_CAPITAL / (symbols × strategies) per slot |
@@ -58,6 +58,89 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 | Entry retry dedup | `mm/evals.py` (_entry_attempted dict) | One attempt per candle per (symbol, strategy) — prevents storm |
 | Fractional qty fallback | `mm/risk.py` (_qty()) | qty < 1 → whole-share fallback instead of silently rejecting |
 | Daily loss limit | `mm/config.py`, `mm/risk.py` | MAX_DAILY_LOSS raised to $20 — $5 killed full day after 1 VWAP PB loss |
+
+---
+
+## Bugs Found & Fixed (correctness corrections to historical research)
+
+### KDJ Day-Boundary Signal Leak — FOUND & FIXED 2026-06-17/18
+**What it was:** `mm/strategy.py`'s and `mm/evals.py`'s KDJ_WINDOW_BARS lookback
+(`.rolling(window=N+1)` / `.iloc[-window:]`) operated on a multi-day candle frame with
+no calendar-day grouping. The first 1-3 bars of a new trading day could see a KDJ
+golden cross from the tail end of the PREVIOUS day's close and fire an entry believing
+it was reacting to a fresh same-session signal. Found via a systematic adversarial code
+audit (not incidental discovery), then verified against real data before fixing.
+
+**Why it mattered more than "a few bars a day" sounds like it should:** BB-touch
+conditions (the strategy's other entry requirement) cluster disproportionately at the
+session open, because overnight gaps frequently push price below the lower band right
+at 9:30-9:40 ET. That's exactly the window the leak lived in. Verified contamination
+rate on real combined CSVs at KDJ_WINDOW_BARS=3, MIN_SIGNAL_SCORE=2: **SPY 30%, QQQ 38%,
+IWM 39%** of all historical entry signals were contaminated.
+
+**Fix:** Both the backtester (`mm/strategy.py::compute_signals`) and the live runner
+(`mm/evals.py::_eval_bb_kdj`) now group the lookback by calendar day, so the window
+can never see across a session boundary.
+
+**Does the w=0 foundational finding (60 trades, PF=1.843, documented throughout this
+project) still hold?** Yes, completely unaffected. That finding was always a `w=0`
+backtest — at w=0 there's no rolling window at all (`kdj_met = bool(last["sig_kdj_cross"])`,
+same-bar check only), so the bug could not have touched it. Re-ran it post-fix on the
+exact original data window (thru 2025-05-30) to confirm: **60 trades, 51.7% win,
+PF=1.843, +$19.12 — identical to the documented figure to every decimal.**
+
+**Does the LIVE DEPLOYED config (SPY w=0, QQQ/IWM w=3) change?** Yes — and it gets
+*better*, not worse. Ran old-buggy-code vs new-fixed-code on the full current dataset
+(thru 2026-06, not just the original 2025-05-30 snapshot), MIN_SIGNAL_SCORE=2:
+
+| Symbol | Trades (buggy) | Trades (fixed) | Win% (buggy→fixed) | PF (buggy→fixed) |
+|--------|----------------|-----------------|---------------------|---------------------|
+| SPY (w=0) | 26 | 26 | 53.8% → 53.8% | 1.999 → 1.999 (unaffected, as expected) |
+| QQQ (w=3) | 292 | 199 | 40.1% → 42.7% | 1.038 → 1.064 |
+| IWM (w=3) | 309 | 209 | 42.4% → 45.0% | 1.279 → 1.390 |
+| **Combined** | **627** | **434** | **41.8% → 44.5%** | **1.136 → 1.195** |
+
+The leaked trades were genuinely lower-quality (stale-signal noise), not a wash —
+removing them shrank trade count ~31% but raised win rate and PF on every w>0 symbol.
+Total $ PnL dropped slightly (+$47.33 → +$45.35) purely because there are fewer trades,
+not because per-trade performance worsened. **The KDJ_WINDOW_BARS=3 "10× more signals"
+claim (previously documented in docs/PROJECT_MAP.md) is also corrected by this fix** —
+post-fix the multiplier on the full dataset is closer to 6.7-7.7× (IWM 209/31≈6.7×,
+QQQ 199/26≈7.7×), not 10×; the original 10× figure was computed on the buggy signal set.
+
+**Bottom line:** no strategy knob changed, no live config touched. The BB+KDJ edge
+survives this fix at every tested configuration and is slightly more favorable
+post-fix, not less. Treat any pre-2026-06-17 backtest number that used KDJ_WINDOW_BARS>0
+as superseded by this entry; w=0 numbers throughout the rest of this project's history
+remain valid as documented.
+
+### Partial Exit Fill PnL/Orphan Bug — FOUND & FIXED 2026-06-17
+**What it was:** `mm/execution.py::_execute_exit()` detected partial fills (`dealt <
+position.qty`) but only logged a warning — it returned just the fill price, never the
+actual dealt quantity. All 4 strategy exit paths in `mm/evals.py` then computed PnL
+using the full original `position.qty` and unconditionally cleared the position
+regardless of fill size. A real partial fill (e.g. 2 of 3 shares) would book PnL as if
+the whole position exited, then leave the unfilled remainder as an orphaned share at
+the broker with zero local tracking forever — the same failure class already fixed once
+on the entry side (see "Execution layer rebuilt" below) but never closed on the exit
+side. No live occurrence found in the JSONL history audited, but the code path existed
+and was untested (zero test coverage for this exact scenario before the fix).
+
+**Fix:** `_execute_exit()` now returns `(fill_price, dealt_qty)`. All 4 callers use
+`dealt_qty` for PnL and, on a partial fill, reduce `position.qty` and keep the position
+open for the remainder to retry next poll instead of clearing it. Added
+`tests/test_paper.py::TestExecuteExit::test_partial_fill_returns_actual_dealt_qty`.
+
+### clock.today() Wrong Date Basis — FOUND & FIXED 2026-06-17
+**What it was:** `mm/clock.py::today()` returned `date.today()` (local system date)
+instead of the ET trading-day date, despite every caller (`DailyTracker`'s daily
+loss/trade-limit reset, ORB's once-per-day guard, session-rollover detection, the
+EOD-summary date) being keyed to the ET trading day. Same bug class as the KDJ leak —
+day-sensitive state keyed to the wrong clock basis — just dormant in practice because
+both the VPS (UTC) and local dev (America/Denver) happen to have midnight fall outside
+ET market hours (9:30am-4pm ET). A timezone whose midnight falls inside that window
+would have silently rolled the trading day at the wrong moment. Fixed: `today()` now
+returns `now_et().date()`.
 
 ---
 
@@ -233,7 +316,7 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 |------|---------|-------------|-----|
 | ATR_STOP_MULT | 1.0 | 0.5–2.0 | Best PF + 56% walk-forward consistency |
 | MIN_SIGNAL_SCORE | 2 | 0–3 | Flips exit split to target-dominant |
-| KDJ_WINDOW_BARS | 3 | 0–5 | 10× signals on IWM/QQQ; SPY excluded or kept at 0 |
+| KDJ_WINDOW_BARS | 3 | 0–5 | ~6.7-7.7× signals on IWM/QQQ vs w=0; SPY excluded or kept at 0 (corrected 2026-06-18 after a day-boundary leak bug fix — see "KDJ Day-Boundary Signal Leak" above; was documented as "10×" on the buggy signal set) |
 | EXIT_ON_KDJ_DEATH | false | — | Re-enabling flips SPY PnL from +$2.34 → −$0.83 |
 | ORB_TARGET_MULT | 1.5 | 1.0–2.0 | Best combined PF |
 | VWAP_PB_MAX_CROSSES | 1 | 0–3 | Critical no-chop filter for VWAP PB edge |

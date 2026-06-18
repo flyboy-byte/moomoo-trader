@@ -1,7 +1,7 @@
 # moomoo-trader: Full Project Map
 
 **AI Context Document** — paste this into any AI session to get full project context without re-deriving.
-Last updated: 2026-06-16.
+Last updated: 2026-06-18.
 
 ---
 
@@ -142,16 +142,37 @@ moomoo-trader/
 - Stop: `close < entry - 1.0 × ATR(14)` — confirmed optimal by sweep (PF=1.843, 56% walk-forward)
 - KDJ death cross exit: DISABLED (`EXIT_ON_KDJ_DEATH=false`) — re-enabling flips PnL negative
 
-**Backtest results (SPY+QQQ+IWM, 2022–2025, K_5M):**
+**Backtest results, w=0 baseline (SPY+QQQ+IWM, 2022–2025-05-30, K_5M):**
 - 60 trades (at MIN_SCORE=2), 51.7% win rate, +$19.12 total, PF=1.843
 - Exit split: 48% stop / 52% target (target-dominant, better than stop-dominant)
 - IWM outperforms: 61.9% win, 38% stop rate vs 50–58% for SPY/QQQ
 - OOS (walk-forward): PF consistently > 1.0 across 22/39 windows
+- Re-verified 2026-06-18 post-bug-fix (see below): identical to the decimal — this
+  finding never touched the buggy code path, since w=0 has no rolling window at all.
+
+**Backtest results, LIVE deployed config (SPY w=0, QQQ/IWM w=3, full dataset thru
+2026-06), corrected 2026-06-18:** A day-boundary signal leak in the KDJ window lookback
+(`mm/strategy.py`/`mm/evals.py` — fixed 2026-06-17) let the first 1-3 bars of a new
+trading day fire on a stale KDJ cross from the previous session's close. Verified
+old-buggy vs new-fixed on real data, full dataset, MIN_SIGNAL_SCORE=2:
+
+| Symbol | Trades (buggy→fixed) | Win% (buggy→fixed) | PF (buggy→fixed) |
+|--------|------------------------|----------------------|----------------------|
+| SPY (w=0) | 26 → 26 | 53.8% → 53.8% | 1.999 → 1.999 (unaffected) |
+| QQQ (w=3) | 292 → 199 | 40.1% → 42.7% | 1.038 → 1.064 |
+| IWM (w=3) | 309 → 209 | 42.4% → 45.0% | 1.279 → 1.390 |
+| **Combined** | **627 → 434** | **41.8% → 44.5%** | **1.136 → 1.195** |
+
+The edge survives and is slightly better post-fix (contaminated trades were lower
+quality, not a wash) — fewer trades (-31%) but higher win rate and PF on both w>0
+symbols. Full reasoning and the contamination-rate numbers (30-39% of historical
+entries affected) in `docs/strategy_graveyard.md`'s "KDJ Day-Boundary Signal Leak" entry.
 
 **Key research decisions locked:**
 - `ATR_STOP_MULT=1.0` — optimal (not 1.5 or 2.0)
 - `MIN_SIGNAL_SCORE=2` — optimal (score=3 has too few trades)
-- `KDJ_WINDOW_BARS=3` — 10× more signals on IWM/QQQ vs 0; SPY excluded or kept at 0
+- `KDJ_WINDOW_BARS=3` — ~6.7-7.7× more signals on IWM/QQQ vs w=0 on corrected data
+  (previously documented as "10×" on the pre-fix buggy signal set); SPY excluded or kept at 0
 - Regime filter: ADX<25 confirmed best vs 6 alternatives (BB width, volume variants)
 - Timeframe: K_5M confirmed best — K_15M produces MORE stops, not fewer
 
