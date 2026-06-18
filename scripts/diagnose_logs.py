@@ -19,6 +19,9 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from mm import clock  # noqa: E402
+
 
 def _load_jsonl(paths: list[Path]) -> list[dict]:
     records = []
@@ -50,7 +53,7 @@ def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dat
             continue
         if not all_dates and not date_str:
             # default: today
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = clock.today().strftime("%Y-%m-%d")
             if date != today:
                 continue
         results.append(p)

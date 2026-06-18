@@ -464,7 +464,7 @@ def _runner_status(last_eval: dict | None) -> tuple[str, str]:
         return "NO DATA", "#888"
     try:
         last_ts = datetime.fromisoformat(last_eval["ts"])
-        age = datetime.now() - last_ts
+        age = clock.now_et() - last_ts
         secs = int(age.total_seconds())
         if secs < 180:
             return f"ALIVE  ({secs}s ago)", "#4caf50"

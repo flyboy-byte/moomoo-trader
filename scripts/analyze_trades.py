@@ -26,6 +26,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import clock  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers (same patterns as diagnose_logs.py)
@@ -71,7 +73,7 @@ def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dat
         if from_date and date < from_date:
             continue
         if not all_dates and not date_str:
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = clock.today().strftime("%Y-%m-%d")
             if date != today:
                 continue
         results.append(p)

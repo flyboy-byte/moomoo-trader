@@ -26,6 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import clock  # noqa: E402
 from mm.config import cfg  # noqa: E402
 from mm.gap_fade import _build_day_map  # noqa: E402
 from mm.premarket import premarket_session, premarket_fill_pct, premarket_volume_ratio, \
@@ -59,7 +60,7 @@ def _events() -> list[dict]:
 def build_report() -> str:
     events = _events()
     closes = [e for e in events if e.get("event") == "position_close"]
-    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    week_ago = (clock.now_et() - timedelta(days=7)).isoformat()
 
     stats: dict[str, dict] = defaultdict(lambda: {
         "n": 0, "wins": 0, "pnl": 0.0, "gw": 0.0, "gl": 0.0, "week_n": 0, "week_pnl": 0.0})
@@ -115,7 +116,7 @@ def _premarket_section() -> str:
     rolling RTH + extended-hours archive. Skips a symbol gracefully if its
     archive doesn't exist yet (e.g. fetch_daily_archive.py hasn't run/caught
     up yet)."""
-    week_ago_date = (datetime.now() - timedelta(days=7)).date()
+    week_ago_date = (clock.now_et() - timedelta(days=7)).date()
     lines = ["", "**Premarket (this week)**"]
     any_data = False
 
