@@ -71,11 +71,26 @@ strategy, but most execution-sensitive (breakout fills are competitive).
 
 ## Review cadence
 
-- Weekly: run `python scripts/analyze_trades.py --all` and check samples against gates.
-- Do nothing in between. Mid-week results are noise by construction of this document.
+This document gates two different things on two different clocks — conflating them caused
+confusion (amended 2026-06-18, see log).
+
+- **Health/bug monitoring** — uptime gaps, stale candles, execution quality, log errors.
+  Check as often as you want (`scripts/diagnose_logs.py`, `scripts/analyze_trades.py --all`).
+  Daily is fine. Finding and fixing a bug is never "too early."
+- **Gate/performance evaluation** — deciding whether a strategy's results are good or bad
+  enough to act on. This is sample-size-gated, not calendar-gated: the trigger is a gate in
+  this doc tripping (e.g. "30 trades reached"), not a day of the week. Looking at PnL more
+  often doesn't make the data more meaningful — with 1-3 trades/day across all strategies,
+  day-to-day swings are noise around an edge too small to see yet. Look whenever you want;
+  just don't change a strategy's parameters off a sample smaller than its gate's threshold.
 
 ## Amendment log
 
+- 2026-06-18: Reworded "Review cadence" — "weekly, do nothing in between" was read as
+  forbidding daily bug/health checks, which was never the intent (the events.py UTC-vs-ET
+  timestamp bug found this same day was caught by exactly that kind of daily check). The
+  actual constraint is sample-size-gated (don't re-tune off too few trades), not calendar-
+  gated (don't look more than once a week). No gate thresholds or knobs changed.
 - 2026-06-10: Initial version.
 - 2026-06-10 (post-close): VWAP PB trade #1 (QQQ, entry 10:10 ET @ 707.20) VOIDED — does
   not count toward the 20-trade gate. The entry limit order pended 5.5 min; periodic broker

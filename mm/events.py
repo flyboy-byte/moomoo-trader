@@ -30,6 +30,14 @@ class PaperEventLog:
 
     Each event includes a strategy tag so multi-strategy runs are distinguishable.
     One file per symbol per day — all strategies for that symbol share the file.
+
+    Bug fix 2026-06-18: filename date and event `ts` used to come from clock.now()
+    (naive server-local time — UTC on the VPS, America/Denver locally), not ET.
+    Same bug class as clock.today() (mm/clock.py): a VPS-recorded ORB entry at
+    13:30 ET was logged as ts="...T17:30:02" with no timezone label, looking like
+    an after-hours trade. Now uses clock.today()/clock.now_et() so `ts` matches
+    candle_ts/eval_ts (already naive ET) and diagnose_logs.py's market-hours
+    staleness check (which compares ts.hour against 9:30-16:00) is correct again.
     """
 
     def __init__(self, symbol: str) -> None:
@@ -39,11 +47,11 @@ class PaperEventLog:
 
     @property
     def _path(self) -> Path:
-        date_str = clock.now().strftime("%Y-%m-%d")
+        date_str = clock.today().strftime("%Y-%m-%d")
         return _config.cfg.logs_dir / f"paper_{self._sym_safe}_{date_str}.jsonl"
 
     def _write(self, event: str, strategy: str = "", **fields) -> None:
-        record = {"ts": clock.now().isoformat(timespec="seconds"), "event": event,
+        record = {"ts": clock.now_et().isoformat(timespec="seconds"), "event": event,
                   "strategy": strategy, **fields}
         try:
             with open(self._path, "a") as f:
