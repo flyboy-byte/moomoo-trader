@@ -220,7 +220,87 @@ on first attempt).
 
 ---
 
+## Infrastructure & Security Hardening (VPS, not code — no commit/deploy needed for these)
+
+These are config-only changes on the OVHcloud VPS itself, not in this repo. Logged here so
+the reasoning survives a context reset, same as everything else in this file.
+
+### VPS Security Pass — 2026-06-21
+
+**Trigger:** OVHcloud's Anti-DDoS dashboard showed 1 detected/cleaned attack against the VPS's
+public IP. Investigated and confirmed it was routine internet background noise (OVH's
+network-layer scrubbing caught it before it reached the box) — no compromise: 19-day uptime,
+all 3 moomoo services healthy, no unknown sessions. `auth.log` showed the expected constant
+flood of failed SSH logins from random bot IPs (targeting `root`/`ubuntu`/random usernames),
+all failed — this is normal background radiation for any public IP, not evidence of anything
+targeted.
+
+While checking, found and fixed three real (if unexploited) weaknesses:
+
+1. **SSH password authentication was enabled VPS-wide.** Two conflicting cloud-init-managed
+   config snippets existed (`/etc/ssh/sshd_config.d/50-cloud-init.conf` set `yes`,
+   `60-cloudimg-settings.conf` set `no`) — sshd uses first-match-wins within `sshd_config.d/`,
+   and `50-...` sorts first, so `yes` was actually in effect (confirmed via `sudo sshd -T`).
+   Combined with the constant brute-force traffic, this was worth closing even though nothing
+   had succeeded. **Fix:** added `/etc/ssh/sshd_config.d/01-hardening.conf` (sorts before both
+   existing files, so it always wins) setting `PasswordAuthentication no` and
+   `PermitRootLogin no`. Verified key-only login still works and password-only login is
+   immediately rejected. Also installed and enabled `fail2ban` (sshd jail, 4 retries / 10 min
+   window / 1hr ban) as defense-in-depth — it had already auto-banned 2 of the brute-force IPs
+   within minutes of being enabled.
+   Deliberately did NOT IP-allowlist port 22 in `ufw` — home/office IP stability unknown,
+   too easy to lock yourself out from a new network. Disabling password auth closes the actual
+   risk (brute-forcing becomes pointless regardless of source IP) without that lockout risk.
+
+2. **The web dashboard was reachable two ways — one of them sent the password in cleartext.**
+   `ufw` allowed port 8080 (the Flask dashboard, `scripts/web_dashboard.py`) from "Anywhere",
+   so it was reachable both via `https://trading.flyboybyte.com` (TLS, through nginx) AND
+   directly via `http://<VPS-IP>:8080` (plain HTTP, no TLS — confirmed reachable with `curl`).
+   `DASHBOARD_PASSWORD` is set, so it wasn't wide open, but anyone using the direct-IP path
+   would submit that password unencrypted — sniffable on any network path between them and the
+   VPS. **Fix:** `sudo ufw delete allow 8080` + `sudo ufw allow from 127.0.0.1 to any port
+   8080` — the only way in now is through nginx's TLS-terminated proxy (which still works,
+   since nginx→Flask is loopback traffic, unaffected by the external-facing firewall rule).
+   Verified the direct path now times out and the TLS path still returns 200.
+
+3. **Same cleartext-bypass pattern on an unrelated app sharing the box** (`disc_tracker`,
+   port 5757, proxied via `disc.flyboybyte.com`) — not part of this project, but the exact
+   same exploit class, so fixed the same way: `ufw` restricted to `127.0.0.1`, verified direct
+   path blocked and the nginx-proxied path still works.
+
+**Also added:** nginx security headers (`Strict-Transport-Security`, `X-Frame-Options`,
+`X-Content-Type-Options`, `Referrer-Policy`) via a shared snippet
+(`/etc/nginx/snippets/security-headers.conf`) included in all three site configs
+(`trading.flyboybyte.com`, `disc.flyboybyte.com`, `flyboybyte.com`). Backups of every edited
+nginx config (`.bak` suffix) left next to the originals on the VPS.
+
+**Confirmed NOT a bug, just a side-effect of an existing finding:** `trading.flyboybyte.com`'s
+nginx block uses `disc.flyboybyte.com`'s SSL certificate. Looked like a copy-paste error at
+first glance — verified via `certbot certificates` that it's actually a real multi-domain
+cert (SANs cover both `disc.flyboybyte.com` and `trading.flyboybyte.com`), so this is correct,
+not a mismatch.
+
+**Not done, flagged for the user to handle directly (can't be done over SSH):** OVH account
+2FA, VPS snapshots/backups. **Not done, explicitly out of scope:** IP-allowlisting SSH (risk
+of lockout outweighs benefit once password auth is off); auditing nginx/headers on the two
+fully-unrelated sites beyond the specific fixes above.
+
+---
+
 ## On Hold (parked with a gate condition)
+
+### Market Holiday Calendar for is_market_open() — parked 2026-06-19, low priority
+**What it is:** `mm/clock.py::is_market_open()` only checks weekday + 9:30-16:00 ET — no
+NYSE holiday calendar. Confirmed live on 2026-06-19 (Juneteenth): the runner correctly
+thought the market should be open and polled normally, but the broker returned 0 candles
+all day, producing a `Stale candles ... not enough candles (0)` loop in paper.log and no
+JSONL event files for the day. Not a bug — fails safe (no candles → no eval → no trades),
+just log noise and an empty session that looks alarming at a glance. NYSE has ~9 holidays/
+year. Would need either a small hardcoded holiday list (simplest, needs annual upkeep) or
+a calendar library (e.g. `pandas_market_calendars`, new dependency). Parked: low value for
+a solo project (~9 days/year of harmless noise) versus the cost of a new dependency or an
+upkeep burden. Revisit if the noise becomes annoying enough, or if holiday-day polling ever
+turns out to cost something beyond log clutter (e.g. burns OpenD API quota).
 
 ### Gap Fade — BUILT 2026-06-16, pending live verification
 **What it is:** Fade the overnight gap when the first 5-min bar (9:35 close) closes against
@@ -354,6 +434,94 @@ see `docs/evaluation_criteria.md` for sample-size discipline before drawing conc
 - `TestMarketHoursGuard` must use `monkeypatch.setattr(mm.clock, ...)` not direct assignment.
 
 **Deploy:** `./deploy.sh` after market close. Refactor is behavior-identical (cert-diffed).
+
+---
+
+### From docs/codex-grand-audit-2026-06-19.md — external review, parked ideas
+
+An external AI review (`docs/codex-grand-audit-2026-06-19.md`, kept as a historical record —
+not a living doc, don't edit it) raised several ideas. The headline engineering claim was
+spot-checked before trusting the rest: verified via `strace` that `import moomoo` does write
+a log file outside the workspace (`~/.com.moomoo.OpenD/Log/py_YYYY_MM_DD.log`, hardcoded in
+the vendor SDK's `ft_logger.py`, fired at module level). The audit's specific symptom claim
+("pytest can fail during collection") did NOT reproduce here — 210/210 tests pass cleanly,
+because `$HOME` happens to be writable on this machine. Root cause real, failure mode
+environment-dependent. The file/line-count stats in the audit were independently verified
+accurate, so the rest of its groundwork is reasonably trustworthy — but its strategic opinions
+below are an outside impression, not validated by data, and don't override the actual decision
+mechanism (`docs/evaluation_criteria.md`'s pre-registered gates).
+
+#### Test Hermeticity — moomoo import writes logs outside the workspace
+**What it is:** `mm/connection.py`, `mm/data.py`, `mm/execution.py` import `moomoo` at module
+level, which triggers the vendor SDK's `logger = FTLog()` side effect (see above) — a write to
+`$HOME`, not the repo workspace. Harmless today (verified), but would crash any pytest
+collection in a sandbox/CI/container without a writable `$HOME`. **Action if revisited:**
+redirect `$HOME` (or monkeypatch the log path) in `tests/conftest.py` before any test imports
+an `mm` module that pulls in `moomoo`, making the suite hermetic regardless of environment.
+
+#### Machine-Readable Project State Snapshot
+**What it is:** a generated `scripts/snapshot.py` producing a small `STATE.json` — active
+strategies, research-only strategies, current gate progress, latest test count, latest audit
+date, highest-risk modules — to counter "too many truth surfaces" (truth is currently spread
+across code, `.env`, `PROJECT_MAP.md`, `strategy_graveyard.md`, `evaluation_criteria.md`).
+Cheap, low-risk, no live-behavior change. **Parked because:** not urgent — the docs are still
+navigable by hand. **Revisit when:** doc-reconciliation starts costing real time, or a future
+session gets confused by stale cross-doc numbers again.
+
+#### Portfolio Governor (entry-time constraints)
+**What it is:** a runtime layer enforcing same-direction symbol clustering limits, max
+concurrent exposure, and cross-strategy overlap risk AT THE POINT OF ENTRY, not just
+after-the-fact via `scripts/analyze_portfolio.py`. **Parked because:** premature while
+strategies are still sample-starved against their own gates (12 combined trades as of
+2026-06-18) — building governance for a portfolio that hasn't proven its individual pieces
+work yet solves a problem with no evidence behind it. **Revisit when:** at least one strategy
+clears its gate and live overlap actually shows up as a real cost in the data.
+
+#### Strategy Promotion Pipeline (formalized)
+**What it is:** an explicit staged path for new strategies — research → replay → shadow
+logging → regime attribution → overlap scoring → promotion to live paper — instead of the
+current implicit version (which is already working, e.g. Gap Fade's shadow-mode wiring this
+session). **Parked because:** the implicit version works fine at the current scale (4
+strategies); formalizing it into tooling is process overhead before a second/third strategy
+is actually queued up needing it. **Revisit when:** ≥2 new strategies are in the research
+pipeline simultaneously.
+
+#### Discrepancy-Focused "Truth Dashboard"
+**What it is:** a dashboard view centered on replay-vs-live divergence, stale-config usage,
+broker/local mismatch events, and execution anomalies — distinct from the existing PnL-first
+dashboards (`scripts/dashboard.py`, `scripts/web_dashboard.py`). **Parked because:** the
+underlying checks already exist as separate scripts (`scripts/replay_vs_live.py`,
+`scripts/diagnose_logs.py`) — a unified view is a nice-to-have UI consolidation, not a missing
+capability. **Revisit when:** those scripts are being run often enough that switching between
+them is actually annoying.
+
+#### Deeper Strategy-Only Audit Checklist
+**What it is:** a future pass examining regime concentration (is the edge concentrated in
+specific vol/trend regimes), symbol dependency (genuine SPY/QQQ/IWM diversification vs
+correlated triplication), live-vs-replay degradation by strategy family, PnL distribution
+shape (consistent base hits vs outlier-carried), and cross-strategy overlap cost. **Parked
+because:** needs a much bigger live sample than exists today (12 trades total) to produce
+anything but noise. **Revisit when:** any individual strategy gate trips, or a few months of
+live data accumulate either way.
+
+#### Large Mixed-Purpose File Refactor Candidates
+**What it is:** `scripts/web_dashboard.py` (967 lines), `scripts/analyze_trades.py` (628),
+`mm/research.py` (618), `mm/evals.py` (576) flagged as broad enough in role to be "heavy
+context nodes" for both human and AI readers — not buggy, just large+mixed-purpose. **Parked
+because:** splitting these now is a speculative refactor without a concrete pain point (CLAUDE.md
+explicitly warns against premature abstraction). **Revisit when:** actually editing one of these
+becomes noticeably harder in practice — not on line-count alone.
+
+#### External Audit's Strategy-Hierarchy Impression (informational only)
+The audit's subjective ranking, captured for reference, NOT a decision: **ORB** = strongest
+backbone candidate (simple, falsifiable, but execution-sensitive); **VWAP PB** = useful
+selective complement (narrower, symbol-selection-sensitive); **BB+KDJ** = the most
+epistemically fragile of the active strategies (most parameterized, most room for subtle
+signal contamination — the KDJ day-boundary bug is cited as reinforcing this concern, though
+that bug is already found and fixed); **Gap Fade** = the most promising non-redundant next
+promotion candidate (structurally distinct thesis, not a decorated duplicate of what's already
+live). This is an outside opinion to weigh, not a gate — the actual promotion/suspension
+decisions still run entirely through `docs/evaluation_criteria.md`.
 
 ---
 
