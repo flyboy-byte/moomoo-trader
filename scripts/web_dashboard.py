@@ -91,10 +91,18 @@ def _read_env() -> dict[str, str]:
     return result
 
 
-def _write_env_key(key: str, value: str) -> None:
-    """Update a single key in .env, preserving all other lines."""
+def _write_env_key(key: str, value: str) -> bool:
+    """Update a single key in .env, preserving all other lines.
+
+    Rejects values containing newlines/carriage returns — otherwise a value
+    like "100\\nTRD_ENV=REAL" would inject a second, arbitrary KEY=VALUE line
+    into .env outside the _EDITABLE_KEYS allowlist. Returns False (no write)
+    if the value is rejected.
+    """
     if key not in _EDITABLE_KEYS:
-        return
+        return False
+    if "\n" in value or "\r" in value:
+        return False
     text = _ENV_PATH.read_text() if _ENV_PATH.exists() else ""
     lines = text.splitlines()
     pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
@@ -109,6 +117,7 @@ def _write_env_key(key: str, value: str) -> None:
     if not updated:
         new_lines.append(f"{key}={value}")
     _ENV_PATH.write_text("\n".join(new_lines) + "\n")
+    return True
 
 
 def _kill_switch_state() -> dict[str, bool]:
@@ -256,12 +265,18 @@ def config_editor() -> Response | str:
 
         elif action == "save_config":
             changed = []
+            rejected = []
             for key in _EDITABLE_KEYS:
                 if key in request.form:
                     val = request.form[key].strip()
-                    _write_env_key(key, val)
-                    changed.append(key)
-            if changed:
+                    if _write_env_key(key, val):
+                        changed.append(key)
+                    else:
+                        rejected.append(key)
+            if rejected:
+                msg = f"Rejected (invalid value): {', '.join(sorted(rejected))}."
+                msg_type = "err"
+            elif changed:
                 msg = f"Saved: {', '.join(sorted(changed))}. Restart runner to apply."
             else:
                 msg = "No changes submitted."
