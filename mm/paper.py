@@ -58,7 +58,7 @@ from .risk import (          # noqa: F401
 log = get_logger("paper")
 
 POLL_SECONDS = 60
-CANDLE_LOOKBACK_DAYS = 3
+CANDLE_LOOKBACK_DAYS = 7  # wide enough to survive a holiday + weekend with no trading days
 MAX_CONSECUTIVE_ERRORS = 3
 BACKOFF_SECONDS = 300  # 5 min after repeated failures
 
