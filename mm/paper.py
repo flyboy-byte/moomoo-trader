@@ -43,7 +43,7 @@ from .events import (        # noqa: F401
 )
 from .evals import (         # noqa: F401
     _entry_attempted,
-    _eval_bb_kdj, _eval_vwap, _eval_vwap_pb, _eval_orb,
+    _eval_bb_kdj, _eval_bb_kdj_loose, _eval_vwap, _eval_vwap_pb, _eval_orb,
 )
 from .execution import (     # noqa: F401
     _orphan_warned,
@@ -296,6 +296,13 @@ def _eval_symbol_all_strategies(
             if df_bb is None:
                 df_bb = compute_signals(df_raw)
             positions[(symbol, strat)] = _eval_bb_kdj(
+                symbol, df_bb, tctx, acc_id,
+                positions[(symbol, strat)], elog, daily,
+            )
+        elif strat == "bb_kdj_loose":
+            if df_bb is None:
+                df_bb = compute_signals(df_raw)
+            positions[(symbol, strat)] = _eval_bb_kdj_loose(
                 symbol, df_bb, tctx, acc_id,
                 positions[(symbol, strat)], elog, daily,
             )

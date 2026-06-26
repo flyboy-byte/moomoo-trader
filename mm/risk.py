@@ -139,7 +139,7 @@ class DailyTracker:
         """Return True if both global and per-strategy limits allow a new entry."""
         self._maybe_reset()
         cfg = _config.cfg
-        if self._trades >= cfg.max_trades_per_day:
+        if cfg.max_trades_per_day > 0 and self._trades >= cfg.max_trades_per_day:
             log.warning("Daily trade limit reached (%d/%d) — no new entries",
                         self._trades, cfg.max_trades_per_day)
             return False

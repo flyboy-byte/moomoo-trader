@@ -169,6 +169,120 @@ def _eval_bb_kdj(
     return position
 
 
+def _eval_bb_kdj_loose(
+    symbol: str, df_signals: pd.DataFrame, tctx, acc_id: int,
+    position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+) -> PaperPosition | None:
+    """BB+KDJ with all entry gates relaxed — research lane only.
+
+    Differences from _eval_bb_kdj:
+    - No ADX/ranging filter: fires in choppy markets the standard strategy skips.
+    - No bonus gate (MIN_SIGNAL_SCORE=0): any BB touch + KDJ cross is enough.
+    Same exit logic, same sizing, same candle data. Runs independently as
+    strategy='bb_kdj_loose' so its P&L is fully separable from the frozen config.
+    """
+    last = df_signals.iloc[-1]
+    candle_ts = last["time_key"]
+    close = float(last["close"])
+    now = clock.now_et()
+
+    sig = signal_snapshot(last)
+    bonus = int(last["bonus_score"]) if "bonus_score" in last else 0
+    bb_lower = round(float(last["bb_lower"]), 4) if "bb_lower" in last else None
+    bb_middle = round(float(last["bb_middle"]), 4) if "bb_middle" in last else None
+    adx = float(last["adx"]) if "adx" in last and not pd.isna(last["adx"]) else 0.0
+    cross_age = _kdj_cross_age(df_signals)
+    log.info("%-8s [bb_kdj_loose] BAR %s  close=%.4f  bb_lower=%.4f  score=%d/5  bonus=%d/3  adx=%.1f  %s",
+             symbol, candle_ts, close, bb_lower or 0, sig.score, bonus, adx, sig)
+    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
+                  close=close, score=sig.score, bonus=bonus,
+                  signals={**sig.details, "bb_lower": bb_lower, "bb_middle": bb_middle,
+                           "kdj_cross_age": cross_age},
+                  regime_label="trending" if adx > 25 else "ranging",
+                  strategy="bb_kdj_loose")
+
+    cfg = _config.cfg
+    if position is None:
+        effective_window = cfg.kdj_window_overrides.get(symbol, cfg.kdj_window_bars)
+        if effective_window > 0:
+            window = min(effective_window + 1, len(df_signals))
+            candle_date = pd.Timestamp(candle_ts).date()
+            tail = df_signals.iloc[-window:]
+            same_day = pd.to_datetime(tail["time_key"]).dt.date == candle_date
+            kdj_met = bool((tail["kdj_golden_cross"] & same_day).any())
+        else:
+            kdj_met = bool(last["sig_kdj_cross"])
+        core_met = bool(last["sig_bb_touch"]) and kdj_met
+
+        if core_met:
+            if _entry_attempted.get((symbol, "bb_kdj_loose")) == str(candle_ts):
+                pass
+            else:
+                _entry_attempted[(symbol, "bb_kdj_loose")] = str(candle_ts)
+                if not daily.can_open(strategy="bb_kdj_loose"):
+                    elog.risk_block("daily_limit_reached", strategy="bb_kdj_loose",
+                                    trades=daily.trades, pnl=daily.pnl)
+                else:
+                    stop = close - cfg.atr_stop_mult * float(last["atr"])
+                    qty = _qty(close, symbol, stop=stop)
+                    cap = _position_cap(symbol)
+                    if not qty:
+                        log.warning("RISK BLOCK [bb_kdj_loose] %s: price %.2f exceeds cap %.2f",
+                                    symbol, close, cap)
+                        elog.risk_block("price_exceeds_max_position", strategy="bb_kdj_loose",
+                                        price=close, max_dollars=cap)
+                    else:
+                        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                                "bb_kdj_loose", elog)
+                        if filled:
+                            order_id, fill_price, fill_qty = filled
+                            position = PaperPosition(
+                                symbol=symbol, strategy="bb_kdj_loose",
+                                entry_time=candle_ts, entry_price=fill_price,
+                                stop_price=stop, qty=fill_qty, order_id=order_id,
+                            )
+                            _save_position(position)
+                            elog.position_open(fill_price, stop, fill_qty, strategy="bb_kdj_loose",
+                                               intended_price=close, kdj_cross_age=cross_age)
+                            notify_entry(symbol, fill_price, stop)
+                            log.info("%-8s [bb_kdj_loose] OPEN  entry=%.4f stop=%.4f qty=%s",
+                                     symbol, fill_price, stop, fill_qty)
+    else:
+        exit_reason: str | None = None
+        if close >= float(last["bb_middle"]):
+            exit_reason = "TARGET_BB_MIDDLE"
+        elif cfg.exit_on_kdj_death and bool(last["kdj_death_cross"]):
+            exit_reason = "KDJ_DEATH_CROSS"
+        elif close < position.stop_price:
+            exit_reason = "STOP_LOSS"
+
+        if exit_reason:
+            result = _execute_exit(tctx, acc_id, symbol, position, close, exit_reason, elog)
+            if result is None:
+                return position
+            fill_price, dealt_qty = result
+            pnl_total = (fill_price - position.entry_price) * dealt_qty
+            hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
+            daily.record_trade(pnl_total, strategy="bb_kdj_loose")
+            partial = dealt_qty < float(position.qty)
+            elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars,
+                                strategy="bb_kdj_loose", direction="long", intended_price=close,
+                                partial_fill=partial, dealt_qty=dealt_qty)
+            notify_exit(symbol, fill_price, exit_reason, pnl_total)
+            if partial:
+                position.qty = position.qty - dealt_qty
+                _save_position(position)
+                log.warning("%-8s [bb_kdj_loose] PARTIAL CLOSE exit=%.4f pnl=%+.4f reason=%s remaining_qty=%s",
+                            symbol, fill_price, pnl_total, exit_reason, position.qty)
+            else:
+                _clear_position(symbol, "bb_kdj_loose")
+                log.info("%-8s [bb_kdj_loose] CLOSE exit=%.4f pnl=%+.4f reason=%s",
+                         symbol, fill_price, pnl_total, exit_reason)
+                position = None
+
+    return position
+
+
 def _eval_vwap(
     symbol: str, df_signals: pd.DataFrame, tctx, acc_id: int,
     position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,

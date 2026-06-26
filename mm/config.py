@@ -148,7 +148,7 @@ class Config:
 
 cfg = Config()
 
-_VALID_STRATEGIES = {"bb_kdj", "orb", "vwap_pb", "vwap"}
+_VALID_STRATEGIES = {"bb_kdj", "bb_kdj_loose", "orb", "vwap_pb", "vwap"}
 
 
 def validate_config() -> list[str]:
@@ -185,8 +185,8 @@ def validate_config() -> list[str]:
         errors.append(f"TOTAL_CAPITAL={cfg.total_capital} must be >= 0")
     if cfg.total_capital == 0 and cfg.max_position_dollars <= 0:
         errors.append("MAX_POSITION_DOLLARS must be > 0 when TOTAL_CAPITAL is not set")
-    if cfg.max_trades_per_day < 1:
-        errors.append(f"MAX_TRADES_PER_DAY={cfg.max_trades_per_day} must be >= 1")
+    if cfg.max_trades_per_day < 0:
+        errors.append(f"MAX_TRADES_PER_DAY={cfg.max_trades_per_day} must be >= 0 (0 = unlimited)")
     if cfg.max_daily_loss <= 0:
         errors.append(f"MAX_DAILY_LOSS={cfg.max_daily_loss} must be > 0")
 
