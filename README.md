@@ -1,11 +1,11 @@
 # moomoo-trader
 
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
-![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-214%20passing-brightgreen)
 ![Trading](https://img.shields.io/badge/trading-paper%20only-orange)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-A systematic strategy research and paper-trading platform built on the [Moomoo API](https://openapi.moomoo.com/moomoo-api-doc/). Three independently validated strategies run simultaneously on multiple symbols, with full backtesting, walk-forward validation, Discord alerts, and live dashboards.
+A systematic strategy research and paper-trading platform built on the [Moomoo API](https://openapi.moomoo.com/moomoo-api-doc/). Four strategies run simultaneously on multiple symbols — three independently validated production strategies plus a loose research lane for accumulating edge data — with full backtesting, walk-forward validation, Discord alerts, and live dashboards.
 
 > **No live orders are ever placed.** All trading runs through Moomoo's simulated paper environment (`TRD_ENV=SIMULATE`). Every order attempt checks this before executing.
 
@@ -24,8 +24,8 @@ A systematic strategy research and paper-trading platform built on the [Moomoo A
 │                  │              │                               │   │
 │                  │    ┌─────────┼──────────┐                   │   │
 │                  │    │         │          │                    │   │
-│                  │  BB+KDJ    ORB      VWAP PB  ← all run on   │   │
-│                  │ signals  signals   signals     same candles  │   │
+│                  │  BB+KDJ    ORB    VWAP PB  BB+KDJ  ← all run │   │
+│                  │ signals  signals  signals   Loose   on same  │   │
 │                  │    │         │          │                    │   │
 │                  │    └─────────┼──────────┘                   │   │
 │                  │              │                               │   │
@@ -69,6 +69,20 @@ Regime: ADX < 25 (ranging) — fires when ORB/momentum strategies are quiet
 | **Combined** | **60** | **51.7%** | **+$19.12** | **48%** | — |
 
 Low frequency (~6 trades/year per symbol at `KDJ_WINDOW_BARS=0`; ~60/year at `w=3`). IWM has the strongest edge.
+
+---
+
+### BB+KDJ Loose (Research Lane)
+
+Same BB+KDJ signal as above, but all entry gates removed — no ADX regime filter, no bonus score requirement, no daily trade cap. Purpose: accumulate more signal data faster to inform future gate tuning. Not independently validated; runs alongside the production strategy as a shadow.
+
+```
+Entry:  close ≤ BB lower(20,2)
+        AND KDJ(9,3) golden cross (within KDJ_WINDOW_BARS prior bars)
+        (no regime, bonus, or trade-count filters)
+
+Exit:   same as BB+KDJ (BB middle target, ATR stop)
+```
 
 ---
 
@@ -145,7 +159,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env:
 #   SYMBOLS=US.IWM,US.SPY,US.QQQ
-#   STRATEGIES=bb_kdj,orb,vwap_pb
+#   STRATEGIES=bb_kdj,orb,vwap_pb,bb_kdj_loose
 #   MAX_POSITION_DOLLARS=900        ← must cover one share (IWM ~$285, SPY ~$755, QQQ ~$745)
 #   VWAP_PB_SYMBOLS=US.SPY,US.QQQ  ← exclude IWM from VWAP PB
 #   ORB_MINUTES_OVERRIDES=US.IWM:30 ← IWM uses 30-min opening range
@@ -178,7 +192,7 @@ python scripts/dashboard.py         # terminal dashboard in a second window
 | `TRD_ENV` | `SIMULATE` | **Never change.** All orders go to the paper account |
 | `LIVE_TRADING_ENABLED` | `false` | Hard kill switch checked before every order |
 | `SYMBOLS` | `US.SPY` | Comma-separated: `US.IWM,US.SPY,US.QQQ` |
-| `STRATEGIES` | `bb_kdj` | Active strategies: `bb_kdj`, `orb`, `vwap_pb` (comma-separated) |
+| `STRATEGIES` | `bb_kdj` | Active strategies: `bb_kdj`, `orb`, `vwap_pb`, `bb_kdj_loose` (comma-separated) |
 | `MAX_POSITION_DOLLARS` | `50` | Max notional per trade — **raise before trading** |
 | `SYMBOL_SIZE_OVERRIDES` | _(empty)_ | Per-symbol cap: `US.IWM:300,US.SPY:600` |
 | `MAX_TRADES_PER_DAY` | `3` | Daily trade limit across all strategies combined |
@@ -263,7 +277,7 @@ mm/                        core package
   paper.py                 multi-strategy paper-trading loop (run_multi, candle fetch)
   events.py                PaperEventLog (JSONL), PaperPosition, position/ORB-tracker persistence
   execution.py             order placement, fill confirmation, broker reconciliation
-  evals.py                 per-strategy live eval functions (_eval_bb_kdj, _eval_orb, _eval_vwap_pb)
+  evals.py                 per-strategy live eval functions (_eval_bb_kdj, _eval_bb_kdj_loose, _eval_orb, _eval_vwap_pb)
   replay.py                replay harness — drives the real live code path against historical candles
   backtest.py              backtester, walk-forward, print_summary, canonical profit_factor()
   research.py              parameter sweeps, variant comparison
@@ -309,6 +323,6 @@ sync_logs.sh               rsync VPS logs → local logs/
 ## Tests
 
 ```bash
-python -m pytest tests/ -q    # 182 tests: risk, indicators, signals, strategy, orb,
+python -m pytest tests/ -q    # 214 tests: risk, indicators, signals, strategy, orb,
                                # clock, data, paper/evals/execution/replay
 ```

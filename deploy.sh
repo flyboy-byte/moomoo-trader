@@ -9,13 +9,17 @@ VPS=$(grep -E '^VPS_HOST=' .env | cut -d= -f2-)
 
 echo "=== Pre-deploy checks ==="
 
-# 1. Tests must pass before deploying
-.venv/bin/python -m pytest tests/ -q || { echo "Tests failed — aborting deploy."; exit 1; }
-
-# 2. Warn on uncommitted changes (don't block — you may want to deploy config fixes)
+# 1. Warn on uncommitted changes
 if ! git diff-index --quiet HEAD --; then
     echo "WARNING: uncommitted local changes (not deployed — only what's pushed to GitHub)."
 fi
+
+# 2. Tests must pass before deploying
+.venv/bin/python -m pytest tests/ -q || { echo "Tests failed — aborting deploy."; exit 1; }
+
+# 3. Push to GitHub
+echo "--- git push ---"
+git push origin master
 
 echo ""
 echo "=== Deploying to $VPS ==="
