@@ -935,7 +935,8 @@ def _render_gate_progress() -> str:
 
 
 def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "",
-            available_dates: list[date] | None = None) -> str:
+            available_dates: list[date] | None = None,
+            latest: dict | None = None) -> str:
     last_eval = evals[-1] if evals else None
     status_label, status_color = _runner_status(last_eval)
     now_str = datetime.now().strftime("%H:%M:%S")
@@ -965,7 +966,6 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     </span>"""
     auto_refresh = '<meta http-equiv="refresh" content="30">' if is_today else ''
 
-    last_close = f"${last_eval['close']:.3f}" if last_eval else "—"
     last_score = str(last_eval.get("signal_score", "—")) if last_eval else "—"
 
     ct = summary.closed_trades
@@ -979,10 +979,16 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
         tr = summary.open_at_close[0]
         is_short = tr.direction == "short"
         unrealized = ""
-        if last_eval:
-            unreal = ((tr.entry_price - last_eval["close"]) if is_short
-                      else (last_eval["close"] - tr.entry_price)) * tr.qty
+        # Look up last close for the open position's symbol specifically.
+        # last_eval is the most recent eval across all symbols (wrong for P&L).
+        sym_evals = (latest or {}).get(tr.symbol, {})
+        sym_last = (max(sym_evals.values(), key=lambda e: e.get("ts", ""))
+                    if sym_evals else None)
+        if sym_last:
+            unreal = ((tr.entry_price - sym_last["close"]) if is_short
+                      else (sym_last["close"] - tr.entry_price)) * tr.qty
             unrealized = f'<span style="color:{_pnl_color(unreal)}">{_fmt_pnl(unreal)} unrealized</span>'
+        last_close = f"${sym_last['close']:.3f}" if sym_last else "—"
         dir_badge = (f'<span style="color:#f44336;font-weight:bold">SHORT</span>' if is_short
                      else f'<span style="color:#4caf50;font-weight:bold">LONG</span>')
         open_html = f"""
@@ -1150,7 +1156,7 @@ def index() -> str:
     latest = _load_latest_evals_by_symbol()
     skips = _load_recent_skips()
     market_cond_html = _render_market_conditions(latest, skips)
-    return _render(summary, evals, market_cond_html, available_dates=avail)
+    return _render(summary, evals, market_cond_html, available_dates=avail, latest=latest)
 
 
 # ---------------------------------------------------------------------------
