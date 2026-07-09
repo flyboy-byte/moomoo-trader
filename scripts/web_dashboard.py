@@ -232,15 +232,34 @@ def logout() -> Response:
 def api_stats() -> Response:
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
+    net = psutil.net_io_counters()
+    cores = psutil.cpu_percent(percpu=True)
+    load = psutil.getloadavg()
+    procs = []
+    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "status"]):
+        try:
+            procs.append({
+                "pid": p.info["pid"],
+                "name": (p.info["name"] or "")[:20],
+                "cpu": round(p.info["cpu_percent"] or 0, 1),
+                "mem": round(p.info["memory_percent"] or 0, 1),
+                "status": (p.info["status"] or "")[:1].upper(),
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    procs.sort(key=lambda x: x["cpu"], reverse=True)
     return jsonify({
-        "cpu_pct": psutil.cpu_percent(interval=0.1),
+        "cores": [round(c, 1) for c in cores],
+        "load": [round(x, 2) for x in load],
         "mem_used_gb": round(vm.used / 1e9, 2),
         "mem_total_gb": round(vm.total / 1e9, 2),
-        "mem_pct": vm.percent,
+        "mem_pct": round(vm.percent, 1),
         "disk_used_gb": round(disk.used / 1e9, 2),
         "disk_total_gb": round(disk.total / 1e9, 2),
-        "disk_pct": disk.percent,
-        "load_1m": round(psutil.getloadavg()[0], 2),
+        "disk_pct": round(disk.percent, 1),
+        "net_sent_mb": round(net.bytes_sent / 1e6, 1),
+        "net_recv_mb": round(net.bytes_recv / 1e6, 1),
+        "procs": procs[:12],
     })
 
 
@@ -370,25 +389,133 @@ def config_editor() -> Response | str:
 
   {msg_html}
 
-  <!-- System stats -->
+  <!-- System stats (htop-style, toggle on/off) -->
   <div class="card" id="stats-card">
-    <h2>SYSTEM</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:8px">
-      <div><div class="kv-label">CPU</div><div id="s-cpu" style="margin-top:4px;color:#ddd">—</div></div>
-      <div><div class="kv-label">MEMORY</div><div id="s-mem" style="margin-top:4px;color:#ddd">—</div></div>
-      <div><div class="kv-label">DISK</div><div id="s-disk" style="margin-top:4px;color:#ddd">—</div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h2 style="margin:0">SYSTEM</h2>
+      <button id="stats-toggle" onclick="toggleStats()"
+              class="btn btn-ok" style="font-size:11px;padding:4px 10px">▶ Start Live Feed</button>
+    </div>
+    <div id="stats-body" style="display:none">
+      <!-- CPU cores -->
+      <div style="margin-bottom:14px">
+        <div class="kv-label" style="margin-bottom:6px">CPU CORES &nbsp;<span id="s-load" style="color:#666"></span></div>
+        <div id="s-cores" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+      </div>
+      <!-- Mem / Disk / Net row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:14px">
+        <div>
+          <div class="kv-label" style="margin-bottom:4px">MEMORY</div>
+          <div class="stat-bar-track"><div id="s-mem-bar" class="stat-bar" style="width:0%"></div></div>
+          <div id="s-mem-lbl" style="font-size:11px;color:#888;margin-top:3px">—</div>
+        </div>
+        <div>
+          <div class="kv-label" style="margin-bottom:4px">DISK</div>
+          <div class="stat-bar-track"><div id="s-disk-bar" class="stat-bar" style="width:0%"></div></div>
+          <div id="s-disk-lbl" style="font-size:11px;color:#888;margin-top:3px">—</div>
+        </div>
+        <div>
+          <div class="kv-label" style="margin-bottom:4px">NETWORK (total)</div>
+          <div id="s-net" style="font-size:12px;color:#aaa;margin-top:4px">—</div>
+        </div>
+      </div>
+      <!-- Top processes -->
+      <div>
+        <div class="kv-label" style="margin-bottom:6px">TOP PROCESSES</div>
+        <table id="s-procs" style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="color:#555">
+            <th style="text-align:left;padding:2px 6px">PID</th>
+            <th style="text-align:left;padding:2px 6px">NAME</th>
+            <th style="text-align:right;padding:2px 6px">CPU%</th>
+            <th style="text-align:right;padding:2px 6px">MEM%</th>
+            <th style="text-align:right;padding:2px 6px">S</th>
+          </tr></thead>
+          <tbody id="s-procs-body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
+  <style>
+  .stat-bar-track {{ background:#222; border-radius:3px; height:10px; overflow:hidden; }}
+  .stat-bar {{ background:#4caf50; height:10px; border-radius:3px; transition:width 0.4s; }}
+  .stat-bar.warn {{ background:#ff9800; }}
+  .stat-bar.crit {{ background:#f44336; }}
+  .core-bar {{ display:inline-flex;flex-direction:column;align-items:center;gap:2px; }}
+  .core-track {{ width:18px;height:60px;background:#222;border-radius:2px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden; }}
+  .core-fill {{ width:100%;background:#4caf50;transition:height 0.4s; }}
+  .core-fill.warn {{ background:#ff9800; }}
+  .core-fill.crit {{ background:#f44336; }}
+  .core-lbl {{ font-size:9px;color:#555; }}
+  </style>
   <script>
-  function refreshStats() {{
-    fetch("/api/stats").then(r => r.json()).then(d => {{
-      document.getElementById("s-cpu").textContent  = d.cpu_pct.toFixed(1) + "% (load " + d.load_1m + ")";
-      document.getElementById("s-mem").textContent  = d.mem_used_gb + " / " + d.mem_total_gb + " GB (" + d.mem_pct + "%)";
-      document.getElementById("s-disk").textContent = d.disk_used_gb + " / " + d.disk_total_gb + " GB (" + d.disk_pct + "%)";
-    }}).catch(() => {{}});
+  var _statsInterval = null;
+
+  function toggleStats() {{
+    var btn = document.getElementById("stats-toggle");
+    var body = document.getElementById("stats-body");
+    if (_statsInterval) {{
+      clearInterval(_statsInterval);
+      _statsInterval = null;
+      btn.textContent = "▶ Start Live Feed";
+      btn.className = "btn btn-ok";
+    }} else {{
+      body.style.display = "block";
+      fetchStats();
+      _statsInterval = setInterval(fetchStats, 2000);
+      btn.textContent = "■ Stop";
+      btn.className = "btn btn-danger";
+    }}
   }}
-  refreshStats();
-  setInterval(refreshStats, 5000);
+
+  function bar(pct) {{
+    var cls = pct >= 90 ? "crit" : pct >= 70 ? "warn" : "";
+    return cls;
+  }}
+
+  function fetchStats() {{
+    fetch("/api/stats").then(r => r.json()).then(d => {{
+      // CPU cores
+      var cDiv = document.getElementById("s-cores");
+      cDiv.innerHTML = "";
+      d.cores.forEach(function(c, i) {{
+        var cls = bar(c);
+        cDiv.innerHTML += '<div class="core-bar">'
+          + '<div class="core-track"><div class="core-fill ' + cls + '" style="height:' + c + '%"></div></div>'
+          + '<div class="core-lbl">' + c.toFixed(0) + '</div>'
+          + '</div>';
+      }});
+      document.getElementById("s-load").textContent = "load " + d.load[0] + " " + d.load[1] + " " + d.load[2];
+
+      // Memory
+      var mb = document.getElementById("s-mem-bar");
+      mb.style.width = d.mem_pct + "%";
+      mb.className = "stat-bar " + bar(d.mem_pct);
+      document.getElementById("s-mem-lbl").textContent = d.mem_used_gb + " / " + d.mem_total_gb + " GB (" + d.mem_pct + "%)";
+
+      // Disk
+      var db = document.getElementById("s-disk-bar");
+      db.style.width = d.disk_pct + "%";
+      db.className = "stat-bar " + bar(d.disk_pct);
+      document.getElementById("s-disk-lbl").textContent = d.disk_used_gb + " / " + d.disk_total_gb + " GB (" + d.disk_pct + "%)";
+
+      // Network
+      document.getElementById("s-net").textContent = "↑ " + d.net_sent_mb + " MB  ↓ " + d.net_recv_mb + " MB";
+
+      // Processes
+      var tbody = document.getElementById("s-procs-body");
+      tbody.innerHTML = "";
+      d.procs.forEach(function(p) {{
+        var cpu_color = p.cpu > 50 ? "#f44336" : p.cpu > 20 ? "#ff9800" : "#aaa";
+        tbody.innerHTML += "<tr style='border-top:1px solid #1f1f1f'>"
+          + "<td style='padding:3px 6px;color:#555'>" + p.pid + "</td>"
+          + "<td style='padding:3px 6px;color:#ccc'>" + p.name + "</td>"
+          + "<td style='padding:3px 6px;text-align:right;color:" + cpu_color + "'>" + p.cpu + "</td>"
+          + "<td style='padding:3px 6px;text-align:right;color:#888'>" + p.mem + "</td>"
+          + "<td style='padding:3px 6px;text-align:right;color:#555'>" + p.status + "</td>"
+          + "</tr>";
+      }});
+    }}).catch(function() {{}});
+  }}
   </script>
 
   <!-- Kill switches -->
