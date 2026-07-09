@@ -21,7 +21,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flask import Flask, Response, redirect, render_template_string, request, session, url_for
+import psutil
+from flask import Flask, Response, abort, jsonify, redirect, render_template_string, request, session, url_for
+from markupsafe import escape
 from mm import clock
 from mm.config import cfg
 from eod_summary import SessionSummary, load_summary
@@ -35,6 +37,9 @@ app = Flask(__name__)
 # repo, so a deterministic key would turn any captured session cookie into
 # offline brute-force material against the password.
 app.secret_key = secrets.token_hex(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = True  # only sent over HTTPS — nginx terminates TLS
 _date_override: date | None = None
 
 # In-memory login rate limit: max 5 failed attempts per IP per 15 minutes.
@@ -44,13 +49,28 @@ _login_fails: dict[str, list[float]] = {}
 
 
 def _client_ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    # X-Real-IP is set by nginx from $remote_addr (trusted upstream).
+    # Never read X-Forwarded-For — clients can spoof it to bypass rate limiting.
+    return request.headers.get("X-Real-IP", request.remote_addr or "?")
 
 
 def _login_blocked(ip: str) -> bool:
     fails = [t for t in _login_fails.get(ip, []) if time.time() - t < _LOGIN_WINDOW_S]
     _login_fails[ip] = fails
     return len(fails) >= _LOGIN_MAX_FAILS
+
+def _csrf_token() -> str:
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+def _check_csrf() -> None:
+    token = request.form.get("_csrf_token", "")
+    expected = session.get("csrf_token", "")
+    if not expected or not hmac.compare_digest(token, expected):
+        abort(403)
+
 
 # ---------------------------------------------------------------------------
 # Auth + config editor support
@@ -169,6 +189,7 @@ def login() -> Response | str:
         return redirect(url_for("index"))
     error = ""
     if request.method == "POST":
+        _check_csrf()
         ip = _client_ip()
         if _login_blocked(ip):
             error = "Too many attempts. Try again in 15 minutes."
@@ -192,6 +213,7 @@ def login() -> Response | str:
     <h2>DASHBOARD LOGIN</h2>
     {('<div class="msg msg-err">' + error + '</div>') if error else ''}
     <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
       <input type="password" name="password" placeholder="Password" autofocus style="margin-bottom:10px">
       <button type="submit" style="width:100%">Sign in</button>
     </form>
@@ -203,6 +225,23 @@ def login() -> Response | str:
 def logout() -> Response:
     session.clear()
     return redirect(url_for("index"))
+
+
+@app.route("/api/stats")
+@_require_login
+def api_stats() -> Response:
+    vm = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+    return jsonify({
+        "cpu_pct": psutil.cpu_percent(interval=0.1),
+        "mem_used_gb": round(vm.used / 1e9, 2),
+        "mem_total_gb": round(vm.total / 1e9, 2),
+        "mem_pct": vm.percent,
+        "disk_used_gb": round(disk.used / 1e9, 2),
+        "disk_total_gb": round(disk.total / 1e9, 2),
+        "disk_pct": disk.percent,
+        "load_1m": round(psutil.getloadavg()[0], 2),
+    })
 
 
 @app.route("/config", methods=["GET", "POST"])
@@ -228,6 +267,7 @@ def config_editor() -> Response | str:
     msg_type = "ok"
 
     if request.method == "POST":
+        _check_csrf()
         action = request.form.get("action", "")
 
         if action == "toggle_stop_trading":
@@ -257,10 +297,10 @@ def config_editor() -> Response | str:
                 if result.returncode == 0:
                     msg = "moomoo-paper.service restarted."
                 else:
-                    msg = f"Restart failed: {result.stderr.strip()}"
+                    msg = f"Restart failed: {escape(result.stderr.strip())}"
                     msg_type = "err"
             except Exception as e:
-                msg = f"Restart error: {e}"
+                msg = f"Restart error: {escape(str(e))}"
                 msg_type = "err"
 
         elif action == "save_config":
@@ -285,7 +325,7 @@ def config_editor() -> Response | str:
     kills = _kill_switch_state()
 
     def _field(key: str) -> str:
-        val = current.get(key, "")
+        val = escape(current.get(key, ""))
         return (f'<div class="kv-row">'
                 f'<span class="kv-label">{key}</span>'
                 f'<input type="text" name="{key}" value="{val}" form="cfg-form">'
@@ -317,7 +357,7 @@ def config_editor() -> Response | str:
     shorts_btn_lbl = "Disable ORB Shorts (create STOP_SHORTS.txt)" if not kills["STOP_SHORTS"] else "Re-enable ORB Shorts (remove STOP_SHORTS.txt)"
     shorts_active = '<span style="color:#ff9800">ACTIVE — shorts disabled</span>' if kills["STOP_SHORTS"] else '<span style="color:#4caf50">inactive</span>'
 
-    msg_html = f'<div class="msg msg-{msg_type}">{msg}</div>' if msg else ""
+    msg_html = f'<div class="msg msg-{escape(msg_type)}">{escape(msg)}</div>' if msg else ""
 
     return render_template_string(f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Config — moomoo-trader</title>
@@ -330,11 +370,33 @@ def config_editor() -> Response | str:
 
   {msg_html}
 
+  <!-- System stats -->
+  <div class="card" id="stats-card">
+    <h2>SYSTEM</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:8px">
+      <div><div class="kv-label">CPU</div><div id="s-cpu" style="margin-top:4px;color:#ddd">—</div></div>
+      <div><div class="kv-label">MEMORY</div><div id="s-mem" style="margin-top:4px;color:#ddd">—</div></div>
+      <div><div class="kv-label">DISK</div><div id="s-disk" style="margin-top:4px;color:#ddd">—</div></div>
+    </div>
+  </div>
+  <script>
+  function refreshStats() {{
+    fetch("/api/stats").then(r => r.json()).then(d => {{
+      document.getElementById("s-cpu").textContent  = d.cpu_pct.toFixed(1) + "% (load " + d.load_1m + ")";
+      document.getElementById("s-mem").textContent  = d.mem_used_gb + " / " + d.mem_total_gb + " GB (" + d.mem_pct + "%)";
+      document.getElementById("s-disk").textContent = d.disk_used_gb + " / " + d.disk_total_gb + " GB (" + d.disk_pct + "%)";
+    }}).catch(() => {{}});
+  }}
+  refreshStats();
+  setInterval(refreshStats, 5000);
+  </script>
+
   <!-- Kill switches -->
   <div class="card">
     <h2>KILL SWITCHES</h2>
     <div class="switch-row">
       <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
         <input type="hidden" name="action" value="toggle_stop_trading">
         <button type="submit" class="btn {stop_btn_cls}">{stop_btn_lbl}</button>
       </form>
@@ -342,6 +404,7 @@ def config_editor() -> Response | str:
     </div>
     <div class="switch-row">
       <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
         <input type="hidden" name="action" value="toggle_stop_shorts">
         <button type="submit" class="btn {shorts_btn_cls}">{shorts_btn_lbl}</button>
       </form>
@@ -353,6 +416,7 @@ def config_editor() -> Response | str:
   <div class="card">
     <h2>RUNNER CONTROL</h2>
     <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
       <input type="hidden" name="action" value="restart_runner">
       <button type="submit" class="btn btn-warn">Restart moomoo-paper.service</button>
     </form>
@@ -361,6 +425,7 @@ def config_editor() -> Response | str:
 
   <!-- .env editor -->
   <form id="cfg-form" method="POST">
+    <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
     <input type="hidden" name="action" value="save_config">
 
     <div class="card">
@@ -966,6 +1031,8 @@ def index() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="moomoo-trader web dashboard")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Bind address (default 127.0.0.1 — use nginx for external access)")
     parser.add_argument("--date", help="Session date YYYY-MM-DD (default: today)")
     args = parser.parse_args()
 
@@ -973,9 +1040,9 @@ def main() -> None:
     if args.date:
         _date_override = date.fromisoformat(args.date)
 
-    print(f"Dashboard running at http://0.0.0.0:{args.port}")
+    print(f"Dashboard running at http://{args.host}:{args.port}")
     print(f"Session date: {_session_date()}")
-    app.run(host="0.0.0.0", port=args.port, debug=False)
+    app.run(host=args.host, port=args.port, debug=False)
 
 
 if __name__ == "__main__":
