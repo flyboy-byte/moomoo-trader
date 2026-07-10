@@ -48,9 +48,10 @@ Package layout:
   mm/gap_fade.py        — Gap Fade backtest engine (research only — not in live STRATEGIES)
   mm/events.py         — PaperEventLog, PaperPosition, position/ORB file I/O (_load/_save/_clear_position, _load/_save_orb_traded)
   mm/execution.py      — order placement (_place_buy/sell/short/cover), fill confirmation, _reconcile_positions, trade_context
-  mm/evals.py          — per-strategy eval functions (_eval_bb_kdj, _eval_vwap, _eval_vwap_pb, _eval_orb), _entry_attempted
+  mm/evals.py          — per-strategy eval functions (_eval_bb_kdj, _eval_bb_kdj_loose, _eval_vwap, _eval_vwap_pb, _eval_orb), _entry_attempted
   mm/risk.py           — trading_allowed(), calc_qty(), DailyTracker, _qty(), _position_cap(), _slot_dollars
   mm/paper.py          — loop + _latest_closed_candles + _eval_symbol_all_strategies + run_multi + back-compat re-exports
+  mm/replay.py         — replay(), FakeBroker, symbol_from_csv() — offline candle replay through the real runner + fake broker
   mm/orb_strategy.py   — ORB backtest engine, _build_opening_ranges() (supports per-symbol orb_minutes)
   mm/vwap_pullback.py  — VWAP Pullback (flush-and-reclaim) backtest engine
   mm/vwap_strategy.py  — VWAP crossover strategy (deprecated, PF≈1.0)
@@ -85,6 +86,14 @@ Scripts (all run from project root with venv active):
   python scripts/replay_vs_live.py [--date YYYY-MM-DD]                         # diff live session decisions vs replay (verify.sh step 5)
   python scripts/weekly_report.py [--dry-run]                                  # Discord gate-progress + premarket report
   python scripts/analyze_orb_hours.py [event_dir]                              # ORB entry-hour edge analysis (replay or live dirs)
+  python scripts/analyze_trades.py [--all] [--start YYYY-MM-DD]                # per-strategy P&L, win%, PF from JSONL logs
+  python scripts/analyze_portfolio.py [--start YYYY-MM-DD]                     # cross-strategy exposure and daily-loss stacking
+  python scripts/backtest_orb.py [csvs...] [--latest] [--all] [--sweep]
+  python scripts/backtest_gap_fade.py [csvs...] [--latest] [--all]             # Gap Fade backtest (research only)
+  python scripts/flatten_simulate.py                                            # flatten Moomoo simulate account to zero positions
+  python scripts/fetch_vix_morning.py                                           # VPS cron: fetch VIX daily data each morning
+  python scripts/web_dashboard.py [--host HOST] [--port PORT]                  # Flask dashboard (VPS :8080, behind nginx)
+  python scripts/eod_summary.py [--date YYYY-MM-DD] [--dry-run]               # end-of-day summary post to Discord
   python scripts/dashboard.py                                                  # live TUI dashboard
   python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
   python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
@@ -109,14 +118,18 @@ Strategy (BB + KDJ mean reversion, 5-min candles) — the core spec, parameters 
 - Exit stop: close < entry_price - ATR_STOP_MULT * ATR(14)
 - KDJ death cross exit is DISABLED by default (EXIT_ON_KDJ_DEATH=false in .env)
 - All signals use closed candles only
+- bb_kdj_loose: research lane variant — same entry/exit but no bonus gate (MIN_SIGNAL_SCORE ignored)
+  and no ADX/ranging filter. Runs independently as strategy='bb_kdj_loose' so P&L is separable.
 - ORB and VWAP Pullback are also live — see docs/ARCHITECTURE.md for their specs, not duplicated here.
 
 Current priorities — this is a snapshot, not a sequence. Use judgment about what's actually most
 useful right now; deviate freely when something better surfaces (e.g. a dashboard bug, an unblocked
 strategy, a doc cleanup). Don't treat this list as a gate against doing other useful work.
-- Accumulate live data across all four live strategies (bb_kdj, orb incl. shorts as of 2026-06-17,
-  vwap_pb) — most "what does the data say" questions need more samples before they're answerable.
+- Five live strategies: bb_kdj, bb_kdj_loose (live 2026-07-04, research lane), orb (SPY shorts only
+  as of 2026-07-09 — QQQ+IWM shorts disabled after 0% win rate on 36 trades), vwap_pb.
+- Accumulate live data — most "what does the data say" questions need more samples.
   See docs/evaluation_criteria.md for the actual pre-registered sample-size gates per strategy.
+- Next steps for the project are in docs/expand_plan.md — pick one and go.
 - Gap Fade (mm/gap_fade.py) is research-only, not in live STRATEGIES. Premarket fill% filter
   validated empirically (9-month sample, see strategy_graveyard.md) and wired into
   run_gap_fade() as of 2026-06-18 — but shadow-mode only (filter_active=GAP_PREMARKET_FILTER_ENABLED,

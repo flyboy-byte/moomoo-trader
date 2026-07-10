@@ -1,14 +1,14 @@
 # moomoo-trader: Full Project Map
 
 **AI Context Document** — paste this into any AI session to get full project context without re-deriving.
-Last updated: 2026-06-18.
+Last updated: 2026-07-09.
 
 ---
 
 ## What This Project Is
 
 A Python paper-trading research platform built on the **Moomoo / Futu OpenD API**. It runs
-three simultaneous intraday strategies on US ETFs (SPY, QQQ, IWM) in Moomoo's SIMULATE
+five simultaneous intraday strategies on US ETFs (SPY, QQQ, IWM) in Moomoo's SIMULATE
 environment. The goal is validated signal research + a production-quality execution engine
 that can be promoted to live trading when ready.
 
@@ -25,7 +25,7 @@ moomoo-trader/
 │
 ├── mm/                          # Core library (importable package)
 │   ├── config.py                # .env loading via python-dotenv; cfg singleton (117 lines)
-│   ├── logger.py                # TimedRotatingFileHandler, midnight rotation, 30-day retention
+│   ├── logger.py                # TimedRotatingFileHandler, midnight rotation, kept forever (backupCount=0)
 │   ├── connection.py            # quote_context() context manager → OpenD at 127.0.0.1:11111
 │   ├── health.py                # run_health_check() — socket ping + quote fetch
 │   ├── data.py                  # fetch_candles(), fetch_and_save() (99 lines)
@@ -45,7 +45,8 @@ moomoo-trader/
 │   ├── execution.py             # _place_buy/sell/short/cover, _confirm_fill,
 │   │                            #   _execute_entry/_execute_exit, _reconcile_positions,
 │   │                            #   trade_context(), _get_simulate_acc_id()
-│   ├── evals.py                 # _eval_bb_kdj(), _eval_vwap(), _eval_vwap_pb(), _eval_orb()
+│   ├── evals.py                 # _eval_bb_kdj(), _eval_bb_kdj_loose(), _eval_vwap(),
+│   │                            #   _eval_vwap_pb(), _eval_orb()
 │   │                            #   _entry_attempted (dedup dict), _kdj_cross_age()
 │   ├── risk.py                  # trading_allowed(), calc_qty(), calc_qty_fractional(),
 │   │                            #   per_slot_dollars(), DailyTracker, _qty(), _position_cap(),
@@ -58,6 +59,7 @@ moomoo-trader/
 │   ├── vwap_strategy.py         # VWAP crossover strategy — DEPRECATED, PF≈1.0 (174 lines)
 │   ├── vwap_signals.py          # VWAP signal scoring (used by vwap crossover only)
 │   ├── ema_momentum.py          # EMA5/EMA20 momentum breakout — RESEARCH ONLY, not deployed
+│   ├── replay.py                # replay(), FakeBroker, symbol_from_csv() — offline replay engine
 │   └── notifications.py         # Discord webhook; no-ops if DISCORD_WEBHOOK_URL not set
 │
 ├── scripts/                     # Runnable entry points (all run from project root)
@@ -84,10 +86,13 @@ moomoo-trader/
 │   ├── simulate_paper.py        # Replay backtest against paper runner logic
 │   ├── backtest_orb.py          # ORB backtest runner
 │   ├── backtest_vwap_pb.py      # VWAP Pullback backtest runner
-│   ├── backtest_vwap.py         # VWAP crossover backtest (deprecated)
+│   ├── backtest_gap_fade.py     # Gap Fade backtest (research only, companion to mm/gap_fade.py)
 │   ├── backtest_ema_momentum.py # EMA momentum backtest (research only)
-│   ├── backtest_vix_filter.py   # VIX regime filter backtest (graveyard'd — do not deploy)
-│   └── sweep_vwap.py            # VWAP parameter sweep
+│   ├── analyze_trades.py        # per-strategy P&L, win%, PF from JSONL logs
+│   ├── analyze_portfolio.py     # cross-strategy exposure, daily-loss stacking analysis
+│   ├── fetch_vix_morning.py     # VPS cron: fetch VIX daily data each morning
+│   ├── flatten_simulate.py      # flatten Moomoo simulate account to zero positions
+│   └── eod_summary.py           # TradeRecord/SessionSummary, load_summary(), Discord post
 │
 ├── tests/
 │   ├── test_indicators.py       # 47 tests: BB, ATR, KDJ, RSI, ADX, VWAP, EMA, bb_width_pct
@@ -97,15 +102,23 @@ moomoo-trader/
 │   │                            #   per_slot_dollars, trading_allowed
 │   ├── test_paper.py            # 40 tests: evals, execution, events, reconcile
 │   ├── test_orb_shorts.py       # 19 tests: ORB long/short entry, exit, PnL, restart recovery
+│   ├── test_bb_kdj_loose.py     # 12 tests: no bonus gate, no ADX filter, unlimited trades,
+│   │                            #   entry dedup, stop/target exit
+│   ├── test_execution.py        # 7 tests: _confirm_fill (partial/timeout), _reconcile_positions
+│   ├── test_events.py           # 9 tests: PaperEventLog, PaperPosition file I/O
 │   ├── test_clock.py            # 2 tests: today() ET-date regression (added 2026-06-18)
+│   ├── test_clock_seam.py       # 2 tests: static guard against raw datetime.now() usage
+│   ├── test_config_staleness.py # 6 tests: cfg reload correctness across module reloads
+│   ├── test_metric_consistency.py # 4 tests: backtest metric reimplementation drift guard
+│   ├── test_web_dashboard_config.py # 4 tests: dashboard .env config editor safety
 │   ├── test_data.py             # 4 tests: combined-archive merge/dedup
 │   └── test_replay.py           # 7 tests: replay harness invariants
-│                                # Total: 182 tests
+│                                # Total: 226 tests
 │
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
 │   ├── ARCHITECTURE.md          # 30-line data flow diagram + config reference
-│   ├── HARDENING_PLAN.md        # NEW: Strategy for ATR-sizing and reliability
+│   ├── expand_plan.md           # Strategic roadmap — 5 directions for what to build next
 │   └── strategy_graveyard.md   # All tested/abandoned/parked features with research data
 │
 ├── logs/                        # Runtime output (gitignored)
@@ -116,7 +129,7 @@ moomoo-trader/
 │   ├── US_SPY_K_5M_combined.csv        # 86,100 candles, 2022-01-03 to 2026-06-03
 │   ├── US_QQQ_K_5M_combined.csv        # same date range
 │   ├── US_IWM_K_5M_combined.csv        # same date range
-│   └── paper.log / risk.log / ...      # Rotating text logs (30-day retention)
+│   └── paper.log / risk.log / ...      # Rotating text logs (kept forever, backupCount=0)
 │
 ├── start.sh                     # Start OpenD + paper runner (systemd user service)
 ├── stop.sh                      # Stop paper runner
@@ -131,7 +144,7 @@ moomoo-trader/
 
 ---
 
-## Deployed Strategies (VPS, as of 2026-06-18)
+## Deployed Strategies (VPS, as of 2026-07-09)
 
 ### 1. BB+KDJ Mean Reversion (`bb_kdj`)
 **Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM.
@@ -182,7 +195,24 @@ entries affected) in `docs/strategy_graveyard.md`'s "KDJ Day-Boundary Signal Lea
 
 ---
 
-### 2. Opening Range Breakout (`orb`)
+### 2. BB+KDJ Loose (`bb_kdj_loose`) — Research Lane
+**Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM. **Live since:** 2026-07-04.
+
+Same entry/exit mechanics as `bb_kdj` with all gates relaxed:
+- **No bonus score gate** — any BB touch + KDJ cross fires (MIN_SIGNAL_SCORE ignored)
+- **No ADX/ranging filter** — fires in trending markets the standard strategy skips
+- Same exit logic: BB middle target, ATR stop, optional KDJ death cross (disabled by default)
+- Runs independently as `strategy='bb_kdj_loose'` — P&L is fully separable from bb_kdj
+
+Purpose: quantify how much edge the bonus gate and ADX filter actually add. If loose underperforms
+standard by a meaningful margin after ~30 trades, the gates are earning their keep.
+
+**Backtest:** Not separately backtested (parameters match the researched bb_kdj config minus gates).
+**Live data:** accumulating — see evaluation_criteria.md for gate thresholds.
+
+---
+
+### 3. Opening Range Breakout (`orb`)
 **Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM.
 
 **Opening range:**
@@ -192,6 +222,7 @@ entries affected) in `docs/strategy_graveyard.md`'s "KDJ Day-Boundary Signal Lea
 
 **Entry (Long):** `close > OR high` + volume > 1.2× 20-bar MA + after OR window closes
 **Entry (Short):** `close < OR low` + volume > 1.2× MA + `ORB_SHORTS_ENABLED=true`
+- SPY shorts only: `ORB_SHORT_SYMBOLS=US.SPY` (QQQ+IWM disabled 2026-07-09 — 0% win rate on 36 trades)
 - Short kill switch: create `STOP_SHORTS.txt` in project root (no restart needed)
 
 **Exit:**
@@ -310,7 +341,7 @@ Open positions survive process restarts via JSON files:
 ./scripts/verify.sh --date 2026-06-04  # past session
 ./scripts/verify.sh --no-sync          # skip VPS sync
 ```
-Runs: pytest (182 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
+Runs: pytest (226 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
 
 ### `scripts/diagnose_logs.py` — Session health
 ```bash
@@ -364,7 +395,7 @@ moomoo-dashboard.service  # web dashboard on :8080 — Restart=always
 ```env
 TRD_ENV=SIMULATE
 LIVE_TRADING_ENABLED=false
-STRATEGIES=bb_kdj,orb,vwap_pb
+STRATEGIES=bb_kdj,bb_kdj_loose,orb,vwap_pb
 SYMBOLS=US.IWM,US.SPY,US.QQQ
 KDJ_WINDOW_BARS=3
 MIN_SIGNAL_SCORE=2
@@ -373,11 +404,12 @@ ORB_MINUTES=15
 ORB_MINUTES_OVERRIDES=US.IWM:30
 ORB_TARGET_MULT=1.5
 ORB_SHORTS_ENABLED=true
+ORB_SHORT_SYMBOLS=US.SPY       # QQQ+IWM shorts disabled 2026-07-09 (0% win rate, 36 trades)
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ
 VWAP_PB_MAX_CROSSES=1
 TOTAL_CAPITAL=100
 FRACTIONAL_SHARES=true
-MAX_TRADES_PER_DAY=5
+MAX_TRADES_PER_DAY=0           # unlimited (bb_kdj_loose needs room; 5 was too restrictive)
 MAX_DAILY_LOSS=20
 ```
 
@@ -412,10 +444,10 @@ don't trust this table as exact, just directionally current. Check `wc -l` if it
 
 ---
 
-## Test Suite (182 tests)
+## Test Suite (226 tests)
 
 ```bash
-python -m pytest tests/ -q              # all 182
+python -m pytest tests/ -q              # all 226
 python -m pytest tests/test_risk.py    # risk + sizing (43)
 python -m pytest tests/test_orb_shorts.py  # ORB shorts (19)
 python -m pytest tests/test_paper.py   # evals, execution, events, reconcile (40)
@@ -426,8 +458,12 @@ Coverage by area:
 - **Strategy/Signals** (20): BB+KDJ scoring, bonus signals, walk-forward, KDJ day-boundary regression
 - **Risk** (43): calc_qty, DailyTracker, fractional sizing, per_slot_dollars
 - **ORB Shorts** (19): long/short entry, stop/target direction, PnL sign, restart recovery
-- **Paper/Evals/Execution** (40): eval functions, fill confirmation, reconcile
-- **Clock** (2): today() ET-date regression
+- **BB+KDJ Loose** (12): no bonus gate, no ADX filter, unlimited trades, dedup, exits
+- **Paper/Evals/Execution** (47): eval functions, fill confirmation, reconcile, events, loose eval
+- **Clock/Seam** (4): today() ET-date regression, static clock-seam violation guard
+- **Config Staleness** (6): cfg reload correctness across module reloads
+- **Metric Consistency** (4): backtest metric reimplementation drift guard
+- **Dashboard Config** (4): web dashboard .env editor safety
 - **Data** (4): combined-archive merge/dedup
 - **Replay** (7): replay harness invariants
 
@@ -436,16 +472,17 @@ Coverage by area:
 ## What's Parked / Backlog
 
 See `docs/strategy_graveyard.md` for full details with research data and graveyard'd features.
+See `docs/expand_plan.md` for the forward roadmap — 5 directions for what to build next.
 
-| Item | Status | Gate |
+| Item | Status | Note |
 |------|--------|------|
-| ATR-normalized sizing (`risk_dollars / (atr × mult)`) | On hold | 2+ weeks live slippage data |
+| ATR-normalized sizing (`risk_dollars / (atr × mult)`) | On hold | Needs more live slippage data |
 | IWM-weighted sizing | On hold | Superseded by ATR sizing — do that first |
 | Session filter (BLOCKED_HOURS) | Swept, no universal benefit | Data is definitive |
 | VIX daily regime filter | Graveyard'd | IWM OOS 0.800 vs 1.033 baseline — destroyed edge |
 | Push architecture (WebSocket exits) | Deferred | slippage_bps shows 60s poll costs real edge |
-| ORB short live verification | Kill switch removed 2026-06-17, shorts live, awaiting first fill | See strategy_graveyard.md |
-| paper.py refactor (split 1,200-line file) | **COMPLETE** 2026-06-16 | 6 commits, cert-diffed, 173/173 tests |
+| ORB QQQ+IWM shorts | Disabled 2026-07-09 | 0% win rate on 36 live trades; SPY shorts kept |
+| paper.py refactor (split 1,200-line file) | **COMPLETE** 2026-06-16 | 6 commits, cert-diffed |
 
 ---
 

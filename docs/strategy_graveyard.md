@@ -37,12 +37,13 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
-## Built & Deployed (live on VPS as of 2026-06-04)
+## Built & Deployed (live on VPS as of 2026-07-09)
 
 | Feature | Code | Notes |
 |---------|------|-------|
 | BB+KDJ mean reversion | `mm/strategy.py`, `mm/evals.py` | MIN_SCORE=2. PF=1.843 is the w=0 baseline (60 trades); live deployed config (SPY w=0, QQQ/IWM w=3) is PF=1.195 combined, 434 trades — see "KDJ Day-Boundary Signal Leak" below for the corrected w=3 numbers. |
-| ORB long + short | `mm/orb_strategy.py`, `mm/evals.py` | 30-min IWM, 15-min SPY/QQQ. Shorts 2026-06-04. |
+| BB+KDJ Loose | `mm/evals.py` (`_eval_bb_kdj_loose`) | Research lane. No bonus gate, no ADX filter. Live 2026-07-04. Tests: `tests/test_bb_kdj_loose.py`. |
+| ORB long + short (SPY only) | `mm/orb_strategy.py`, `mm/evals.py` | 30-min IWM, 15-min SPY/QQQ. Shorts SPY-only as of 2026-07-09 (see ORB Short config entry below). |
 | VWAP Pullback | `mm/vwap_pullback.py`, `mm/evals.py` | SPY/QQQ only. PF=1.655 SPY, 1.072 QQQ OOS. |
 | Fractional sizing | `mm/risk.py` (_qty, _slot_dollars) | TOTAL_CAPITAL / (symbols × strategies) per slot |
 | JSONL event logging | `mm/events.py` (PaperEventLog) | bar_eval, signal_skip, position_open/close, slippage_bps |
@@ -567,3 +568,5 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 | Timeframe | K_5M | 5M/15M/60M | K_15M produces MORE stops, not fewer |
 | Regime filter | ADX < 25 | 7 alternatives | Confirmed best vs BB width, volume variants |
 | ORB window IWM | 30-min | 15/30-min | 15-min PF=1.017 → 30-min PF=1.217 |
+| ORB_SHORT_SYMBOLS | US.SPY | all vs per-symbol | Live data 2026-06-17→2026-07-09: QQQ shorts 0% win/24 trades (−$80), IWM shorts 0% win/12 trades (−$40), SPY shorts 100% win/20 trades (+$36). QQQ+IWM disabled. |
+| mm/vwap_strategy.py + mm/vwap_signals.py | Candidate for removal | Still imported by mm/paper.py and mm/evals.py for the deprecated 'vwap' strategy path. No live STRATEGIES entry uses them. Safe to delete once the import sites are cleaned up. |

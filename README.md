@@ -1,7 +1,7 @@
 # moomoo-trader
 
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
-![Tests](https://img.shields.io/badge/tests-214%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-226%20passing-brightgreen)
 ![Trading](https://img.shields.io/badge/trading-paper%20only-orange)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -323,6 +323,6 @@ sync_logs.sh               rsync VPS logs → local logs/
 ## Tests
 
 ```bash
-python -m pytest tests/ -q    # 214 tests: risk, indicators, signals, strategy, orb,
+python -m pytest tests/ -q    # 226 tests: risk, indicators, signals, strategy, orb,
                                # clock, data, paper/evals/execution/replay
 ```
