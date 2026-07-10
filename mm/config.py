@@ -125,6 +125,8 @@ class Config:
     orb_max_range_pct: float = float(_get("ORB_MAX_RANGE_PCT", "0.008"))
     # Short entries for ORB. Disable at runtime by creating STOP_SHORTS.txt in project root.
     orb_shorts_enabled: bool = _bool("ORB_SHORTS_ENABLED", True)
+    # Per-symbol short allow-list. Empty = all symbols. e.g. "US.SPY,US.QQQ"
+    orb_short_symbols: list = [s.strip() for s in _get("ORB_SHORT_SYMBOLS", "").split(",") if s.strip()]
 
     # Gap Fade pre-market filter knobs (GAP_PREMARKET_FILTER_ENABLED, GAP_PREMARKET_FILL_PCT_MIN)
     # live as self-contained module constants in mm/gap_fade.py, NOT here — that file doesn't

@@ -642,6 +642,7 @@ def _eval_orb(
         # --- Short entry ---
         elif (after_cutoff and below_low and vol_ok
               and cfg.orb_shorts_enabled
+              and (not cfg.orb_short_symbols or symbol in cfg.orb_short_symbols)
               and not (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists()):
             if _entry_attempted.get((symbol, "orb")) == str(candle_ts):
                 pass
@@ -680,6 +681,8 @@ def _eval_orb(
                                      symbol, fill_price, stop, target, fill_qty)
         elif below_low and after_cutoff and vol_ok and not cfg.orb_shorts_enabled:
             elog.signal_skip("orb_shorts_disabled", score=0, bonus=0, min_score=0, strategy="orb")
+        elif below_low and after_cutoff and vol_ok and cfg.orb_short_symbols and symbol not in cfg.orb_short_symbols:
+            elog.signal_skip("orb_shorts_symbol_excluded", score=0, bonus=0, min_score=0, strategy="orb")
         elif below_low and after_cutoff and vol_ok and (Path(__file__).parent.parent / "STOP_SHORTS.txt").exists():
             elog.signal_skip("orb_shorts_kill_switch", score=0, bonus=0, min_score=0, strategy="orb")
         elif below_low and not after_cutoff:
