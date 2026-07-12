@@ -41,12 +41,13 @@ moomoo-trader/
 │   ├── clock.py                 # Time seam: now(), now_et(), today(), sleep(),
 │   │                            #   is_market_open(), seconds_until_open() — single patch point
 │   ├── events.py                # PaperEventLog, PaperPosition, position/ORB file I/O
-│   │                            #   _load/_save/_clear_position, _load/_save_orb_traded
+│   │                            #   _load/_save/_clear_position, _load/_save_orb_traded,
+│   │                            #   _load/_save_gap_fade_traded
 │   ├── execution.py             # _place_buy/sell/short/cover, _confirm_fill,
 │   │                            #   _execute_entry/_execute_exit, _reconcile_positions,
 │   │                            #   trade_context(), _get_simulate_acc_id()
 │   ├── evals.py                 # _eval_bb_kdj(), _eval_bb_kdj_loose(), _eval_vwap(),
-│   │                            #   _eval_vwap_pb(), _eval_orb()
+│   │                            #   _eval_vwap_pb(), _eval_orb(), _eval_gap_fade()
 │   │                            #   _entry_attempted (dedup dict), _kdj_cross_age()
 │   ├── risk.py                  # trading_allowed(), calc_qty(), calc_qty_fractional(),
 │   │                            #   per_slot_dollars(), DailyTracker, _qty(), _position_cap(),
@@ -113,7 +114,7 @@ moomoo-trader/
 │   ├── test_web_dashboard_config.py # 4 tests: dashboard .env config editor safety
 │   ├── test_data.py             # 4 tests: combined-archive merge/dedup
 │   └── test_replay.py           # 7 tests: replay harness invariants
-│                                # Total: 226 tests
+│                                # Total: 223 passing tests
 │
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
@@ -220,13 +221,14 @@ standard by a meaningful margin after ~30 trades, the gates are earning their ke
 - IWM: first 30 minutes (9:30–10:00 ET) — `ORB_MINUTES_OVERRIDES=US.IWM:30`
 - Range must be 0.1%–0.8% of close price (filters tiny flat opens and news spikes)
 
-**Entry (Long):** `close > OR high` + volume > 1.2× 20-bar MA + after OR window closes
-**Entry (Short):** `close < OR low` + volume > 1.2× MA + `ORB_SHORTS_ENABLED=true`
+**Entry (Long):** `close > OR high` + volume > 1.5× 20-bar MA + after OR window closes (`ORB_VOL_MULT=1.5`)
+**Entry (Short):** `close < OR low` + volume > 1.5× MA + `ORB_SHORTS_ENABLED=true`
 - SPY shorts only: `ORB_SHORT_SYMBOLS=US.SPY` (QQQ+IWM disabled 2026-07-09 — 0% win rate on 36 trades)
 - Short kill switch: create `STOP_SHORTS.txt` in project root (no restart needed)
 
 **Exit:**
-- Target: entry + 1.5 × OR range (`ORB_TARGET_MULT=1.5`)
+- Target: per-symbol mult × OR range. Global `ORB_TARGET_MULT=1.5`; per-symbol overrides via `ORB_TARGET_MULT_OVERRIDES`.
+  - OOS (2024+) optimal: QQQ=2.0× (+4.3% PF), IWM=1.0× (+6% PF), SPY=1.5× (marginal)
 - Stop (long): OR low. Stop (short): OR high.
 - Time stop: 15:45 ET
 
@@ -239,7 +241,7 @@ standard by a meaningful margin after ~30 trades, the gates are earning their ke
 ---
 
 ### 3. VWAP Pullback (`vwap_pb`)
-**Timeframe:** 5-min candles. **Symbols:** SPY, QQQ only (IWM excluded — negative OOS).
+**Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM (IWM added 2026-07-12: PF=1.332, 265 trades OOS).
 
 **Entry (flush-and-reclaim):** All four on same closed bar after 9:45 ET:
 - `low < VWAP` (wick dipped below — the "flush")
@@ -254,7 +256,31 @@ standard by a meaningful margin after ~30 trades, the gates are earning their ke
 
 **Backtest OOS (train 2022–23, test 2024–25):**
 - SPY PF=1.655, QQQ PF=1.072
-- IWM: negative OOS — excluded via `VWAP_PB_SYMBOLS=US.SPY,US.QQQ`
+- IWM PF=1.332 (265 trades OOS — added 2026-07-12)
+
+---
+
+### 4. Gap Fade (`gap_fade`) — Live 2026-07-12
+**Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM. **Fires once per day at 9:35 ET bar.**
+
+**Entry:** Previous close → first bar computes `gap_pct = (today_open - prev_close) / prev_close`
+- Gap must be ≥ 0.5% and ≤ 3.0% (`GAP_MIN_PCT`, `GAP_MAX_PCT` in `mm/gap_fade.py`)
+- Gap up + rejection (close < today_open) → short
+- Gap down + rejection (close > today_open) → long
+- `GAP_SHORTS_ENABLED=true` required for short entries
+
+**Exit:**
+- TARGET: 50% gap fill (default `GAP_TARGET_PCT=0.5`)
+- STOP: entry + `GAP_STOP_PCT` × gap size
+- TIME_STOP: 11:00 ET
+
+**One trade per day** — state persisted in `logs/paper_*_gap_fade_traded.json`.
+
+**Premarket fill% filter** wired in shadow mode (`GAP_PREMARKET_FILTER_ENABLED=false` default —
+logs `would_filter_skip` without blocking). Validated on 9-month sample; see `strategy_graveyard.md`.
+
+**Config knobs**: self-contained module constants in `mm/gap_fade.py` (not `cfg.*`) — that file
+deliberately does not import `cfg`. Set via `.env` vars with same names.
 
 ---
 
@@ -341,7 +367,7 @@ Open positions survive process restarts via JSON files:
 ./scripts/verify.sh --date 2026-06-04  # past session
 ./scripts/verify.sh --no-sync          # skip VPS sync
 ```
-Runs: pytest (226 tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
+Runs: pytest (223 passing tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
 
 ### `scripts/diagnose_logs.py` — Session health
 ```bash
@@ -395,17 +421,20 @@ moomoo-dashboard.service  # web dashboard on :8080 — Restart=always
 ```env
 TRD_ENV=SIMULATE
 LIVE_TRADING_ENABLED=false
-STRATEGIES=bb_kdj,bb_kdj_loose,orb,vwap_pb
+STRATEGIES=bb_kdj,bb_kdj_loose,orb,vwap_pb,gap_fade
 SYMBOLS=US.IWM,US.SPY,US.QQQ
 KDJ_WINDOW_BARS=3
+KDJ_WINDOW_OVERRIDES=US.SPY:0
 MIN_SIGNAL_SCORE=2
 ATR_STOP_MULT=1.0
 ORB_MINUTES=15
 ORB_MINUTES_OVERRIDES=US.IWM:30
 ORB_TARGET_MULT=1.5
+ORB_TARGET_MULT_OVERRIDES=US.QQQ:2.0,US.IWM:1.0
+ORB_VOL_MULT=1.5
 ORB_SHORTS_ENABLED=true
 ORB_SHORT_SYMBOLS=US.SPY       # QQQ+IWM shorts disabled 2026-07-09 (0% win rate, 36 trades)
-VWAP_PB_SYMBOLS=US.SPY,US.QQQ
+VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
 VWAP_PB_MAX_CROSSES=1
 TOTAL_CAPITAL=100
 FRACTIONAL_SHARES=true
@@ -444,10 +473,10 @@ don't trust this table as exact, just directionally current. Check `wc -l` if it
 
 ---
 
-## Test Suite (226 tests)
+## Test Suite (223 passing tests)
 
 ```bash
-python -m pytest tests/ -q              # all 226
+python -m pytest tests/ -q              # 223 passing (3 pre-existing test_data.py failures)
 python -m pytest tests/test_risk.py    # risk + sizing (43)
 python -m pytest tests/test_orb_shorts.py  # ORB shorts (19)
 python -m pytest tests/test_paper.py   # evals, execution, events, reconcile (40)

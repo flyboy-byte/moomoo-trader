@@ -524,6 +524,8 @@ def _eval_orb(
     is_time_stop = bar_clock >= dtime(15, 45)
 
     orb_mins = cfg.orb_minutes_overrides.get(symbol, cfg.orb_minutes)
+    orb_vol_mult = cfg.orb_vol_mult_overrides.get(symbol, cfg.orb_vol_mult)
+    orb_target_mult = cfg.orb_target_mult_overrides.get(symbol, cfg.orb_target_mult)
     ranges = _build_opening_ranges(df, orb_minutes=orb_mins)
     or_info = ranges.get(bar_date)
     or_valid = or_info is not None and or_info["valid"]
@@ -587,7 +589,7 @@ def _eval_orb(
                  dtime(10, (30 + orb_mins) % 60)
         vol = float(last.get("volume", 0))
         vol_ma = float(last.get("volume_ma", 1))
-        vol_ok = vol > cfg.orb_vol_mult * vol_ma
+        vol_ok = vol > orb_vol_mult * vol_ma
         after_cutoff = bar_clock >= cutoff
         above_high = close > or_high
         below_low = close < or_low
@@ -620,7 +622,7 @@ def _eval_orb(
                         elog.risk_block("price_exceeds_max_position", strategy="orb",
                                         price=close, max_dollars=cap)
                     else:
-                        target = close + cfg.orb_target_mult * or_range
+                        target = close + orb_target_mult * or_range
                         entry_limit = round(close * 1.001, 2)
                         filled = _execute_entry(tctx, acc_id, symbol, qty, entry_limit,
                                                 "orb", elog)
@@ -661,7 +663,7 @@ def _eval_orb(
                         elog.risk_block("price_exceeds_max_position", strategy="orb",
                                         price=close, max_dollars=cap)
                     else:
-                        target = close - cfg.orb_target_mult * or_range
+                        target = close - orb_target_mult * or_range
                         entry_limit = round(close * 0.999, 2)
                         filled = _execute_entry(tctx, acc_id, symbol, qty, entry_limit,
                                                 "orb", elog, direction="short")

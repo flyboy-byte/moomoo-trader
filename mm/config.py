@@ -120,7 +120,19 @@ class Config:
     }
     # orb_target_mult: target = mult × OR range height. 1.5 optimal per sweep (PF=1.215).
     orb_target_mult: float = float(_get("ORB_TARGET_MULT", "1.5"))
+    # Per-symbol target mult overrides. OOS sweep (2024+): QQQ 2.0x (+4.3% PF), IWM 1.0x (+6%).
+    orb_target_mult_overrides: dict[str, float] = {
+        s.split(":")[0].strip(): float(s.split(":")[1].strip())
+        for s in _get("ORB_TARGET_MULT_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
     orb_vol_mult: float = float(_get("ORB_VOL_MULT", "1.2"))
+    # Per-symbol vol mult overrides. OOS sweep (2024+): global 1.5 optimal; SPY could use 2.0.
+    orb_vol_mult_overrides: dict[str, float] = {
+        s.split(":")[0].strip(): float(s.split(":")[1].strip())
+        for s in _get("ORB_VOL_MULT_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
     orb_min_range_pct: float = float(_get("ORB_MIN_RANGE_PCT", "0.001"))
     orb_max_range_pct: float = float(_get("ORB_MAX_RANGE_PCT", "0.008"))
     # Short entries for ORB. Disable at runtime by creating STOP_SHORTS.txt in project root.
@@ -210,5 +222,13 @@ def validate_config() -> list[str]:
         raw = raw.strip()
         if raw and ":" not in raw:
             errors.append(f"KDJ_WINDOW_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:BARS'")
+    for raw in _get("ORB_TARGET_MULT_OVERRIDES", "").split(","):
+        raw = raw.strip()
+        if raw and ":" not in raw:
+            errors.append(f"ORB_TARGET_MULT_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:MULT'")
+    for raw in _get("ORB_VOL_MULT_OVERRIDES", "").split(","):
+        raw = raw.strip()
+        if raw and ":" not in raw:
+            errors.append(f"ORB_VOL_MULT_OVERRIDES entry {raw!r} missing colon — expected 'SYMBOL:MULT'")
 
     return errors
