@@ -564,6 +564,7 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 | KDJ_WINDOW_BARS | 3 | 0–5 | ~6.7-7.7× signals on IWM/QQQ vs w=0; SPY excluded or kept at 0 (corrected 2026-06-18 after a day-boundary leak bug fix — see "KDJ Day-Boundary Signal Leak" above; was documented as "10×" on the buggy signal set) |
 | EXIT_ON_KDJ_DEATH | false | — | Re-enabling flips SPY PnL from +$2.34 → −$0.83 |
 | ORB_TARGET_MULT | 1.5 | 1.0–2.0 | Best combined PF |
+| ORB_VOL_MULT | 1.5 | 0.0–2.0 | OOS (2024+): QQQ PF 1.162→1.309 (+13%), SPY 1.122→1.156. IWM unaffected (PF flat 1.216→1.210 — high-vol filtering hurts IWM in recent data; skip per-symbol override for now). Deployed 2026-07-12. |
 | VWAP_PB_MAX_CROSSES | 1 | 0–3 | Critical no-chop filter for VWAP PB edge |
 | Timeframe | K_5M | 5M/15M/60M | K_15M produces MORE stops, not fewer |
 | Regime filter | ADX < 25 | 7 alternatives | Confirmed best vs BB width, volume variants |
