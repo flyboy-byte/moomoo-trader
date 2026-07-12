@@ -363,6 +363,48 @@ def api_scoreboard() -> Response:
     return jsonify(result)
 
 
+@app.route("/api/pnl_history")
+@_require_login
+def api_pnl_history() -> Response:
+    """Cumulative P&L per strategy over time, from JSONL position_close events.
+
+    Returns {strategy: [{date, pnl, cumulative}]} sorted by date.
+    Accepts optional ?start=YYYY-MM-DD to limit date range.
+    """
+    start_str = request.args.get("start")
+    # {strategy: [(date_str, pnl)]}
+    by_strat: dict[str, list[tuple[str, float]]] = {}
+
+    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
+        date_part = f.stem.rsplit("_", 1)[-1]
+        if start_str and date_part < start_str:
+            continue
+        try:
+            for line in f.read_text().splitlines():
+                if not line:
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != "position_close":
+                    continue
+                strat = ev.get("strategy") or "unknown"
+                pnl = float(ev.get("pnl", 0))
+                by_strat.setdefault(strat, []).append((date_part, pnl))
+        except Exception:
+            continue
+
+    result: dict[str, list[dict]] = {}
+    for strat, entries in by_strat.items():
+        entries.sort(key=lambda x: x[0])
+        cum = 0.0
+        series = []
+        for date_str, pnl in entries:
+            cum = round(cum + pnl, 4)
+            series.append({"date": date_str, "pnl": round(pnl, 4), "cumulative": cum})
+        result[strat] = series
+
+    return jsonify(result)
+
+
 @app.route("/config", methods=["GET", "POST"])
 @_require_login
 def config_editor() -> Response | str:
@@ -653,6 +695,144 @@ def config_editor() -> Response | str:
 
   // Load scorecard on page load
   loadScoreboard(0);
+
+  // Strategy colors for P&L chart
+  var STRAT_COLORS = {{
+    "bb_kdj":       "#4caf50",
+    "bb_kdj_loose": "#81c784",
+    "orb":          "#2196f3",
+    "vwap_pb":      "#ff9800",
+    "gap_fade":     "#e91e63",
+    "vwap":         "#9c27b0",
+    "unknown":      "#888"
+  }};
+
+  function loadPnlChart(days) {{
+    var url = "/api/pnl_history";
+    if (days > 0) {{
+      var d = new Date();
+      d.setDate(d.getDate() - days);
+      var pad = n => String(n).padStart(2, "0");
+      url += "?start=" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+    }}
+    fetch(url).then(r => r.json()).then(function(data) {{
+      var canvas = document.getElementById("pnl-canvas");
+      var legend = document.getElementById("pnl-legend");
+      var strategies = Object.keys(data);
+      if (!strategies.length) {{
+        legend.innerHTML = '<span style="color:#555">No trades yet.</span>';
+        return;
+      }}
+
+      // Collect all unique dates across all strategies
+      var allDates = [];
+      strategies.forEach(function(s) {{ data[s].forEach(function(p) {{ allDates.push(p.date); }}); }});
+      allDates = Array.from(new Set(allDates)).sort();
+      if (!allDates.length) return;
+
+      // Build per-strategy cumulative series indexed by date
+      var series = {{}};
+      strategies.forEach(function(s) {{
+        var lastVal = 0;
+        var byDate = {{}};
+        data[s].forEach(function(p) {{ byDate[p.date] = p.cumulative; }});
+        var pts = [];
+        allDates.forEach(function(dt) {{
+          if (byDate[dt] !== undefined) lastVal = byDate[dt];
+          pts.push(lastVal);
+        }});
+        series[s] = pts;
+      }});
+
+      // Find value range for scaling
+      var allVals = [];
+      strategies.forEach(function(s) {{ series[s].forEach(function(v) {{ allVals.push(v); }}); }});
+      var minV = Math.min(0, Math.min.apply(null, allVals));
+      var maxV = Math.max(0, Math.max.apply(null, allVals));
+      var span = maxV - minV || 1;
+
+      // Draw
+      var dpr = window.devicePixelRatio || 1;
+      var W = canvas.offsetWidth || 600;
+      var H = 200;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+      var ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+
+      // Background
+      ctx.fillStyle = "#0d0d0d";
+      ctx.fillRect(0, 0, W, H);
+
+      var PAD_L = 48, PAD_R = 8, PAD_T = 10, PAD_B = 20;
+      var chartW = W - PAD_L - PAD_R;
+      var chartH = H - PAD_T - PAD_B;
+
+      function xOf(i) {{ return PAD_L + (i / Math.max(allDates.length - 1, 1)) * chartW; }}
+      function yOf(v) {{ return PAD_T + chartH - ((v - minV) / span) * chartH; }}
+
+      // Zero line
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(PAD_L, yOf(0));
+      ctx.lineTo(W - PAD_R, yOf(0));
+      ctx.stroke();
+
+      // Y axis labels (min, 0, max)
+      ctx.fillStyle = "#555";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "right";
+      [[minV, yOf(minV)], [0, yOf(0)], [maxV, yOf(maxV)]].forEach(function(p) {{
+        ctx.fillText("$" + p[0].toFixed(0), PAD_L - 4, p[1] + 4);
+      }});
+
+      // X axis date labels (first and last)
+      if (allDates.length > 1) {{
+        ctx.textAlign = "left";
+        ctx.fillText(allDates[0].slice(5), PAD_L, H - 4);
+        ctx.textAlign = "right";
+        ctx.fillText(allDates[allDates.length-1].slice(5), W - PAD_R, H - 4);
+      }}
+
+      // Draw each strategy line
+      strategies.forEach(function(s) {{
+        var pts = series[s];
+        var color = STRAT_COLORS[s] || "#888";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        pts.forEach(function(v, i) {{
+          if (i === 0) ctx.moveTo(xOf(i), yOf(v));
+          else ctx.lineTo(xOf(i), yOf(v));
+        }});
+        ctx.stroke();
+        // endpoint dot
+        var lastPt = pts[pts.length-1];
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(xOf(pts.length-1), yOf(lastPt), 3, 0, Math.PI*2);
+        ctx.fill();
+      }});
+
+      // Legend
+      legend.innerHTML = "";
+      strategies.forEach(function(s) {{
+        var lastVal = series[s][series[s].length - 1];
+        var sign = lastVal >= 0 ? "+" : "";
+        var color = STRAT_COLORS[s] || "#888";
+        legend.innerHTML += '<span style="color:' + color + '">'
+          + '■ ' + s + ' ' + sign + lastVal.toFixed(2) + '</span>';
+      }});
+    }}).catch(function() {{
+      document.getElementById("pnl-legend").innerHTML = '<span style="color:#555">Failed to load.</span>';
+    }});
+  }}
+
+  // Load P&L chart on page load
+  loadPnlChart(0);
   </script>
 
   <!-- Kill switches -->
@@ -1260,6 +1440,18 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
   {open_html}
   {trades_html}
   {market_cond_html}
+
+  <div class="card" id="pnl-chart-card">
+    <div class="card-title">CUMULATIVE P&L BY STRATEGY
+      <span style="float:right;font-size:11px;color:#555;font-weight:normal">
+        <a href="#" onclick="loadPnlChart(30);return false" style="color:#555;margin-right:8px">30d</a>
+        <a href="#" onclick="loadPnlChart(90);return false" style="color:#555;margin-right:8px">90d</a>
+        <a href="#" onclick="loadPnlChart(0);return false" style="color:#555">all</a>
+      </span>
+    </div>
+    <canvas id="pnl-canvas" style="width:100%;height:200px;display:block"></canvas>
+    <div id="pnl-legend" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:11px"></div>
+  </div>
 
   <div class="card" id="scorecard-card">
     <div class="card-title">ALL-TIME SCORECARD
