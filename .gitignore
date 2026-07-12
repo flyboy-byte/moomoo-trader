@@ -11,3 +11,7 @@ resume.txt
 replay_out/
 replay_*/
 replay_diff/
+*resume.sh
+.claude/
+.just-scrape/
+skills-lock.json

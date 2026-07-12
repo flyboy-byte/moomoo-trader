@@ -967,6 +967,7 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     auto_refresh = '<meta http-equiv="refresh" content="30">' if is_today else ''
 
     last_score = str(last_eval.get("signal_score", "—")) if last_eval else "—"
+    last_close = "—"
 
     ct = summary.closed_trades
     pnl = summary.realized_pnl
