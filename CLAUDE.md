@@ -121,12 +121,16 @@ Strategy (BB + KDJ mean reversion, 5-min candles) — the core spec, parameters 
 - bb_kdj_loose: research lane variant — same entry/exit but no bonus gate (MIN_SIGNAL_SCORE ignored)
   and no ADX/ranging filter. Runs independently as strategy='bb_kdj_loose' so P&L is separable.
 - ORB and VWAP Pullback are also live — see docs/ARCHITECTURE.md for their specs, not duplicated here.
+- gap_fade: fires once per day at 9:35 ET; fades the opening gap (gap up+rejection→short,
+  gap down+rejection→long); exit on TARGET (50% fill) / STOP / TIME_STOP (11:00 ET).
+  One trade per day per symbol. Deployed live 2026-07-12.
 
 Current priorities — this is a snapshot, not a sequence. Use judgment about what's actually most
 useful right now; deviate freely when something better surfaces (e.g. a dashboard bug, an unblocked
 strategy, a doc cleanup). Don't treat this list as a gate against doing other useful work.
-- Five live strategies: bb_kdj, bb_kdj_loose (live 2026-07-04, research lane), orb (SPY shorts only
-  as of 2026-07-09 — QQQ+IWM shorts disabled after 0% win rate on 36 trades), vwap_pb.
+- Six live strategies: bb_kdj, bb_kdj_loose (live 2026-07-04, research lane), orb (SPY shorts only
+  as of 2026-07-09 — QQQ+IWM shorts disabled after 0% win rate on 36 trades), vwap_pb,
+  gap_fade (live 2026-07-12).
 - Accumulate live data — most "what does the data say" questions need more samples.
   See docs/evaluation_criteria.md for the actual pre-registered sample-size gates per strategy.
 - Next steps for the project are in docs/expand_plan.md — pick one and go.

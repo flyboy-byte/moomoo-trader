@@ -259,9 +259,28 @@ def api_stats() -> Response:
     procs = []
     for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "status"]):
         try:
+            raw_name = p.info["name"] or ""
+            # For Python processes, show the script name instead of "python"
+            if raw_name.lower().startswith("python"):
+                try:
+                    cmdline = p.cmdline()
+                    # Find first non-interpreter argument (the script or -m module)
+                    script = next(
+                        (a for a in cmdline[1:] if not a.startswith("-")), None
+                    )
+                    if script:
+                        import os
+                        script_base = os.path.basename(script).replace(".py", "")
+                        display_name = f"py:{script_base}"
+                    else:
+                        display_name = raw_name
+                except (psutil.AccessDenied, psutil.ZombieProcess):
+                    display_name = raw_name
+            else:
+                display_name = raw_name
             procs.append({
                 "pid": p.info["pid"],
-                "name": (p.info["name"] or "")[:20],
+                "name": display_name[:24],
                 "cpu": round(p.info["cpu_percent"] or 0, 1),
                 "mem": round(p.info["memory_percent"] or 0, 1),
                 "status": (p.info["status"] or "")[:1].upper(),
@@ -282,6 +301,66 @@ def api_stats() -> Response:
         "net_recv_mb": round(net.bytes_recv / 1e6, 1),
         "procs": procs[:12],
     })
+
+
+@app.route("/api/scoreboard")
+@_require_login
+def api_scoreboard() -> Response:
+    """Per-strategy P&L scorecard from all historical JSONL logs.
+
+    Accepts optional ?start=YYYY-MM-DD to limit the date range.
+    Returns {strategy: {trades, wins, win_pct, net_pnl, pf, last_trade}} sorted by net_pnl desc.
+    """
+    start_str = request.args.get("start")
+    per: dict[str, dict] = {}
+
+    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
+        if start_str:
+            date_part = f.stem.rsplit("_", 1)[-1]
+            if date_part < start_str:
+                continue
+        try:
+            for line in f.read_text().splitlines():
+                if not line:
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != "position_close":
+                    continue
+                strat = ev.get("strategy") or "unknown"
+                pnl = float(ev.get("pnl", 0))
+                ts = ev.get("ts", "")
+                s = per.setdefault(strat, {
+                    "trades": 0, "wins": 0,
+                    "gross_win": 0.0, "gross_loss": 0.0,
+                    "net_pnl": 0.0, "last_trade": "",
+                })
+                s["trades"] += 1
+                s["net_pnl"] = round(s["net_pnl"] + pnl, 4)
+                if pnl > 0:
+                    s["wins"] += 1
+                    s["gross_win"] = round(s["gross_win"] + pnl, 4)
+                else:
+                    s["gross_loss"] = round(s["gross_loss"] - pnl, 4)
+                if ts > s["last_trade"]:
+                    s["last_trade"] = ts
+        except Exception:
+            continue
+
+    result = []
+    for strat, s in per.items():
+        pf = round(s["gross_win"] / s["gross_loss"], 3) if s["gross_loss"] > 0 else float("inf")
+        win_pct = round(s["wins"] / s["trades"] * 100, 1) if s["trades"] else 0.0
+        result.append({
+            "strategy": strat,
+            "trades": s["trades"],
+            "wins": s["wins"],
+            "win_pct": win_pct,
+            "net_pnl": s["net_pnl"],
+            "pf": pf if pf != float("inf") else None,
+            "last_trade": s["last_trade"][:10] if s["last_trade"] else "",
+        })
+    result.sort(key=lambda x: x["net_pnl"], reverse=True)
+    return jsonify(result)
 
 
 @app.route("/config", methods=["GET", "POST"])
@@ -537,6 +616,43 @@ def config_editor() -> Response | str:
       }});
     }}).catch(function() {{}});
   }}
+
+  function loadScoreboard(days) {{
+    var url = "/api/scoreboard";
+    if (days > 0) {{
+      var d = new Date();
+      d.setDate(d.getDate() - days);
+      var pad = n => String(n).padStart(2, "0");
+      url += "?start=" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+    }}
+    fetch(url).then(r => r.json()).then(function(rows) {{
+      var tbody = document.getElementById("scorecard-tbody");
+      if (!rows.length) {{
+        tbody.innerHTML = "<tr><td colspan='6' style='color:#555;padding:6px'>No trades yet.</td></tr>";
+        return;
+      }}
+      tbody.innerHTML = "";
+      rows.forEach(function(r) {{
+        var pnl_col = r.net_pnl > 0 ? "#4caf50" : r.net_pnl < 0 ? "#f44336" : "#888";
+        var pf_str = r.pf === null ? "∞" : r.pf.toFixed(2);
+        var pf_col = r.pf === null || r.pf >= 1.5 ? "#4caf50" : r.pf >= 1.0 ? "#ff9800" : "#f44336";
+        tbody.innerHTML += "<tr style='border-top:1px solid #1f1f1f'>"
+          + "<td style='padding:4px 6px;color:#ccc'>" + r.strategy + "</td>"
+          + "<td style='padding:4px 6px;text-align:right;color:#888'>" + r.trades + "</td>"
+          + "<td style='padding:4px 6px;text-align:right;color:#888'>" + r.win_pct + "%</td>"
+          + "<td style='padding:4px 6px;text-align:right;color:" + pf_col + "'>" + pf_str + "</td>"
+          + "<td style='padding:4px 6px;text-align:right;color:" + pnl_col + ";font-variant-numeric:tabular-nums'>$" + r.net_pnl.toFixed(2) + "</td>"
+          + "<td style='padding:4px 6px;text-align:right;color:#555'>" + r.last_trade + "</td>"
+          + "</tr>";
+      }});
+    }}).catch(function() {{
+      document.getElementById("scorecard-tbody").innerHTML =
+        "<tr><td colspan='6' style='color:#555;padding:6px'>Failed to load.</td></tr>";
+    }});
+  }}
+
+  // Load scorecard on page load
+  loadScoreboard(0);
   </script>
 
   <!-- Kill switches -->
@@ -1144,6 +1260,31 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
   {open_html}
   {trades_html}
   {market_cond_html}
+
+  <div class="card" id="scorecard-card">
+    <div class="card-title">ALL-TIME SCORECARD
+      <span style="float:right;font-size:11px;color:#555;font-weight:normal">
+        <a href="#" onclick="loadScoreboard(30);return false" style="color:#555;margin-right:8px">30d</a>
+        <a href="#" onclick="loadScoreboard(90);return false" style="color:#555;margin-right:8px">90d</a>
+        <a href="#" onclick="loadScoreboard(0);return false" style="color:#555">all</a>
+      </span>
+    </div>
+    <div id="scorecard-body">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr class="th">
+            <th style="text-align:left;padding:4px 6px">STRATEGY</th>
+            <th style="text-align:right;padding:4px 6px">TRADES</th>
+            <th style="text-align:right;padding:4px 6px">WIN%</th>
+            <th style="text-align:right;padding:4px 6px">PF</th>
+            <th style="text-align:right;padding:4px 6px">NET P&L</th>
+            <th style="text-align:right;padding:4px 6px">LAST</th>
+          </tr>
+        </thead>
+        <tbody id="scorecard-tbody"><tr><td colspan="6" style="color:#555;padding:6px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
 
   {_render_gate_progress()}
 
