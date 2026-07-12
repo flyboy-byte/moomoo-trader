@@ -405,6 +405,83 @@ def api_pnl_history() -> Response:
     return jsonify(result)
 
 
+@app.route("/api/trades")
+@_require_login
+def api_trades() -> Response:
+    """Recent closed trades from JSONL logs, paired with their entry data.
+
+    Returns a list of trade dicts, newest first. Accepts:
+      ?start=YYYY-MM-DD  — only include trades on or after this date
+      ?limit=N           — max rows (default 200)
+    """
+    start_str = request.args.get("start")
+    try:
+        limit = int(request.args.get("limit", 200))
+    except ValueError:
+        limit = 200
+
+    # Pass 1: collect opens and closes per (symbol, strategy), preserving order
+    opens_by_key: dict[tuple, list[dict]] = {}   # (sym, strat) -> [open events...]
+    closes: list[dict] = []
+
+    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
+        date_part = f.stem.rsplit("_", 1)[-1]
+        if start_str and date_part < start_str:
+            continue
+        sym_safe = f.stem.removeprefix("paper_").removesuffix(f"_{date_part}")
+        sym = sym_safe.replace("_", ".", 1)
+        try:
+            for line in f.read_text().splitlines():
+                if not line:
+                    continue
+                ev = json.loads(line)
+                ev.setdefault("symbol", sym)
+                event = ev.get("event")
+                if event == "position_open":
+                    key = (ev.get("symbol", sym), ev.get("strategy", ""))
+                    opens_by_key.setdefault(key, []).append(ev)
+                elif event == "position_close":
+                    closes.append(ev)
+        except Exception:
+            continue
+
+    # Sort closes newest-first, pair each with its most recent preceding open
+    closes.sort(key=lambda e: e.get("ts", ""), reverse=True)
+
+    trades = []
+    for c in closes[:limit * 2]:   # fetch extra before pairing, trim at end
+        sym = c.get("symbol", "?")
+        strat = c.get("strategy", "?")
+        key = (sym, strat)
+        close_ts = c.get("ts", "")
+        # Find the latest open for this (symbol, strategy) that precedes the close
+        entry_price = None
+        entry_qty = None
+        matching_opens = opens_by_key.get(key, [])
+        for o in reversed(matching_opens):
+            if o.get("ts", "") <= close_ts:
+                entry_price = o.get("entry")
+                entry_qty = o.get("qty")
+                break
+        trades.append({
+            "ts": close_ts,
+            "date": close_ts[:10],
+            "symbol": sym,
+            "strategy": strat,
+            "direction": c.get("direction", "long"),
+            "entry": entry_price,
+            "exit": c.get("exit"),
+            "qty": entry_qty,
+            "pnl": c.get("pnl"),
+            "hold_bars": c.get("hold_bars", 0),
+            "reason": c.get("reason", ""),
+        })
+        if len(trades) >= limit:
+            break
+
+    return jsonify(trades)
+
+
 @app.route("/config", methods=["GET", "POST"])
 @_require_login
 def config_editor() -> Response | str:
@@ -833,6 +910,85 @@ def config_editor() -> Response | str:
 
   // Load P&L chart on page load
   loadPnlChart(0);
+
+  // Trade log
+  var _tradeRows = [];
+  var _tradeSortKey = "ts";
+  var _tradeSortAsc = false;
+
+  function loadTrades(days) {{
+    var url = "/api/trades";
+    if (days > 0) {{
+      var d = new Date();
+      d.setDate(d.getDate() - days);
+      var pad = n => String(n).padStart(2, "0");
+      url += "?start=" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+    }}
+    fetch(url).then(r => r.json()).then(function(rows) {{
+      _tradeRows = rows;
+      _tradeSortKey = "ts";
+      _tradeSortAsc = false;
+      renderTrades();
+    }}).catch(function() {{
+      document.getElementById("tradelog-tbody").innerHTML =
+        "<tr><td colspan='9' style='color:#555;padding:6px'>Failed to load.</td></tr>";
+    }});
+  }}
+
+  function sortTrades(key) {{
+    if (_tradeSortKey === key) {{
+      _tradeSortAsc = !_tradeSortAsc;
+    }} else {{
+      _tradeSortKey = key;
+      _tradeSortAsc = key !== "ts";  // date defaults newest-first; others ascending
+    }}
+    renderTrades();
+  }}
+
+  function renderTrades() {{
+    var rows = _tradeRows.slice();
+    var key = _tradeSortKey;
+    var asc = _tradeSortAsc;
+    rows.sort(function(a, b) {{
+      var av = a[key] === null ? "" : a[key];
+      var bv = b[key] === null ? "" : b[key];
+      if (av < bv) return asc ? -1 : 1;
+      if (av > bv) return asc ? 1 : -1;
+      return 0;
+    }});
+    document.getElementById("tradelog-sort-label").textContent =
+      "sort: " + key + " " + (asc ? "▲" : "▼");
+    var tbody = document.getElementById("tradelog-tbody");
+    if (!rows.length) {{
+      tbody.innerHTML = "<tr><td colspan='9' style='color:#555;padding:6px'>No trades.</td></tr>";
+      return;
+    }}
+    tbody.innerHTML = "";
+    rows.forEach(function(r) {{
+      var pnl = r.pnl !== null ? r.pnl : 0;
+      var pnl_col = pnl > 0 ? "#4caf50" : pnl < 0 ? "#f44336" : "#888";
+      var dir_col = r.direction === "short" ? "#ff9800" : "#4fc3f7";
+      var reason_col = r.reason === "TARGET" ? "#4caf50" : r.reason === "STOP" ? "#f44336" : "#888";
+      var strat_color = STRAT_COLORS[r.strategy] || "#888";
+      var entry_str = r.entry !== null ? r.entry.toFixed(2) : "—";
+      var exit_str = r.exit !== null ? r.exit.toFixed(2) : "—";
+      var pnl_str = r.pnl !== null ? (pnl >= 0 ? "+" : "") + pnl.toFixed(2) : "—";
+      tbody.innerHTML += "<tr style='border-top:1px solid #1f1f1f'>"
+        + "<td style='padding:3px 6px;color:#555'>" + (r.date || "?") + "</td>"
+        + "<td style='padding:3px 6px;color:#ccc'>" + (r.symbol || "").replace("US.", "") + "</td>"
+        + "<td style='padding:3px 6px;color:" + strat_color + "'>" + (r.strategy || "?") + "</td>"
+        + "<td style='padding:3px 6px;color:" + dir_col + "'>" + (r.direction || "long") + "</td>"
+        + "<td style='padding:3px 6px;text-align:right;color:#888;font-variant-numeric:tabular-nums'>" + entry_str + "</td>"
+        + "<td style='padding:3px 6px;text-align:right;color:#888;font-variant-numeric:tabular-nums'>" + exit_str + "</td>"
+        + "<td style='padding:3px 6px;text-align:right;color:" + pnl_col + ";font-variant-numeric:tabular-nums'>" + pnl_str + "</td>"
+        + "<td style='padding:3px 6px;text-align:right;color:#555'>" + (r.hold_bars || 0) + "</td>"
+        + "<td style='padding:3px 6px;color:" + reason_col + "'>" + (r.reason || "?") + "</td>"
+        + "</tr>";
+    }});
+  }}
+
+  // Load trade log on page load
+  loadTrades(0);
   </script>
 
   <!-- Kill switches -->
@@ -1474,6 +1630,35 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
           </tr>
         </thead>
         <tbody id="scorecard-tbody"><tr><td colspan="6" style="color:#555;padding:6px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="tradelog-card">
+    <div class="card-title">TRADE LOG
+      <span style="float:right;font-size:11px;color:#555;font-weight:normal">
+        <a href="#" onclick="loadTrades(30);return false" style="color:#555;margin-right:8px">30d</a>
+        <a href="#" onclick="loadTrades(90);return false" style="color:#555;margin-right:8px">90d</a>
+        <a href="#" onclick="loadTrades(0);return false" style="color:#555;margin-right:8px">all</a>
+        <span id="tradelog-sort-label" style="color:#444;margin-left:12px">sort: newest</span>
+      </span>
+    </div>
+    <div style="overflow-x:auto">
+      <table id="tradelog-table" style="width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap">
+        <thead>
+          <tr class="th">
+            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('date')">DATE</th>
+            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('symbol')">SYM</th>
+            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('strategy')">STRAT</th>
+            <th style="padding:4px 6px;text-align:left">DIR</th>
+            <th style="padding:4px 6px;text-align:right;cursor:pointer" onclick="sortTrades('entry')">ENTRY</th>
+            <th style="padding:4px 6px;text-align:right;cursor:pointer" onclick="sortTrades('exit')">EXIT</th>
+            <th style="padding:4px 6px;text-align:right;cursor:pointer" onclick="sortTrades('pnl')">P&L</th>
+            <th style="padding:4px 6px;text-align:right">BARS</th>
+            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('reason')">REASON</th>
+          </tr>
+        </thead>
+        <tbody id="tradelog-tbody"><tr><td colspan="9" style="color:#555;padding:6px">Loading...</td></tr></tbody>
       </table>
     </div>
   </div>
