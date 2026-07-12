@@ -40,12 +40,17 @@ app.secret_key = secrets.token_hex(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True  # only sent over HTTPS — nginx terminates TLS
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
 _date_override: date | None = None
 
-# In-memory login rate limit: max 5 failed attempts per IP per 15 minutes.
-_LOGIN_MAX_FAILS = 5
-_LOGIN_WINDOW_S = 900
+# In-memory login rate limit.
+# Lockout duration escalates with repeated offenses: 5 fails → 15 min, 10 → 1 h, 15+ → 24 h.
+_LOGIN_FAIL_TIERS: list[tuple[int, int]] = [(15, 86400), (10, 3600), (5, 900)]
+# Tracks all fail timestamps per IP (never pruned beyond the longest window).
 _login_fails: dict[str, list[float]] = {}
+
+import logging as _logging
+_auth_log = _logging.getLogger("dashboard.auth")
 
 
 def _client_ip() -> str:
@@ -54,10 +59,19 @@ def _client_ip() -> str:
     return request.headers.get("X-Real-IP", request.remote_addr or "?")
 
 
-def _login_blocked(ip: str) -> bool:
-    fails = [t for t in _login_fails.get(ip, []) if time.time() - t < _LOGIN_WINDOW_S]
+def _login_blocked(ip: str) -> tuple[bool, int]:
+    """Return (blocked, retry_after_seconds). Prunes stale timestamps."""
+    now = time.time()
+    longest_window = _LOGIN_FAIL_TIERS[0][1]  # 24 h — max window to keep
+    fails = [t for t in _login_fails.get(ip, []) if now - t < longest_window]
     _login_fails[ip] = fails
-    return len(fails) >= _LOGIN_MAX_FAILS
+    for threshold, window_s in _LOGIN_FAIL_TIERS:
+        recent = sum(1 for t in fails if now - t < window_s)
+        if recent >= threshold:
+            oldest_in_window = min(t for t in fails if now - t < window_s)
+            retry_after = int(oldest_in_window + window_s - now) + 1
+            return True, retry_after
+    return False, 0
 
 def _csrf_token() -> str:
     if "csrf_token" not in session:
@@ -95,6 +109,7 @@ def _require_login(f):
             return f(*args, **kwargs)
         if not session.get("logged_in"):
             return redirect(url_for("login", next=request.path))
+        session.permanent = True  # extend lifetime on each authenticated request
         return f(*args, **kwargs)
     return decorated
 
@@ -191,11 +206,16 @@ def login() -> Response | str:
     if request.method == "POST":
         _check_csrf()
         ip = _client_ip()
-        if _login_blocked(ip):
-            error = "Too many attempts. Try again in 15 minutes."
+        blocked, retry_after = _login_blocked(ip)
+        if blocked:
+            mins = (retry_after + 59) // 60
+            error = f"Too many attempts. Try again in {mins} minute{'s' if mins != 1 else ''}."
+            _auth_log.warning("login blocked ip=%s retry_after=%ds", ip, retry_after)
         elif hmac.compare_digest(request.form.get("password", ""), cfg.dashboard_password):
             session["logged_in"] = True
+            session.permanent = True
             _login_fails.pop(ip, None)
+            _auth_log.info("login success ip=%s", ip)
             # only same-site relative redirects (block open-redirect via ?next=)
             nxt = request.args.get("next", "")
             if not nxt.startswith("/") or nxt.startswith("//"):
@@ -203,6 +223,7 @@ def login() -> Response | str:
             return redirect(nxt)
         else:
             _login_fails.setdefault(ip, []).append(time.time())
+            _auth_log.warning("login failed ip=%s total_fails=%d", ip, len(_login_fails[ip]))
             error = "Wrong password."
     return render_template_string(f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Login</title>
