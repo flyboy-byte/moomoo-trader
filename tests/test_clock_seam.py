@@ -26,14 +26,13 @@ ALLOWLIST = {
     ("mm/data.py", 38),
     ("mm/data.py", 40),
     ("mm/data.py", 85),  # research-archive filename, "when fetched", not trading-day-keyed
-    ("scripts/backtest_vix_filter.py", 50),
     ("scripts/fetch_daily_archive.py", 42),
     ("scripts/fetch_daily_archive.py", 43),
     ("scripts/fetch_vix_morning.py", 48),
     ("scripts/fetch_vix_morning.py", 49),
     # Display-only — rendered once, never persisted/compared/sorted.
     ("scripts/dashboard.py", 228),
-    ("scripts/web_dashboard.py", 942),
+    ("scripts/web_dashboard.py", 963),
     # Docstring prose, not a call.
     ("mm/replay.py", 13),
 }

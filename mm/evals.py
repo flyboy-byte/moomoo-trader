@@ -691,3 +691,154 @@ def _eval_orb(
             elog.signal_skip("orb_vol_fail", score=0, bonus=0, min_score=0, strategy="orb")
 
     return position
+
+
+def _eval_gap_fade(
+    symbol: str, df_raw: pd.DataFrame, tctx, acc_id: int,
+    position: PaperPosition | None, elog: PaperEventLog, daily: DailyTracker,
+    already_entered: bool = False,
+) -> PaperPosition | None:
+    """Evaluate Gap Fade strategy for one symbol.
+
+    Fires once per day at the 9:35 ET bar. Fades the opening gap:
+    - Gap up + first-bar rejection (close < open) → short
+    - Gap down + first-bar rejection (close > open) → long
+
+    already_entered: True if gap_fade already traded today (one trade per day).
+    """
+    from .gap_fade import (GAP_MIN_PCT, GAP_MAX_PCT, GAP_TARGET_FILL_PCT,
+                           GAP_STOP_BUFFER, GAP_SHORTS_ENABLED)
+
+    cfg = _config.cfg
+
+    df = add_all(df_raw.copy())
+    last = df.iloc[-1]
+    candle_ts = last["time_key"]
+    close = float(last["close"])
+    bar_time = pd.Timestamp(candle_ts)
+    bar_date = bar_time.date()
+    bar_clock = bar_time.time()
+    now = clock.now_et()
+
+    is_entry_bar = bar_clock == dtime(9, 35)
+    is_time_stop = bar_clock >= dtime(11, 0)
+
+    log.info("%-8s [gap_fade] BAR %s  close=%.4f", symbol, candle_ts, close)
+    elog.bar_eval(candle_ts=candle_ts, eval_ts=now, accepted=True,
+                  close=close, score=0, bonus=0, signals={},
+                  regime_label="n/a", strategy="gap_fade")
+
+    # --- Exit ---
+    if position is not None:
+        is_short = position.direction == "short"
+        exit_reason: str | None = None
+
+        if is_time_stop:
+            exit_reason = "TIME_STOP"
+        elif position.target_price > 0 and (
+            close <= position.target_price if is_short else close >= position.target_price
+        ):
+            exit_reason = "TARGET"
+        elif (close >= position.stop_price if is_short else close <= position.stop_price):
+            exit_reason = "STOP"
+
+        if exit_reason:
+            result = _execute_exit(tctx, acc_id, symbol, position, close, exit_reason, elog)
+            if result is None:
+                return position
+            fill_price, dealt_qty = result
+            pnl_per_share = (position.entry_price - fill_price) if is_short else (fill_price - position.entry_price)
+            pnl_total = pnl_per_share * dealt_qty
+            hold_bars = int((pd.Timestamp(candle_ts) - pd.Timestamp(position.entry_time)).total_seconds() / 300)
+            daily.record_trade(pnl_total, strategy="gap_fade")
+            partial = dealt_qty < float(position.qty)
+            elog.position_close(fill_price, exit_reason, pnl_total, hold_bars=hold_bars,
+                                strategy="gap_fade", direction=position.direction, intended_price=close,
+                                partial_fill=partial, dealt_qty=dealt_qty)
+            notify_exit(symbol, fill_price, exit_reason, pnl_total)
+            if partial:
+                position.qty = position.qty - dealt_qty
+                _save_position(position)
+                log.warning("%-8s [gap_fade] PARTIAL CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s remaining=%s",
+                            symbol, position.direction, fill_price, pnl_total, exit_reason, position.qty)
+            else:
+                _clear_position(symbol, "gap_fade")
+                log.info("%-8s [gap_fade] CLOSE [%s] exit=%.4f pnl=%+.4f reason=%s",
+                         symbol, position.direction, fill_price, pnl_total, exit_reason)
+                position = None
+
+    # --- Entry (9:35 bar only, one trade per day) ---
+    elif is_entry_bar and not already_entered:
+        # Derive prev_close from the last bar of the prior trading day in the window
+        df["_ts_tmp"] = pd.to_datetime(df["time_key"])
+        df["_date_tmp"] = df["_ts_tmp"].dt.date
+        prev_day_df = df[df["_date_tmp"] < bar_date]
+        if prev_day_df.empty:
+            return position
+
+        prev_close = float(prev_day_df.iloc[-1]["close"])
+        today_open = float(last["open"])
+        first_high = float(last["high"])
+        first_low = float(last["low"])
+
+        gap_pct = (today_open - prev_close) / prev_close
+
+        if abs(gap_pct) < GAP_MIN_PCT or abs(gap_pct) > GAP_MAX_PCT:
+            elog.signal_skip("gap_out_of_range", score=0, bonus=0, min_score=0, strategy="gap_fade")
+            return position
+
+        direction: str | None = None
+        stop: float = 0.0
+        target: float = 0.0
+
+        if gap_pct > 0 and close < today_open and GAP_SHORTS_ENABLED:
+            direction = "short"
+            stop = round(first_high * (1 + GAP_STOP_BUFFER), 4)
+            target = round(today_open - GAP_TARGET_FILL_PCT * (today_open - prev_close), 4)
+        elif gap_pct < 0 and close > today_open:
+            direction = "long"
+            stop = round(first_low * (1 - GAP_STOP_BUFFER), 4)
+            target = round(today_open + GAP_TARGET_FILL_PCT * (prev_close - today_open), 4)
+
+        if direction is None:
+            elog.signal_skip("gap_no_rejection", score=0, bonus=0, min_score=0, strategy="gap_fade")
+            return position
+
+        if _entry_attempted.get((symbol, "gap_fade")) == str(candle_ts):
+            return position
+        _entry_attempted[(symbol, "gap_fade")] = str(candle_ts)
+
+        if not daily.can_open(strategy="gap_fade"):
+            elog.risk_block("daily_limit_reached", strategy="gap_fade",
+                            trades=daily.trades, pnl=daily.pnl)
+            return position
+
+        qty = _qty(close, symbol, stop=stop)
+        if not qty:
+            log.warning("RISK BLOCK [gap_fade] %s: price %.2f exceeds cap %.2f",
+                        symbol, close, _position_cap(symbol))
+            elog.risk_block("price_exceeds_max_position", strategy="gap_fade",
+                            price=close, max_dollars=_position_cap(symbol))
+            return position
+
+        if direction == "short":
+            qty = math.floor(qty)
+
+        filled = _execute_entry(tctx, acc_id, symbol, qty, close,
+                                "gap_fade", elog, direction=direction)
+        if filled:
+            order_id, fill_price, fill_qty = filled
+            position = PaperPosition(
+                symbol=symbol, strategy="gap_fade", direction=direction,
+                entry_time=candle_ts, entry_price=fill_price,
+                stop_price=stop, target_price=target,
+                qty=fill_qty, order_id=order_id,
+            )
+            _save_position(position)
+            elog.position_open(fill_price, stop, fill_qty, strategy="gap_fade",
+                               direction=direction, intended_price=close)
+            notify_entry(symbol, fill_price, stop)
+            log.info("%-8s [gap_fade] OPEN  [%s]  entry=%.4f stop=%.4f target=%.4f qty=%s  gap=%+.3f%%",
+                     symbol, direction, fill_price, stop, target, fill_qty, gap_pct * 100)
+
+    return position

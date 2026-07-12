@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(not CSV.exists(), reason="combined candle CSVs n
 
 # Three sessions with known trade activity (replay smoke window)
 START, END = "2026-05-27", "2026-05-29"
-STRATS = ["bb_kdj", "bb_kdj_loose", "orb", "vwap_pb"]
+STRATS = ["bb_kdj", "bb_kdj_loose", "orb", "vwap_pb", "gap_fade"]
 
 
 def _run(tmp_path, fill_mode, csvs=None):

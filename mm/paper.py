@@ -39,11 +39,12 @@ from .logger import get_logger
 from .events import (        # noqa: F401
     PaperEventLog, PaperPosition,
     _load_position, _load_orb_traded, _save_orb_traded,
+    _load_gap_fade_traded, _save_gap_fade_traded,
     _clear_position,
 )
 from .evals import (         # noqa: F401
     _entry_attempted,
-    _eval_bb_kdj, _eval_bb_kdj_loose, _eval_vwap, _eval_vwap_pb, _eval_orb,
+    _eval_bb_kdj, _eval_bb_kdj_loose, _eval_vwap, _eval_vwap_pb, _eval_orb, _eval_gap_fade,
 )
 from .execution import (     # noqa: F401
     _orphan_warned,
@@ -173,8 +174,9 @@ def run_multi(symbols: list[str] | None = None) -> None:
     # One event log per symbol (all strategies share the file, tagged per event)
     elogs: dict[str, PaperEventLog] = {sym: PaperEventLog(sym) for sym in symbols}
 
-    # ORB one-trade-per-day enforcement (persisted across restarts)
+    # One-trade-per-day enforcement (persisted across restarts)
     orb_traded: dict[str, date] = _load_orb_traded(symbols)
+    gap_fade_traded: dict[str, date] = _load_gap_fade_traded(symbols)
 
     acc_id: int | None = None
     daily = DailyTracker()
@@ -246,6 +248,7 @@ def run_multi(symbols: list[str] | None = None) -> None:
                     _eval_symbol_all_strategies(
                         symbol, strategies, tctx, acc_id, positions, elogs, daily,
                         orb_traded=orb_traded,
+                        gap_fade_traded=gap_fade_traded,
                     )
 
         except KeyboardInterrupt:
@@ -278,6 +281,7 @@ def _eval_symbol_all_strategies(
     elogs: dict[str, PaperEventLog],
     daily: DailyTracker,
     orb_traded: dict[str, date] | None = None,
+    gap_fade_traded: dict[str, date] | None = None,
 ) -> None:
     """Fetch candles once for symbol, then evaluate each active strategy."""
     elog = elogs[symbol]
@@ -333,6 +337,18 @@ def _eval_symbol_all_strategies(
                 symbol, df_bb, tctx, acc_id,
                 positions[(symbol, strat)], elog, daily,
             )
+        elif strat == "gap_fade":
+            prev_pos = positions[(symbol, strat)]
+            already_entered = (gap_fade_traded or {}).get(symbol) == clock.today()
+            positions[(symbol, strat)] = _eval_gap_fade(
+                symbol, df_raw, tctx, acc_id,
+                prev_pos, elog, daily,
+                already_entered=already_entered,
+            )
+            if prev_pos is None and positions[(symbol, strat)] is not None:
+                if gap_fade_traded is not None:
+                    gap_fade_traded[symbol] = clock.today()
+                    _save_gap_fade_traded(symbol, clock.today())
         else:
             log.warning("Unknown strategy '%s' — skipping", strat)
 

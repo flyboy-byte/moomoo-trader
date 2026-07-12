@@ -246,6 +246,7 @@ def replay(
     }
     elogs = {sym: paper.PaperEventLog(sym) for sym in dfs}
     orb_traded: dict[str, date] = {}
+    gap_fade_traded: dict[str, date] = {}
     daily = risk.DailyTracker()
 
     bars_done = 0
@@ -273,6 +274,7 @@ def replay(
                 paper._eval_symbol_all_strategies(
                     sym, strategies, broker, 1, positions, elogs, daily,
                     orb_traded=orb_traded,
+                    gap_fade_traded=gap_fade_traded,
                 )
 
             bars_done += 1

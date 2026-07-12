@@ -150,7 +150,7 @@ class Config:
 
 cfg = Config()
 
-_VALID_STRATEGIES = {"bb_kdj", "bb_kdj_loose", "orb", "vwap_pb", "vwap"}
+_VALID_STRATEGIES = {"bb_kdj", "bb_kdj_loose", "orb", "vwap_pb", "vwap", "gap_fade"}
 
 
 def validate_config() -> list[str]:

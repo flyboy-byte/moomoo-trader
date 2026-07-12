@@ -205,3 +205,25 @@ def _load_orb_traded(symbols: list[str]) -> dict[str, date]:
 
 def _save_orb_traded(symbol: str, traded_date: date) -> None:
     _orb_traded_file(symbol).write_text(json.dumps({"date": str(traded_date)}))
+
+
+def _gap_fade_traded_file(symbol: str) -> Path:
+    return _config.cfg.logs_dir / f"paper_{symbol.replace('.', '_')}_gap_fade_traded.json"
+
+
+def _load_gap_fade_traded(symbols: list[str]) -> dict[str, date]:
+    """Load the last gap_fade entry date per symbol. Enforces one trade per day on restart."""
+    result: dict[str, date] = {}
+    for sym in symbols:
+        path = _gap_fade_traded_file(sym)
+        if path.exists():
+            try:
+                d = json.loads(path.read_text())
+                result[sym] = date.fromisoformat(d["date"])
+            except Exception:
+                pass
+    return result
+
+
+def _save_gap_fade_traded(symbol: str, traded_date: date) -> None:
+    _gap_fade_traded_file(symbol).write_text(json.dumps({"date": str(traded_date)}))
