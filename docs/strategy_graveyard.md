@@ -563,8 +563,8 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 | MIN_SIGNAL_SCORE | 2 | 0–3 | Flips exit split to target-dominant |
 | KDJ_WINDOW_BARS | 3 | 0–5 | ~6.7-7.7× signals on IWM/QQQ vs w=0; SPY excluded or kept at 0 (corrected 2026-06-18 after a day-boundary leak bug fix — see "KDJ Day-Boundary Signal Leak" above; was documented as "10×" on the buggy signal set) |
 | EXIT_ON_KDJ_DEATH | false | — | Re-enabling flips SPY PnL from +$2.34 → −$0.83 |
-| ORB_TARGET_MULT | 1.5 global | 1.0–3.0 | Global default 1.5. Per-symbol OOS (2024+) sweep at vol=1.5: QQQ 2.0× PF 1.309→1.352 (+4.3%), IWM 1.0× PF 1.210→1.270 (+6%), SPY flat (marginal gain at 2.5×). Per-symbol overrides deployed 2026-07-12 via ORB_TARGET_MULT_OVERRIDES. |
-| ORB_VOL_MULT | 1.5 global | 0.0–2.0 | OOS (2024+): QQQ PF 1.162→1.309 (+13%), SPY 1.122→1.156. IWM unaffected (PF flat 1.216→1.210 — high-vol filtering hurts IWM; IWM stays at global 1.5). ORB_VOL_MULT_OVERRIDES machinery built 2026-07-12 for future per-symbol tuning. |
+| ORB_TARGET_MULT | 1.5 global | 1.0–3.0 | Global default 1.5. Per-symbol OOS (2024+) sweep at vol=1.5: QQQ 2.0× PF 1.309→1.352 (+4.3%), IWM 1.0× PF 1.210→1.270 (+6%), SPY flat (marginal gain at 2.5×). Per-symbol overrides deployed 2026-07-12 via ORB_TARGET_MULT_OVERRIDES. Full exit-reason sweep 2026-07-21 confirmed: high TIME_STOP rate is expected (58% QQQ, 51% SPY, 65% IWM) — TIME_STOP exits are net positive in backtest; live -$14 on TIME_STOPs is 34-trade noise. |
+| ORB_VOL_MULT | 1.5 global | 0.0–2.0 | OOS (2024+): QQQ PF 1.162→1.309 (+13%), SPY 1.122→1.156. Full exit-reason sweep 2026-07-21: SPY 2.0× is clearly better (PF 1.156→1.300, PnL $65→$83 on 490 vs 570 trades). QQQ 2.0× loses total PnL ($182→$147 at 468 trades) — stays at 1.5. IWM 2.0× flat ($40→$31) — stays at 1.5. ORB_VOL_MULT_OVERRIDES=US.SPY:2.0 deployed 2026-07-21. |
 | VWAP_PB_MAX_CROSSES | 1 | 0–3 | Critical no-chop filter for VWAP PB edge |
 | Timeframe | K_5M | 5M/15M/60M | K_15M produces MORE stops, not fewer |
 | Regime filter | ADX < 25 | 7 alternatives | Confirmed best vs BB width, volume variants |
