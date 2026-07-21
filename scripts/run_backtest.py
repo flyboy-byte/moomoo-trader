@@ -4,6 +4,8 @@
 Usage:
     python scripts/run_backtest.py logs/US_SPY_K_5M_2026-05-30.csv
     python scripts/run_backtest.py --latest   # picks newest CSV in logs/
+    python scripts/run_backtest.py logs/US_SPY_K_5M_combined.csv --start 2026-01-01
+    python scripts/run_backtest.py logs/US_SPY_K_5M_combined.csv --start 2024-01-01 --end 2025-12-31
 """
 import argparse
 import sys
@@ -28,6 +30,8 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("csv", nargs="?", help="Path to candle CSV")
     group.add_argument("--latest", action="store_true", help="Use newest CSV in logs/")
+    parser.add_argument("--start", metavar="YYYY-MM-DD", help="Only include candles on or after this date")
+    parser.add_argument("--end", metavar="YYYY-MM-DD", help="Only include candles on or before this date")
     args = parser.parse_args()
 
     if args.latest or args.csv is None:
@@ -39,7 +43,7 @@ def main() -> None:
         print(f"File not found: {path}")
         sys.exit(1)
 
-    backtest_file(path)
+    backtest_file(path, start=args.start, end=args.end)
 
 
 if __name__ == "__main__":

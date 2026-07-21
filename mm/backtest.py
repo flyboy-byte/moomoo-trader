@@ -114,8 +114,16 @@ def print_summary(trades: list[Trade]) -> None:
         )
 
 
-def backtest_file(path: str | Path) -> list[Trade]:
+def backtest_file(
+    path: str | Path,
+    start: str | None = None,
+    end: str | None = None,
+) -> list[Trade]:
     df = load_candles(path)
+    if start:
+        df = df[df["time_key"] >= pd.Timestamp(start)].reset_index(drop=True)
+    if end:
+        df = df[df["time_key"] <= pd.Timestamp(end)].reset_index(drop=True)
     log.info("Loaded %d candles from %s", len(df), path)
     trades, _ = run_backtest(df)
     print_summary(trades)
