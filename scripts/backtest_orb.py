@@ -9,6 +9,7 @@ Usage:
     python scripts/backtest_orb.py --sweep-minutes      # sweep orb_minutes (15/30/45/60)
     python scripts/backtest_orb.py --sweep-target       # sweep target_mult (0.5/1.0/1.5/2.0/2.5)
     python scripts/backtest_orb.py --sweep-vol --all    # vol sweep across SPY+QQQ+IWM combined CSVs
+    python scripts/backtest_orb.py --all --start 2024-01-01  # OOS slice
 """
 import argparse
 import sys
@@ -63,6 +64,8 @@ def sweep_target(df, sym: str) -> None:
 def _run_file(path: Path, args: argparse.Namespace) -> None:
     sym = path.stem.split("_K_")[0].replace("_", ".", 1)
     df = load_candles(path)
+    if args.start:
+        df = df[df["time_key"] >= args.start].reset_index(drop=True)
     df = add_all(df)
 
     do_sweep = args.sweep_vol or args.sweep_minutes or args.sweep_target
@@ -93,6 +96,8 @@ def main() -> None:
                         help="Sweep orb_minutes opening range window: 15, 30, 45, 60")
     parser.add_argument("--sweep-target", action="store_true",
                         help="Sweep target_mult: 0.5, 1.0, 1.5, 2.0, 2.5")
+    parser.add_argument("--start", metavar="YYYY-MM-DD",
+                        help="Only include candles on or after this date (OOS slice)")
     args = parser.parse_args()
 
     logs = Path(__file__).parent.parent / "logs"

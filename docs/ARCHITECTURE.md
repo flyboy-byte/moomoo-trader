@@ -82,6 +82,7 @@ ORB_MINUTES_OVERRIDES=US.IWM:30
 ORB_TARGET_MULT=1.5             # target = mult × OR range height (global default)
 ORB_TARGET_MULT_OVERRIDES=US.QQQ:2.0,US.IWM:1.0  # OOS sweep 2024+: QQQ +4.3%, IWM +6%
 ORB_VOL_MULT=1.5                # breakout bar must exceed mult × 20-bar vol MA
+ORB_VOL_MULT_OVERRIDES=US.SPY:2.0  # OOS sweep 2024+: SPY PF 1.156→1.300 (+$18 PnL on 490 trades)
 ORB_SHORTS_ENABLED=true         # kill switch: create STOP_SHORTS.txt to disable at runtime
 ORB_SHORT_SYMBOLS=US.SPY        # per-symbol allow-list; empty = all (QQQ+IWM disabled 2026-07-09)
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
