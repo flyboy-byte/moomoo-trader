@@ -42,23 +42,19 @@ test it and deploy it. The gate thresholds are still useful as checkpoints, not 
 
 **Concrete experiments worth running now:**
 
-### 4a. BB+KDJ w=0 on 2026 YTD
-The w=0 foundational finding (PF=2.13 on 2022–2025) showed signs of degrading in the
-2026 YTD replay (PF=0.98 on 10 trades, tiny sample). Settle this:
-```bash
-python scripts/run_backtest.py logs/US_SPY_K_5M_combined.csv --start 2026-01-01
-```
-If w=0 looks better in 2026 than w=3, switch SPY+QQQ back to w=0.
+### ~~4a. BB+KDJ w=0 on 2026 YTD~~ — DONE (2026-07-21)
+2026 YTD OOS: SPY bb_kdj is broken regardless of window (w=0: 3 trades -$1.67; w=3: 18 trades
+-$10.46). Neither window is recoverable in current regime. IWM at w=0 dramatically better:
+72% win, +24.1 bps/trade (18 trades) vs w=3 45% win, +5.4 bps (119 trades).
+Deployed: `KDJ_WINDOW_OVERRIDES=US.SPY:0,US.IWM:0` (SPY override was pre-existing).
 
 ### 4b. ORB: Symbol-by-Symbol Tuning — DONE (2026-07-12)
 OOS sweeps run. Results: `ORB_VOL_MULT=1.5` (global, was 1.2) + per-symbol target mult overrides:
 `ORB_TARGET_MULT_OVERRIDES=US.QQQ:2.0,US.IWM:1.0` (QQQ +4.3% PF, IWM +6% PF vs global 1.5×).
 Deployed. `ORB_VOL_MULT_OVERRIDES` machinery also built for future per-symbol vol tuning.
 
-### 4c. Add IWM to BB+KDJ
-IWM already runs bb_kdj (it's in SYMBOLS) but the backtest shows it has the best
-win rate (45.0% at w=3). Consider: does adding IWM at w=0 as a separate override
-(`KDJ_WINDOW_OVERRIDES=US.IWM:0`) improve results? Already supported in config.
+### ~~4c. Add IWM to BB+KDJ at w=0~~ — DONE (2026-07-21)
+See 4a above. IWM w=0 deployed via `KDJ_WINDOW_OVERRIDES=US.SPY:0,US.IWM:0`.
 
 **Effort:** Each is a 30-min backtest run + 10 min deploy if results are positive.
 
@@ -117,6 +113,16 @@ No wrong answer. Some rough heuristics:
 | ~~Best return on time~~ | ~~Option 2 (VWAP PB / IWM)~~ — Done |
 | ~~Visual dashboard~~ | ~~Option 3~~ — Done |
 | ~~ORB symbol-by-symbol tuning~~ | ~~Option 4b~~ — Done |
-| Accumulate live data | All 5 strategies are live — wait for samples |
-| Regime-aware entries | Option 5c (VIX gate on BB+KDJ or ORB) |
+| ~~BB+KDJ w=0 / IWM override~~ | ~~Option 4a/4c~~ — Done (2026-07-21) |
+| Accumulate live data | All 6 strategies are live — wait for samples |
+| Regime-aware entries | Option 5c (VIX gate) OR **Route 2 in docs/expansions/** |
+| Find a non-textbook edge | **Route 1 in docs/expansions/** |
 | Build something genuinely new | Option 5a (Earnings Momentum) or 5d (Spread) |
+
+---
+
+## This roadmap is complete. Forward plans live in `docs/expansions/`
+
+All 5 original options are done or explored. The next phase is in
+`docs/expansions/` — three routes (data mining, LLM signal layer, real money)
+with a full phase-gated plan packet. Start at `docs/expansions/FRAMEWORK.md`.

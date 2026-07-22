@@ -7,4 +7,5 @@ textual>=8.0
 flask>=3.0
 yfinance>=0.2
 psutil>=5.9
+anthropic>=0.30
 pytest>=8.0

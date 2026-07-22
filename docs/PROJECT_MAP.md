@@ -119,8 +119,17 @@ moomoo-trader/
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
 │   ├── ARCHITECTURE.md          # 30-line data flow diagram + config reference
-│   ├── expand_plan.md           # Strategic roadmap — 5 directions for what to build next
-│   └── strategy_graveyard.md   # All tested/abandoned/parked features with research data
+│   ├── expand_plan.md           # Original 5-option roadmap — all options now done/explored
+│   ├── strategy_graveyard.md   # All tested/abandoned/parked features with research data
+│   ├── evaluation_criteria.md  # Pre-registered gates per strategy (knob freeze)
+│   └── expansions/              # Next phase plans (data mining + LLM signal layer)
+│       ├── FRAMEWORK.md         # Phase-gated status tracker for both routes
+│       ├── README.md            # Doc index
+│       ├── route-1-data-mining.md   # Hypotheses, scripts, deploy criteria
+│       ├── route-2-llm-signals.md   # LLM regime gate architecture and rollout plan
+│       ├── route-3-real-money.md    # Parked — real money prerequisites
+│       ├── docs/                # Scoping packet (overview, approach, infra, risks, notes)
+│       └── research/            # Raw deep-research output intake
 │
 ├── logs/                        # Runtime output (gitignored)
 │   ├── paper_US_SPY_YYYY-MM-DD.jsonl   # Structured event log per symbol per day
@@ -501,7 +510,8 @@ Coverage by area:
 ## What's Parked / Backlog
 
 See `docs/strategy_graveyard.md` for full details with research data and graveyard'd features.
-See `docs/expand_plan.md` for the forward roadmap — 5 directions for what to build next.
+See `docs/expand_plan.md` for the original 5-option roadmap (all options now done/explored).
+See `docs/expansions/FRAMEWORK.md` for the next phase — data mining and LLM signal layer.
 
 | Item | Status | Note |
 |------|--------|------|

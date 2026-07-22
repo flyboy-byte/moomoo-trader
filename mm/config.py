@@ -151,6 +151,21 @@ class Config:
     # kept only as a documented placeholder, not a trap.
     gap_premarket_vol_ratio_max: float = float(_get("GAP_PREMARKET_VOL_RATIO_MAX", "1.5"))
 
+    # LLM regime gate (Route 2 expansion)
+    # classify_regime() calls Claude API at 9:20 ET, writes logs/regime_YYYY-MM-DD.json.
+    # _eval_* functions check the label before entry. Fail-open: missing file = "neutral".
+    anthropic_api_key: str = _get("ANTHROPIC_API_KEY", "")
+    anthropic_model: str = _get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    regime_gate_enabled: bool = _bool("REGIME_GATE_ENABLED", False)
+    # Strategies the gate applies to. Empty = gate applies to all active strategies.
+    regime_gate_strategies: list[str] = [
+        s.strip() for s in _get("REGIME_GATE_STRATEGIES", "bb_kdj,bb_kdj_loose").split(",") if s.strip()
+    ]
+    # Regime labels that block entry. "neutral" is never a skip label.
+    regime_skip_labels: list[str] = [
+        s.strip() for s in _get("REGIME_SKIP_LABELS", "choppy,risk_off").split(",") if s.strip()
+    ]
+
     # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
     # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.
     # FRACTIONAL_SHARES=true required to trade below one-share price (e.g. $100 / 9 slots).

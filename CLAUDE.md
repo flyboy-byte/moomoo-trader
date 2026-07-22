@@ -133,7 +133,10 @@ strategy, a doc cleanup). Don't treat this list as a gate against doing other us
   gap_fade (live 2026-07-12).
 - Accumulate live data — most "what does the data say" questions need more samples.
   See docs/evaluation_criteria.md for the actual pre-registered sample-size gates per strategy.
-- Next steps for the project are in docs/expand_plan.md — pick one and go.
+- docs/expand_plan.md is the original 5-option roadmap — all 5 options are done or explored.
+  Next phase is in docs/expansions/ — start at docs/expansions/FRAMEWORK.md.
+  Two primary routes: Route 1 (data mining, scripts/mine_*.py) and
+  Route 2 (LLM regime gate, mm/morning_regime.py + mm/evals.py).
 - Gap Fade (mm/gap_fade.py) is research-only, not in live STRATEGIES. Premarket fill% filter
   validated empirically (9-month sample, see strategy_graveyard.md) and wired into
   run_gap_fade() as of 2026-06-18 — but shadow-mode only (filter_active=GAP_PREMARKET_FILTER_ENABLED,

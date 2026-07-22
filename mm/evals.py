@@ -16,6 +16,7 @@ import pandas as pd
 
 from . import clock
 from . import config as _config
+from .morning_regime import load_regime_today
 from .events import PaperEventLog, PaperPosition, _save_position, _clear_position
 from .execution import _execute_entry, _execute_exit
 from .indicators import add_all
@@ -31,6 +32,46 @@ log = get_logger("paper")
 # Tracks the last candle_ts for which an entry was attempted per (symbol, strategy).
 # Prevents the 60s poll from retrying the same failed order on every tick until a new candle arrives.
 _entry_attempted: dict[tuple[str, str], str] = {}
+
+
+def _regime_gate(
+    symbol: str,
+    strategy: str,
+    candle_ts,
+    elog: "PaperEventLog",
+    sig_score: int,
+    bonus: int,
+) -> bool:
+    """
+    Return True if the regime gate blocks entry (caller should skip entry and return position).
+    When REGIME_GATE_ENABLED=false, logs a shadow event but always returns False.
+    Exits are never gated — only call this inside the entry branch.
+    """
+    cfg = _config.cfg
+    if strategy not in cfg.regime_gate_strategies:
+        return False
+
+    bar_date = pd.Timestamp(candle_ts).strftime("%Y-%m-%d")
+    regime = load_regime_today(bar_date)
+    would_block = regime in cfg.regime_skip_labels
+
+    if not would_block:
+        return False
+
+    if cfg.regime_gate_enabled:
+        log.info("%-8s [%s] REGIME_BLOCK  regime=%s", symbol, strategy, regime)
+        elog.signal_skip("regime_gate", score=sig_score, bonus=bonus,
+                         min_score=0, strategy=strategy,
+                         regime=regime, gate_enabled=True)
+        return True
+    else:
+        # Shadow mode — log what would happen but don't block
+        log.info("%-8s [%s] REGIME_SHADOW  would_block=True regime=%s (gate disabled)",
+                 symbol, strategy, regime)
+        elog.signal_skip("regime_gate_shadow", score=sig_score, bonus=bonus,
+                         min_score=0, strategy=strategy,
+                         regime=regime, gate_enabled=False, would_block=True)
+        return False
 
 
 def _kdj_cross_age(df_signals: pd.DataFrame, max_lookback: int = 50) -> int | None:
@@ -95,6 +136,9 @@ def _eval_bb_kdj(
                 kdj_met = bool(last["sig_kdj_cross"])
             core_met = bool(last["sig_bb_touch"]) and kdj_met
             bonus_met = bonus >= cfg.min_signal_score
+
+        if _regime_gate(symbol, "bb_kdj", candle_ts, elog, sig.score, bonus):
+            return position
 
         if core_met and bonus_met:
             if _entry_attempted.get((symbol, "bb_kdj")) == str(candle_ts):
@@ -213,6 +257,9 @@ def _eval_bb_kdj_loose(
         else:
             kdj_met = bool(last["sig_kdj_cross"])
         core_met = bool(last["sig_bb_touch"]) and kdj_met
+
+        if _regime_gate(symbol, "bb_kdj_loose", candle_ts, elog, sig.score, bonus):
+            return position
 
         if core_met:
             if _entry_attempted.get((symbol, "bb_kdj_loose")) == str(candle_ts):
