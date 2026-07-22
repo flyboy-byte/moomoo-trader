@@ -14,6 +14,8 @@ VPS=$(grep -E '^VPS_HOST=' .env | cut -d= -f2-)
 DAILY_LINE='15 0 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_daily_archive.py >> logs/cron_premarket.log 2>&1'
 WEEKLY_LINE='30 0 * * 6 cd ~/moomoo && .venv/bin/python scripts/weekly_report.py >> logs/cron_weekly.log 2>&1'
 VIX_LINE='10 13 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_vix_morning.py >> logs/cron_vix.log 2>&1'
+# 9:20 ET = 13:20 UTC (EDT). Runs Mon-Fri to classify pre-market regime before open.
+REGIME_LINE='20 13 * * 1-5 cd ~/moomoo && .venv/bin/python scripts/classify_regime.py >> logs/cron_regime.log 2>&1'
 
 # Bug fix 2026-06-17: the old idempotency check matched on script filename
 # substring only, not the full line. If a line's schedule/args were ever
@@ -50,6 +52,7 @@ update_line() {
 update_line "fetch_daily_archive.py" "$DAILY_LINE"
 update_line "weekly_report.py" "$WEEKLY_LINE"
 update_line "fetch_vix_morning.py" "$VIX_LINE"
+update_line "classify_regime.py" "$REGIME_LINE"
 
 echo "\$NEW" | crontab -
 echo ""
