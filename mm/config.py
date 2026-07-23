@@ -166,6 +166,13 @@ class Config:
         s.strip() for s in _get("REGIME_SKIP_LABELS", "choppy,risk_off").split(",") if s.strip()
     ]
 
+    # ORB VIX gate — block all ORB entries when prior-day VIX > threshold.
+    # Empty / unset = disabled. Set after running backtest sweep to find optimal threshold.
+    # Reads logs/vix_daily.jsonl (same file as morning_regime.py). Fail-open: missing VIX = no block.
+    orb_vix_max: float | None = (
+        float(_get("ORB_VIX_MAX", "")) if _get("ORB_VIX_MAX", "") else None
+    )
+
     # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
     # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.
     # FRACTIONAL_SHARES=true required to trade below one-share price (e.g. $100 / 9 slots).

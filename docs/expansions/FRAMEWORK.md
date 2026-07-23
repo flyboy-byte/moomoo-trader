@@ -106,23 +106,36 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 
 **Gate to Phase 3:** at least one successful API call with a sensible structured output.
 
-### Phase 3 — Build
+### Phase 2 — Validation ✓
 
-- [ ] `mm/morning_regime.py` — `classify_regime()` + `_load_regime_today()`
-- [ ] `mm/config.py` — `anthropic_api_key`, `regime_gate_enabled`, `regime_skip_labels`
-- [ ] `mm/evals.py` — `_load_regime_today()` helper + regime gate in `_eval_bb_kdj`
-- [ ] `scripts/classify_regime.py` — standalone runner
-- [ ] Shadow mode running: classifies daily but never blocks entries (log-only)
-- [ ] VPS `.env` updated with `ANTHROPIC_API_KEY` + `REGIME_GATE_ENABLED=false` (shadow)
-- [ ] VPS cron: 9:20 ET daily call to `scripts/classify_regime.py`
+- [x] Anthropic API key obtained and tested
+- [x] `scripts/classify_regime.py` returns a valid JSON label for today's date
+- [x] Prompt produces sensible labels (first live label: choppy; daily labels since 2026-07-21)
 
-**Gate to Phase 4:** shadow mode running cleanly for at least 5 trading sessions.
+**Gate to Phase 3:** ✓ passed.
+
+### Phase 3 — Build ✓ (shadow mode live as of 2026-07-22)
+
+- [x] `mm/morning_regime.py` — `classify_regime()` + `load_regime_today()` + `clear_regime_cache()`
+- [x] `mm/config.py` — `anthropic_api_key`, `regime_gate_enabled`, `regime_gate_strategies`, `regime_skip_labels`
+- [x] `mm/evals.py` — `_regime_gate()` helper wired into `_eval_bb_kdj` and `_eval_bb_kdj_loose`
+- [x] `scripts/classify_regime.py` — standalone runner (`--dry-run`, `--date`)
+- [x] Shadow mode running: classifies daily, never blocks entries, logs `regime_gate_shadow`
+- [x] VPS `.env` updated with `ANTHROPIC_API_KEY` + `REGIME_GATE_ENABLED=false`
+- [x] VPS cron: `20 13 * * 1-5` (9:20 ET Mon–Fri)
+
+**Phase 3 additions (expanded plan — see route-2-llm-signals.md):**
+- [ ] **ORB setup scorer** — `score_orb_setup()` in `mm/morning_regime.py`, per-trade confidence gate in `_eval_orb`
+- [ ] **Weekly synthesis** — `scripts/weekly_synthesis.py`, Monday 9:00 ET cron, posts to Discord
+
+**Gate to Phase 4:** shadow mode cleanly running ≥ 5 sessions (✓) + at least one of the Phase 3 additions built.
 
 ### Phase 4 — Verify
 
 - [ ] 2-week shadow log reviewed: do regime labels correlate with actual session outcomes?
 - [ ] `REGIME_GATE_ENABLED=true` flipped after shadow period, PF trend monitored
-- [ ] `tests/test_replay.py` covers: regime=choppy → entry skipped; regime=neutral → entry fires
+- [ ] `tests/test_replay.py` covers: regime=choppy → entry skipped; regime=neutral → entry fires (TODO)
+- [ ] ORB setup scorer shadow log reviewed: does confidence score correlate with trade outcome?
 - [ ] Fail-open confirmed: delete regime file, confirm no trades are blocked
 
 **Gate to Phase 5:** gate has been live for ≥ 10 trading sessions with no blocking incidents.
@@ -138,7 +151,7 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 
 ## Current status (update this line as phases advance)
 
-**Both routes are in Phase 1 (scoped, not yet built). Next single action: get an
-Anthropic API key and run one test call — that's the fastest way to learn if Route 2
-is a 1-hour build or a 1-day build. Route 1 can start in parallel by writing
-`scripts/mine_first_bar.py` against the existing candle CSVs.**
+**Route 2 is in Phase 3 — shadow mode live on VPS since 2026-07-22. Labels have been
+`neutral` for all 3 sessions so far (VIX 16–18, no macro events). Next build: ORB setup
+scorer (per-trade Claude confidence gate) + weekly synthesis script. Route 1 not yet started —
+next action is `scripts/mine_first_bar.py`.**

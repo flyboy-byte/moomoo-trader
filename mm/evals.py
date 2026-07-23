@@ -8,6 +8,7 @@ Contains:
 - _eval_vwap_pb()    — VWAP Pullback (flush-and-reclaim)
 - _eval_orb()        — Opening Range Breakout (long and short)
 """
+import json
 import math
 from datetime import time as dtime
 from pathlib import Path
@@ -72,6 +73,31 @@ def _regime_gate(
                          min_score=0, strategy=strategy,
                          regime=regime, gate_enabled=False, would_block=True)
         return False
+
+
+_vix_cache: dict[str, float | None] = {}
+
+
+def _load_vix_today(date_str: str) -> float | None:
+    """Return prior-day VIX close for the given trading date, or None if unavailable.
+    Reads logs/vix_daily.jsonl (keyed by trading date). Cached per date."""
+    if date_str in _vix_cache:
+        return _vix_cache[date_str]
+    cfg = _config.cfg
+    vix_file = cfg.logs_dir / "vix_daily.jsonl"
+    result: float | None = None
+    if vix_file.exists():
+        try:
+            with open(vix_file) as f:
+                for line in f:
+                    rec = json.loads(line)
+                    if rec.get("date") == date_str:
+                        result = float(rec["vix_prev_close"])
+                        break
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            pass
+    _vix_cache[date_str] = result
+    return result
 
 
 def _kdj_cross_age(df_signals: pd.DataFrame, max_lookback: int = 50) -> int | None:
@@ -629,6 +655,16 @@ def _eval_orb(
                 position = None
 
     elif or_valid and not is_time_stop and not already_entered:
+        # VIX gate — block all ORB entries on elevated-vol days. Fail-open: missing VIX = proceed.
+        if cfg.orb_vix_max is not None:
+            vix_val = _load_vix_today(bar_date.strftime("%Y-%m-%d"))
+            if vix_val is not None and vix_val > cfg.orb_vix_max:
+                log.info("%-8s [orb]    SKIP  orb_vix_block vix=%.2f > max=%.2f",
+                         symbol, vix_val, cfg.orb_vix_max)
+                elog.signal_skip("orb_vix_block", score=0, bonus=0, min_score=0,
+                                 strategy="orb", vix=vix_val, threshold=cfg.orb_vix_max)
+                return position
+
         or_high = or_info["high"]
         or_low = or_info["low"]
         or_range = or_high - or_low
