@@ -11,6 +11,7 @@ returns "neutral" and all strategy entries proceed normally.
 from __future__ import annotations
 
 import json
+import socket
 import time
 from dataclasses import dataclass, asdict
 from datetime import date, datetime
@@ -248,6 +249,29 @@ def classify_regime(
     out_path = logs_dir / f"regime_{date_str}.json"
     out_path.write_text(json.dumps(asdict(result), indent=2))
     log.info("Regime for %s: %s (confidence=%.2f) → %s", date_str, regime, confidence, out_path)
+
+    # Append to api_usage.jsonl — prompt, response, token counts, and hostname.
+    # Hostname distinguishes VPS calls (expected) from accidental local runs.
+    usage_record = {
+        "ts": result.ts,
+        "date": date_str,
+        "host": socket.gethostname(),
+        "model": cfg.anthropic_model,
+        "prompt_version": PROMPT_VERSION,
+        "input_tokens": message.usage.input_tokens,
+        "output_tokens": message.usage.output_tokens,
+        "system_prompt": _SYSTEM,
+        "user_prompt": prompt,
+        "raw_response": raw,
+        "regime": regime,
+        "confidence": result.confidence,
+    }
+    usage_path = logs_dir / "api_usage.jsonl"
+    with open(usage_path, "a") as f:
+        f.write(json.dumps(usage_record) + "\n")
+    log.info("API usage logged: input=%d output=%d tokens host=%s → %s",
+             message.usage.input_tokens, message.usage.output_tokens,
+             usage_record["host"], usage_path)
 
     return result
 
