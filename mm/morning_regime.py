@@ -536,7 +536,7 @@ def score_orb_setup(
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
         msg = client.messages.create(
             model=cfg.anthropic_model,
-            max_tokens=64,
+            max_tokens=128,
             system=_ORB_SCORE_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
