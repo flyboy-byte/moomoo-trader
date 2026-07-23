@@ -488,7 +488,7 @@ def synthesize_week(
 # ---------------------------------------------------------------------------
 
 _orb_score_cache: dict[str, dict] = {}
-_FAIL_OPEN_SCORE = {"confidence": 0.5, "reason": "unavailable"}
+_FAIL_OPEN_SCORE = {"confidence": 1.0, "reason": "unavailable"}  # fail-open = always allow
 
 _ORB_SCORE_SYSTEM = (
     "You are a technical trading setup evaluator for Opening Range Breakout strategies. "
