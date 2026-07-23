@@ -14,7 +14,7 @@ import json
 import socket
 import time
 from dataclasses import dataclass, asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from . import clock
@@ -243,7 +243,7 @@ def classify_regime(
         reason=reason,
         model=cfg.anthropic_model,
         prompt_version=PROMPT_VERSION,
-        ts=datetime.utcnow().isoformat(),
+        ts=datetime.now(timezone.utc).isoformat(),
     )
 
     out_path = logs_dir / f"regime_{date_str}.json"
@@ -251,11 +251,9 @@ def classify_regime(
     log.info("Regime for %s: %s (confidence=%.2f) → %s", date_str, regime, confidence, out_path)
 
     # Append to api_usage.jsonl — prompt, response, token counts, and hostname.
-    # Hostname distinguishes VPS calls (expected) from accidental local runs.
-    usage_record = {
-        "ts": result.ts,
+    _append_api_usage(logs_dir, {
+        "call_type": "classify_regime",
         "date": date_str,
-        "host": socket.gethostname(),
         "model": cfg.anthropic_model,
         "prompt_version": PROMPT_VERSION,
         "input_tokens": message.usage.input_tokens,
@@ -265,13 +263,10 @@ def classify_regime(
         "raw_response": raw,
         "regime": regime,
         "confidence": result.confidence,
-    }
-    usage_path = logs_dir / "api_usage.jsonl"
-    with open(usage_path, "a") as f:
-        f.write(json.dumps(usage_record) + "\n")
-    log.info("API usage logged: input=%d output=%d tokens host=%s → %s",
+    })
+    log.info("API usage logged: input=%d output=%d tokens host=%s",
              message.usage.input_tokens, message.usage.output_tokens,
-             usage_record["host"], usage_path)
+             socket.gethostname())
 
     return result
 
@@ -314,3 +309,263 @@ def load_regime_today(date_str: str, logs_dir: Path | None = None) -> str:
 def clear_regime_cache() -> None:
     """Clear the in-process cache. Used in tests to reset state between runs."""
     _regime_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Shared API usage logger
+# ---------------------------------------------------------------------------
+
+def _append_api_usage(logs_dir: Path, extra: dict) -> None:
+    """Append one record to logs/api_usage.jsonl with host + timestamp."""
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "host": socket.gethostname(),
+        **extra,
+    }
+    with open(logs_dir / "api_usage.jsonl", "a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Weekly synthesis
+# ---------------------------------------------------------------------------
+
+def _build_week_stats(
+    events: list[dict],
+    regime_labels: dict[str, str],
+) -> dict:
+    """Aggregate trade + skip events into a compact summary dict."""
+    by_strat: dict[str, dict] = {}
+    for e in events:
+        if e.get("event") == "position_close":
+            s = e.get("strategy", "unknown")
+            if s not in by_strat:
+                by_strat[s] = {"trades": 0, "wins": 0, "total_pnl": 0.0}
+            pnl = float(e.get("pnl", 0))
+            by_strat[s]["trades"] += 1
+            by_strat[s]["wins"] += 1 if pnl > 0 else 0
+            by_strat[s]["total_pnl"] = round(by_strat[s]["total_pnl"] + pnl, 2)
+
+    skip_counts: dict[str, int] = {}
+    for e in events:
+        if e.get("event") == "signal_skip":
+            r = e.get("reason", "unknown")
+            skip_counts[r] = skip_counts.get(r, 0) + 1
+
+    regime_counts: dict[str, int] = {}
+    for label in regime_labels.values():
+        regime_counts[label] = regime_counts.get(label, 0) + 1
+
+    return {
+        "by_strategy": by_strat,
+        "skip_counts": skip_counts,
+        "regime_counts": regime_counts,
+    }
+
+
+def _build_synthesis_prompt(week_str: str, stats: dict) -> str:
+    return f"""Weekly paper-trading results for {week_str}:
+
+Strategy results (paper/simulate account — not real money):
+{json.dumps(stats['by_strategy'], indent=2)}
+
+Morning regime labels this week:
+{json.dumps(stats['regime_counts'])}
+
+Entry skip reasons (how often entries were blocked and why):
+{json.dumps(stats['skip_counts'])}
+
+Respond with exactly this JSON:
+{{"summary": "<2-3 sentence plain-English summary>", "bright_spots": ["<item>"], "concerns": ["<item>"], "regime_verdict": "<did regime labels seem to match outcomes?>", "recommendation": "<one concrete next action or 'more data needed'>", "data_quality": "<comment on sample size>"}}"""
+
+
+def synthesize_week(
+    week_str: str | None = None,
+    logs_dir: Path | None = None,
+) -> dict:
+    """
+    Read last week's JSONL trade events, call Claude for structured analysis,
+    write logs/synthesis_YYYY-WW.json. Fail-open: returns raw stats on API error.
+    Called by scripts/weekly_synthesis.py every Monday at 9:00 ET.
+    """
+    import anthropic
+
+    cfg = _config.cfg
+    if logs_dir is None:
+        logs_dir = cfg.logs_dir
+
+    today = clock.today()
+    days_since_monday = today.weekday()
+    last_monday = today - timedelta(days=days_since_monday + 7)
+    last_friday = last_monday + timedelta(days=4)
+
+    if week_str is None:
+        year, week_num, _ = last_monday.isocalendar()
+        week_str = f"{year}-W{week_num:02d}"
+
+    # Load position_close + signal_skip events from last week's JSONL files
+    KEEP = {"position_close", "signal_skip"}
+    events: list[dict] = []
+    for jsonl in sorted(logs_dir.glob("paper_*_202*.jsonl")):
+        date_part = jsonl.stem.rsplit("_", 1)[-1]
+        if not (str(last_monday) <= date_part <= str(last_friday)):
+            continue
+        for line in jsonl.read_text().splitlines():
+            try:
+                e = json.loads(line)
+                if e.get("event") in KEEP:
+                    events.append(e)
+            except json.JSONDecodeError:
+                pass
+
+    # Collect regime labels for the week
+    regime_labels: dict[str, str] = {}
+    d = last_monday
+    while d <= last_friday:
+        ds = str(d)
+        regime_labels[ds] = load_regime_today(ds, logs_dir=logs_dir)
+        d += timedelta(days=1)
+
+    stats = _build_week_stats(events, regime_labels)
+    out_path = logs_dir / f"synthesis_{week_str}.json"
+
+    # Fail-open: write raw stats even if API call fails
+    if not cfg.anthropic_api_key:
+        result = {"week": week_str, "stats": stats, "analysis": None,
+                  "ts": datetime.now(timezone.utc).isoformat()}
+        out_path.write_text(json.dumps(result, indent=2))
+        log.info("Weekly synthesis (no API key) written → %s", out_path)
+        return result
+
+    prompt = _build_synthesis_prompt(week_str, stats)
+    analysis: dict = {}
+    input_tokens = output_tokens = 0
+    try:
+        client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+        msg = client.messages.create(
+            model=cfg.anthropic_model,
+            max_tokens=512,
+            system=(
+                "You are a trading strategy analyst reviewing paper-trading results. "
+                "Respond ONLY with a valid JSON object. No markdown, no explanation."
+            ),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        analysis = json.loads(raw)
+        input_tokens = msg.usage.input_tokens
+        output_tokens = msg.usage.output_tokens
+        _append_api_usage(logs_dir, {
+            "call_type": "weekly_synthesis",
+            "week": week_str,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "user_prompt": prompt,
+            "raw_response": raw,
+        })
+    except Exception as e:
+        log.warning("Weekly synthesis API call failed (%s) — writing raw stats only", e)
+        analysis = {"error": str(e)}
+
+    result = {
+        "week": week_str,
+        "stats": stats,
+        "analysis": analysis,
+        "model": cfg.anthropic_model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    out_path.write_text(json.dumps(result, indent=2))
+    log.info("Weekly synthesis for %s written → %s", out_path.name, out_path)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# ORB per-trade setup scorer
+# ---------------------------------------------------------------------------
+
+_orb_score_cache: dict[str, dict] = {}
+_FAIL_OPEN_SCORE = {"confidence": 0.5, "reason": "unavailable"}
+
+_ORB_SCORE_SYSTEM = (
+    "You are a technical trading setup evaluator for Opening Range Breakout strategies. "
+    "Respond ONLY with a valid JSON object. No markdown, no explanation."
+)
+
+
+def score_orb_setup(
+    symbol: str,
+    bar_ts: str,
+    setup: dict,
+    logs_dir: Path | None = None,
+) -> dict:
+    """
+    Return {"confidence": float 0-1, "reason": str} for this ORB entry setup.
+    Fail-open: returns confidence=0.5 on any API error.
+    Cached per (symbol, bar_ts) — safe to call multiple times per bar.
+    """
+    import anthropic
+
+    cache_key = f"{symbol}:{bar_ts}"
+    if cache_key in _orb_score_cache:
+        return _orb_score_cache[cache_key]
+
+    cfg = _config.cfg
+    if not cfg.anthropic_api_key:
+        return _FAIL_OPEN_SCORE
+
+    prompt = (
+        f"Rate this Opening Range Breakout setup on confidence 0.0-1.0.\n\n"
+        f"Symbol: {symbol}\n"
+        f"Date: {setup.get('date', 'unknown')}\n"
+        f"Direction: {setup.get('direction', 'unknown')}\n"
+        f"OR range: {setup.get('or_range_pct', 0):.2f}% of price\n"
+        f"Volume ratio: {setup.get('vol_ratio', 0):.1f}x 20-bar MA\n"
+        f"VIX prior close: {setup.get('vix') or 'unknown'}\n"
+        f"Prior session change: {setup.get('prior_chg', 0):+.2f}%\n"
+        f"Morning regime: {setup.get('regime', 'neutral')} "
+        f"(confidence {setup.get('regime_confidence', 0.5):.2f})\n"
+        f"Minutes since open: {setup.get('mins_since_open', 0)}\n\n"
+        f'Respond with: {{"confidence": <0.0-1.0>, "reason": "<one sentence>"}}'
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+        msg = client.messages.create(
+            model=cfg.anthropic_model,
+            max_tokens=64,
+            system=_ORB_SCORE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(raw)
+        result: dict = {
+            "confidence": float(parsed.get("confidence", 0.5)),
+            "reason": str(parsed.get("reason", "")),
+        }
+        _append_api_usage(logs_dir or cfg.logs_dir, {
+            "call_type": "orb_setup_scorer",
+            "symbol": symbol,
+            "bar_ts": bar_ts,
+            "input_tokens": msg.usage.input_tokens,
+            "output_tokens": msg.usage.output_tokens,
+            "user_prompt": prompt,
+            "raw_response": raw,
+            "confidence": result["confidence"],
+        })
+    except Exception as e:
+        log.warning("score_orb_setup failed for %s@%s (%s) — using 0.5", symbol, bar_ts, e)
+        result = dict(_FAIL_OPEN_SCORE)
+
+    _orb_score_cache[cache_key] = result
+    return result
+
+
+def clear_orb_score_cache() -> None:
+    """Clear per-bar score cache. Used in tests."""
+    _orb_score_cache.clear()

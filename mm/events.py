@@ -69,9 +69,9 @@ class PaperEventLog:
                     regime_label=regime_label, signals=signals)
 
     def signal_skip(self, reason: str, score: int, bonus: int, min_score: int,
-                    strategy: str = "") -> None:
+                    strategy: str = "", **extra) -> None:
         self._write("signal_skip", strategy=strategy, reason=reason, score=score,
-                    bonus_score=bonus, min_score=min_score)
+                    bonus_score=bonus, min_score=min_score, **extra)
 
     def risk_block(self, reason: str, strategy: str = "", **details) -> None:
         self._write("risk_block", strategy=strategy, reason=reason, **details)

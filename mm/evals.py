@@ -17,7 +17,7 @@ import pandas as pd
 
 from . import clock
 from . import config as _config
-from .morning_regime import load_regime_today
+from .morning_regime import load_regime_today, score_orb_setup
 from .events import PaperEventLog, PaperPosition, _save_position, _clear_position
 from .execution import _execute_entry, _execute_exit
 from .indicators import add_all
@@ -677,6 +677,36 @@ def _eval_orb(
         after_cutoff = bar_clock >= cutoff
         above_high = close > or_high
         below_low = close < or_low
+
+        # ORB setup scorer — per-trade Claude confidence gate (shadow mode by default).
+        # Runs after VIX gate and before long/short split so it sees direction.
+        if cfg.anthropic_api_key and (cfg.orb_setup_scorer_enabled or True):
+            direction = "LONG" if above_high else ("SHORT" if below_low else None)
+            if direction and after_cutoff and vol_ok:
+                vix_for_score = _load_vix_today(bar_date.strftime("%Y-%m-%d"))
+                morning_regime = load_regime_today(bar_date.strftime("%Y-%m-%d"))
+                open_time = bar_time.replace(hour=9, minute=30, second=0, microsecond=0)
+                setup = {
+                    "date": bar_date.strftime("%Y-%m-%d"),
+                    "direction": direction,
+                    "or_range_pct": round(or_range / close * 100, 3),
+                    "vol_ratio": round(vol / vol_ma if vol_ma else 0, 2),
+                    "vix": vix_for_score,
+                    "regime": morning_regime,
+                    "mins_since_open": int((bar_time - open_time).total_seconds() / 60),
+                }
+                scored = score_orb_setup(symbol, str(candle_ts), setup)
+                confidence = scored["confidence"]
+                if cfg.orb_setup_scorer_enabled and confidence < cfg.orb_entry_min_confidence:
+                    log.info("%-8s [orb]    SKIP  orb_claude_score=%.2f < min=%.2f  %s",
+                             symbol, confidence, cfg.orb_entry_min_confidence, scored["reason"])
+                    elog.signal_skip("orb_claude_score", score=0, bonus=0, min_score=0,
+                                     strategy="orb", confidence=confidence,
+                                     reason=scored["reason"])
+                    return position
+                else:
+                    log.info("%-8s [orb]    SCORE  confidence=%.2f  %s  (gate=%s)",
+                             symbol, confidence, scored["reason"], cfg.orb_setup_scorer_enabled)
 
         # --- Long entry ---
         if above_high and after_cutoff and not vol_ok:

@@ -166,6 +166,12 @@ class Config:
         s.strip() for s in _get("REGIME_SKIP_LABELS", "choppy,risk_off").split(",") if s.strip()
     ]
 
+    # ORB per-trade setup scorer (Route 2 Phase 2) — calls Claude before each entry.
+    # Shadow mode (false): logs confidence score without blocking.
+    # Live mode (true): blocks entries below orb_entry_min_confidence.
+    orb_setup_scorer_enabled: bool = _bool("ORB_SETUP_SCORER_ENABLED", False)
+    orb_entry_min_confidence: float = float(_get("ORB_ENTRY_MIN_CONFIDENCE", "0.65"))
+
     # ORB VIX gate — block ORB entries when prior-day VIX > threshold.
     # Global default: empty/unset = no global filter. Per-symbol override wins if set.
     # Sweep (2024+ OOS): IWM benefits at ≤18 (PF 1.045→1.113); QQQ hurts at every threshold;
