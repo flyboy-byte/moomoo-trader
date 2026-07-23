@@ -188,6 +188,19 @@ class Config:
         if ":" in s and s.strip()
     }
 
+    # Gap Fade VIX gate — block gap_fade entries when prior-day VIX > threshold.
+    # OOS sweep (2024+): VIX>=20 negative for SPY (PF 0.626) and QQQ (PF 0.655).
+    # IWM positive at all VIX bands — use GAP_VIX_MAX_OVERRIDES to filter per-symbol.
+    # Reads logs/vix_daily.jsonl. Fail-open: missing VIX data = no block.
+    gap_vix_max: float | None = (
+        float(_get("GAP_VIX_MAX", "")) if _get("GAP_VIX_MAX", "") else None
+    )
+    gap_vix_max_overrides: dict[str, float] = {
+        s.split(":")[0].strip(): float(s.split(":")[1].strip())
+        for s in _get("GAP_VIX_MAX_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
+
     # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
     # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.
     # FRACTIONAL_SHARES=true required to trade below one-share price (e.g. $100 / 9 slots).

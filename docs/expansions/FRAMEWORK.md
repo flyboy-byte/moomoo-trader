@@ -62,8 +62,8 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
       → **ACTIONABLE**: VIX 20-25 kills SPY (PF 0.490) and QQQ (PF 0.546) gap fades
       → **SAFE ZONE**: VIX 15-20 best for SPY (PF 1.861) / QQQ (PF 1.289)
       → **IWM DIFFERENT**: positive across all VIX bands (VIX<15: PF 2.397)
-- [ ] H2 finding deployed: `GAP_VIX_SKIP_BAND` filter on gap_fade for SPY/QQQ
-      (OOS verification still needed before wiring in)
+- [x] H2 finding deployed: `GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20` (2026-07-23)
+      OOS confirmed VIX>=20 negative for both; IWM unfiltered (positive at all VIX bands)
 
 **Gate to Phase 4:** at least one non-trivial finding (positive or confirmed null).
 

@@ -885,6 +885,18 @@ def _eval_gap_fade(
 
     # --- Entry (9:35 bar only, one trade per day) ---
     elif is_entry_bar and not already_entered:
+        # VIX gate — block entries when prior-day VIX > per-symbol threshold
+        effective_gap_vix_max = cfg.gap_vix_max_overrides.get(symbol, cfg.gap_vix_max)
+        if effective_gap_vix_max is not None:
+            vix_val = _load_vix_today(bar_date.strftime("%Y-%m-%d"))
+            if vix_val is not None and vix_val > effective_gap_vix_max:
+                log.info("%-8s [gap_fade] SKIP  gap_vix_block vix=%.2f > max=%.2f",
+                         symbol, vix_val, effective_gap_vix_max)
+                elog.signal_skip("gap_vix_block", score=0, bonus=0, min_score=0,
+                                 strategy="gap_fade", vix=vix_val,
+                                 threshold=effective_gap_vix_max)
+                return position
+
         # Derive prev_close from the last bar of the prior trading day in the window
         df["_ts_tmp"] = pd.to_datetime(df["time_key"])
         df["_date_tmp"] = df["_ts_tmp"].dt.date

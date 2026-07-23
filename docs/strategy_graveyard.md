@@ -53,8 +53,13 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 | VIX>25 | 62 | 56% | 1.213 | +4.66 |
 
 **Key finding:** VIX 20–25 is the kill zone for SPY and QQQ gap fades. Win rate drops to 40–44% and PF collapses below 0.55. VIX>25 (extreme fear) is surprisingly OK — gaps become directional in a known direction. IWM is different: positive across all VIX bands, best at low VIX.
-**Deploy candidate:** Block gap_fade entries on SPY and QQQ when VIX is in [20, 25) range. IWM needs no filter. OOS verification still needed (run --sweep-vix with --start 2024-01-01 once flag is added).
-**Code:** `scripts/backtest_gap_fade.py --sweep-vix`; VIX data in `logs/vix_daily.jsonl`.
+**OOS verification (2024+ only, 2026-07-23):**
+- SPY VIX 20-25 OOS: PF 0.626 (-7.82), VIX>25 OOS: PF 0.898 (-0.98) → block at VIX>=20
+- QQQ VIX 20-25 OOS: PF 0.655 (-11.34), VIX>25 OOS: PF 0.693 (-4.41) → block at VIX>=20
+- IWM VIX 20-25 OOS: PF 2.285 (+7.79), VIX>25 OOS: PF 3.385 (+6.21) → no filter
+**DEPLOYED 2026-07-23:** `GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20` in `.env` and VPS.
+`mm/evals.py::_eval_gap_fade` reads `cfg.gap_vix_max_overrides` + `_load_vix_today()` before entry.
+**Code:** `scripts/backtest_gap_fade.py --sweep-vix [--start YYYY-MM-DD]`; VIX data in `logs/vix_daily.jsonl`.
 
 ---
 

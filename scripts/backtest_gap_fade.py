@@ -66,15 +66,19 @@ def _load_vix_map() -> dict[str, float]:
     return out
 
 
-def sweep_vix(df: pd.DataFrame, sym: str, vix_map: dict[str, float]) -> None:
+def sweep_vix(df: pd.DataFrame, sym: str, vix_map: dict[str, float],
+              start: str | None = None) -> None:
     """Print PF / win% / trade count broken down by VIX band × gap size band."""
+    if start:
+        df = df[pd.to_datetime(df["time_key"]).dt.strftime("%Y-%m-%d") >= start].copy()
     all_trades = run_gap_fade(df.copy())
     if not all_trades:
         print(f"  {sym}: no trades")
         return
 
+    period = f" OOS≥{start}" if start else ""
     print(f"\n{'='*70}")
-    print(f"  {sym} — Gap × VIX breakdown  (n={len(all_trades)} total trades)")
+    print(f"  {sym} — Gap × VIX breakdown{period}  (n={len(all_trades)} total trades)")
     print(f"{'='*70}")
 
     dates = pd.to_datetime(df["time_key"]).dt.strftime("%Y-%m-%d")
@@ -147,7 +151,7 @@ def run_single(path: Path, args: argparse.Namespace,
     days = df["time_key"].dt.date.nunique()
 
     if args.sweep_vix:
-        sweep_vix(df, sym, vix_map or {})
+        sweep_vix(df, sym, vix_map or {}, start=getattr(args, "start", None))
         return
 
     if args.sweep:
@@ -212,6 +216,7 @@ def main() -> None:
     parser.add_argument("--sweep", action="store_true", help="Sweep min_gap × target_fill")
     parser.add_argument("--sweep-fill", action="store_true", help="Sweep target_fill_pct only")
     parser.add_argument("--sweep-vix", action="store_true", help="Gap × VIX band breakdown")
+    parser.add_argument("--start", metavar="YYYY-MM-DD", help="Filter trades from this date")
     parser.add_argument("--details", action="store_true", help="Print individual trades")
     args = parser.parse_args()
 
