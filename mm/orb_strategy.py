@@ -97,6 +97,8 @@ def run_orb_signals(
     vol_mult: float = ORB_VOL_MULT,
     orb_minutes: int | None = None,
     target_mult: float = ORB_TARGET_MULT,
+    vix_map: dict | None = None,
+    vix_max: float | None = None,
 ) -> tuple[list[ORBTrade], pd.DataFrame]:
     """Stateful bar-by-bar ORB evaluation. Returns (trades, annotated_df)."""
     df = add_all(df)
@@ -167,6 +169,12 @@ def run_orb_signals(
                 position = None
 
         if position is None and not is_time_stop and bar_date not in entered_today:
+            if vix_map is not None and vix_max is not None:
+                vix_val = vix_map.get(str(bar_date))
+                if vix_val is not None and vix_val > vix_max:
+                    entered_today.add(bar_date)  # skip whole day
+                    continue
+
             vol_ok = float(row["volume"]) > vol_mult * float(row.get("volume_ma", 0))
 
             if close > or_high and vol_ok:

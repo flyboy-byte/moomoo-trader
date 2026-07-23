@@ -166,12 +166,21 @@ class Config:
         s.strip() for s in _get("REGIME_SKIP_LABELS", "choppy,risk_off").split(",") if s.strip()
     ]
 
-    # ORB VIX gate — block all ORB entries when prior-day VIX > threshold.
-    # Empty / unset = disabled. Set after running backtest sweep to find optimal threshold.
-    # Reads logs/vix_daily.jsonl (same file as morning_regime.py). Fail-open: missing VIX = no block.
+    # ORB VIX gate — block ORB entries when prior-day VIX > threshold.
+    # Global default: empty/unset = no global filter. Per-symbol override wins if set.
+    # Sweep (2024+ OOS): IWM benefits at ≤18 (PF 1.045→1.113); QQQ hurts at every threshold;
+    # SPY mild positive at 20. Deploy as IWM-only via ORB_VIX_MAX_OVERRIDES=US.IWM:18.
+    # Reads logs/vix_daily.jsonl. Fail-open: missing VIX data for a date = no block.
     orb_vix_max: float | None = (
         float(_get("ORB_VIX_MAX", "")) if _get("ORB_VIX_MAX", "") else None
     )
+    # Per-symbol VIX max overrides: "US.IWM:18,US.SPY:20" → {"US.IWM": 18.0, "US.SPY": 20.0}
+    # Falls back to orb_vix_max for symbols not listed.
+    orb_vix_max_overrides: dict[str, float] = {
+        s.split(":")[0].strip(): float(s.split(":")[1].strip())
+        for s in _get("ORB_VIX_MAX_OVERRIDES", "").split(",")
+        if ":" in s and s.strip()
+    }
 
     # Capital allocation. When TOTAL_CAPITAL > 0, per-slot dollars are computed automatically
     # as total_capital / (symbols × strategies). Overrides MAX_POSITION_DOLLARS entirely.

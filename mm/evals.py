@@ -656,13 +656,14 @@ def _eval_orb(
 
     elif or_valid and not is_time_stop and not already_entered:
         # VIX gate — block all ORB entries on elevated-vol days. Fail-open: missing VIX = proceed.
-        if cfg.orb_vix_max is not None:
+        effective_vix_max = cfg.orb_vix_max_overrides.get(symbol, cfg.orb_vix_max)
+        if effective_vix_max is not None:
             vix_val = _load_vix_today(bar_date.strftime("%Y-%m-%d"))
-            if vix_val is not None and vix_val > cfg.orb_vix_max:
+            if vix_val is not None and vix_val > effective_vix_max:
                 log.info("%-8s [orb]    SKIP  orb_vix_block vix=%.2f > max=%.2f",
-                         symbol, vix_val, cfg.orb_vix_max)
+                         symbol, vix_val, effective_vix_max)
                 elog.signal_skip("orb_vix_block", score=0, bonus=0, min_score=0,
-                                 strategy="orb", vix=vix_val, threshold=cfg.orb_vix_max)
+                                 strategy="orb", vix=vix_val, threshold=effective_vix_max)
                 return position
 
         or_high = or_info["high"]
