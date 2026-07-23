@@ -5,6 +5,81 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
+## Data Mining Results (Route 1 — scripts/mine_*.py)
+
+### H1 — First-Bar Direction Predicts 10am-11am Returns — TESTED 2026-07-23, NULL
+**Hypothesis:** Does the direction of the 9:30–9:35 bar predict net return in the 10am–11am window?
+**Method:** `scripts/mine_first_bar.py --all`; Mann-Whitney U test + Pearson r on up vs down first bars.
+**Results (all three symbols, IS=2022-2023, OOS=2024-present):**
+
+| Symbol | Period | n days | MW p-value | Cohen's d | Verdict |
+|--------|--------|--------|------------|-----------|---------|
+| IWM | OOS | 615 | 0.367 | +0.062 | NULL |
+| QQQ | OOS | 611 | 0.203 | +0.071 | NULL |
+| SPY | OOS | 618 | 0.173 | +0.059 | NULL |
+
+**Conclusion:** First-bar direction carries zero predictive signal for the next hour's return. Mean differences are near zero in both directions. Effect sizes are trivially small (Cohen's d < 0.1 in all cases).
+**Code:** `scripts/mine_first_bar.py` — kept for future hypothesis testing.
+
+---
+
+### H2 — Gap Size × VIX Band — TESTED 2026-07-23, ACTIONABLE FINDING
+**Hypothesis:** Does gap fade success rate vary meaningfully by VIX regime and gap size?
+**Method:** `scripts/backtest_gap_fade.py --all --sweep-vix`; 2022–2026 backtest data × vix_daily.jsonl.
+**Results (2022-2026 combined):**
+
+**SPY (285 trades):**
+| VIX Band | Trades | Win% | PF | PnL |
+|----------|--------|------|----|-----|
+| VIX<15 | 43 | 58% | 0.918 | -1.65 |
+| VIX 15-20 | 116 | 67% | 1.861 | +44.38 |
+| VIX 20-25 | 70 | 40% | 0.490 | -28.58 |
+| VIX>25 | 56 | 61% | 1.242 | +9.17 |
+
+**QQQ (343 trades):**
+| VIX Band | Trades | Win% | PF | PnL |
+|----------|--------|------|----|-----|
+| VIX<15 | 58 | 64% | 1.105 | +3.26 |
+| VIX 15-20 | 150 | 65% | 1.289 | +24.06 |
+| VIX 20-25 | 73 | 44% | 0.546 | -31.41 |
+| VIX>25 | 62 | 61% | 1.067 | +2.78 |
+
+**IWM (335 trades) — DIFFERENT PATTERN:**
+| VIX Band | Trades | Win% | PF | PnL |
+|----------|--------|------|----|-----|
+| VIX<15 | 66 | 77% | 2.397 | +15.86 |
+| VIX 15-20 | 151 | 69% | 1.579 | +20.50 |
+| VIX 20-25 | 56 | 61% | 1.145 | +2.72 |
+| VIX>25 | 62 | 56% | 1.213 | +4.66 |
+
+**Key finding:** VIX 20–25 is the kill zone for SPY and QQQ gap fades. Win rate drops to 40–44% and PF collapses below 0.55. VIX>25 (extreme fear) is surprisingly OK — gaps become directional in a known direction. IWM is different: positive across all VIX bands, best at low VIX.
+**Deploy candidate:** Block gap_fade entries on SPY and QQQ when VIX is in [20, 25) range. IWM needs no filter. OOS verification still needed (run --sweep-vix with --start 2024-01-01 once flag is added).
+**Code:** `scripts/backtest_gap_fade.py --sweep-vix`; VIX data in `logs/vix_daily.jsonl`.
+
+---
+
+### H3 — Lag-1 Autocorrelation by Hour Bucket — TESTED 2026-07-23, PARTIAL SIGNAL
+**Hypothesis:** Is there serial correlation in 5-min returns for SPY/QQQ/IWM at different times of day?
+**Method:** `scripts/mine_autocorrelation.py --all`; Pearson r between ret[t] and ret[t-1] by hour bucket.
+**Results (OOS = 2024-present):**
+
+**IWM 09:30-10:00: r=-0.185, p<0.0001, n=2461 bars — SIGNAL**
+- Strongest finding. Strong mean-reversion in IWM opening 30 minutes. An up bar strongly predicts a down bar.
+- Not present in IS (r=+0.049, IS p=0.030 — opposite sign, different regime). Emerged 2024+.
+- Validates the BB+KDJ mean-reversion premise empirically for IWM in the opening window.
+- NOT independently deployable without entry/exit mechanics — but supports the existing strategy rationale.
+
+**SPY 13:00-14:00: r=+0.059, p<0.0001, n=7350 bars — SIGNAL (mild momentum)**
+- Mild positive autocorrelation in SPY 1-2pm window. Small effect, but highly significant due to n.
+- Suggests momentum strategies (not mean reversion) might have an edge in SPY 1-2pm.
+- Not independently deployable at current effect size.
+
+**QQQ: NULL** — no bucket met |r|>0.05 AND p<0.01 AND n≥200.
+**IWM/SPY other buckets: NULL.**
+**Code:** `scripts/mine_autocorrelation.py`
+
+---
+
 ## Dead Strategies (tested, no deployable edge)
 
 ### VWAP Crossover (momentum)

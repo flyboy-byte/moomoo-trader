@@ -44,20 +44,26 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 
 **Gate to Phase 2:** done (no blocking condition — this is a documentation exercise).
 
-### Phase 2 — Validation
+### Phase 2 — Validation ✓
 
-- [ ] Run at least one `scripts/mine_*.py` script and get a non-trivial result
-      (confirms the research loop infrastructure actually works end-to-end)
-- [ ] At least one hypothesis tested with real data output — kill it or advance it
+- [x] `scripts/mine_first_bar.py` run on all 3 symbols — H1 confirmed null (2026-07-23)
+- [x] Research loop infrastructure working end-to-end
 
-**Gate to Phase 3:** one working mining script producing interpretable results.
+**Gate to Phase 3:** ✓ passed.
 
-### Phase 3 — Build
+### Phase 3 — Build ✓ (all mining scripts complete 2026-07-23)
 
-- [ ] First mining script written: `scripts/mine_first_bar.py` (H1 — 9:30 bar predictive?)
-- [ ] Second: `scripts/mine_autocorrelation.py` (H3 — lag-1 autocorr by time-of-day)
-- [ ] Extend `scripts/backtest_gap_fade.py --sweep-vix` (H2 — gap × VIX band)
-- [ ] Any finding with PF ≥ 1.2 + ≥ 100 OOS trades wired into a new `_eval_*` or filter
+- [x] `scripts/mine_first_bar.py` (H1 — 9:30 bar predictive?) → **NULL** all 3 symbols
+- [x] `scripts/mine_autocorrelation.py` (H3 — lag-1 autocorr by time-of-day)
+      → **SIGNAL**: IWM 9:30-10:00 OOS r=-0.185 p<0.0001 (strong mean reversion)
+      → **SIGNAL**: SPY 13:00-14:00 OOS r=+0.059 p<0.0001 (mild momentum)
+      → **NULL**: QQQ across all buckets
+- [x] `scripts/backtest_gap_fade.py --sweep-vix` (H2 — gap × VIX band)
+      → **ACTIONABLE**: VIX 20-25 kills SPY (PF 0.490) and QQQ (PF 0.546) gap fades
+      → **SAFE ZONE**: VIX 15-20 best for SPY (PF 1.861) / QQQ (PF 1.289)
+      → **IWM DIFFERENT**: positive across all VIX bands (VIX<15: PF 2.397)
+- [ ] H2 finding deployed: `GAP_VIX_SKIP_BAND` filter on gap_fade for SPY/QQQ
+      (OOS verification still needed before wiring in)
 
 **Gate to Phase 4:** at least one non-trivial finding (positive or confirmed null).
 

@@ -7,12 +7,16 @@ Usage:
     python scripts/backtest_gap_fade.py logs/US_SPY_K_5M_combined.csv
     python scripts/backtest_gap_fade.py --all --sweep              # sweep gap size + target fill
     python scripts/backtest_gap_fade.py --all --sweep-fill         # sweep target_fill_pct only
+    python scripts/backtest_gap_fade.py --all --sweep-vix          # gap × VIX band breakdown
 """
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -23,11 +27,96 @@ from mm.gap_fade import (              # noqa: E402
 )
 
 LOGS = Path(__file__).parent.parent / "logs"
+
 COMBINED_CSVS = [
     "US_SPY_K_5M_combined.csv",
     "US_QQQ_K_5M_combined.csv",
     "US_IWM_K_5M_combined.csv",
 ]
+
+
+LOGS = Path(__file__).parent.parent / "logs"
+
+_VIX_BANDS = [
+    ("VIX<15",    0,  15),
+    ("VIX 15-20", 15, 20),
+    ("VIX 20-25", 20, 25),
+    ("VIX>25",    25, 999),
+]
+
+_GAP_BANDS = [
+    ("gap 0.3-0.5%", 0.003, 0.005),
+    ("gap 0.5-1.0%", 0.005, 0.010),
+    ("gap>1.0%",     0.010, 0.020),
+]
+
+
+def _load_vix_map() -> dict[str, float]:
+    vix_file = LOGS / "vix_daily.jsonl"
+    out: dict[str, float] = {}
+    if not vix_file.exists():
+        return out
+    with open(vix_file) as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+                out[rec["date"]] = float(rec["vix_prev_close"])
+            except (KeyError, ValueError, json.JSONDecodeError):
+                continue
+    return out
+
+
+def sweep_vix(df: pd.DataFrame, sym: str, vix_map: dict[str, float]) -> None:
+    """Print PF / win% / trade count broken down by VIX band × gap size band."""
+    all_trades = run_gap_fade(df.copy())
+    if not all_trades:
+        print(f"  {sym}: no trades")
+        return
+
+    print(f"\n{'='*70}")
+    print(f"  {sym} — Gap × VIX breakdown  (n={len(all_trades)} total trades)")
+    print(f"{'='*70}")
+
+    dates = pd.to_datetime(df["time_key"]).dt.strftime("%Y-%m-%d")
+    df = df.copy()
+    df["_date_str"] = dates.values
+
+    header = f"  {'Segment':<22} {'n':>5} {'win%':>6} {'PF':>7} {'PnL':>9}"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+
+    def _stats(trades: list) -> tuple:
+        if not trades:
+            return 0, 0.0, 0.0, 0.0
+        wins = sum(1 for t in trades if t.pnl > 0)
+        pnl  = sum(t.pnl for t in trades)
+        gw   = sum(t.pnl for t in trades if t.pnl > 0)
+        gl   = abs(sum(t.pnl for t in trades if t.pnl < 0))
+        pf   = gw / gl if gl else float("inf")
+        return len(trades), wins / len(trades) * 100, pf, pnl
+
+    for vix_label, vlo, vhi in _VIX_BANDS:
+        vix_trades = [
+            t for t in all_trades
+            if vix_map.get(str(t.entry_time.date())) is not None
+            and vlo <= vix_map[str(t.entry_time.date())] < vhi
+        ]
+        n, wp, pf, pnl = _stats(vix_trades)
+        pf_s = f"{pf:.3f}" if pf != float("inf") else "   ∞"
+        print(f"  {vix_label:<22} {n:>5} {wp:>5.0f}% {pf_s:>7} {pnl:>+9.2f}")
+
+        for gap_label, glo, ghi in _GAP_BANDS:
+            sub = [t for t in vix_trades if glo <= abs(t.gap_pct) < ghi]
+            n2, wp2, pf2, pnl2 = _stats(sub)
+            if n2 == 0:
+                continue
+            pf2_s = f"{pf2:.3f}" if pf2 != float("inf") else "   ∞"
+            print(f"    ↳ {gap_label:<20} {n2:>5} {wp2:>5.0f}% {pf2_s:>7} {pnl2:>+9.2f}")
+
+    # overall sanity check
+    no_vix = [t for t in all_trades if str(t.entry_time.date()) not in vix_map]
+    if no_vix:
+        print(f"\n  ({len(no_vix)} trades had no VIX data — excluded from breakdown)")
 
 
 def _symbol(path: Path) -> str:
@@ -51,10 +140,15 @@ def _resolve_csvs(args: argparse.Namespace) -> list[Path]:
     return []
 
 
-def run_single(path: Path, args: argparse.Namespace) -> None:
+def run_single(path: Path, args: argparse.Namespace,
+               vix_map: dict[str, float] | None = None) -> None:
     sym = _symbol(path)
     df = load_candles(path)
     days = df["time_key"].dt.date.nunique()
+
+    if args.sweep_vix:
+        sweep_vix(df, sym, vix_map or {})
+        return
 
     if args.sweep:
         print(f"\n{'='*70}\n  {sym} — SWEEP  (stop_buffer={GAP_STOP_BUFFER:.3f})\n{'='*70}")
@@ -117,6 +211,7 @@ def main() -> None:
     parser.add_argument("--latest", action="store_true", help="Most recent CSV per symbol")
     parser.add_argument("--sweep", action="store_true", help="Sweep min_gap × target_fill")
     parser.add_argument("--sweep-fill", action="store_true", help="Sweep target_fill_pct only")
+    parser.add_argument("--sweep-vix", action="store_true", help="Gap × VIX band breakdown")
     parser.add_argument("--details", action="store_true", help="Print individual trades")
     args = parser.parse_args()
 
@@ -128,17 +223,25 @@ def main() -> None:
         print("No CSV files found. Run with --all or pass CSV paths explicitly.")
         sys.exit(1)
 
-    print(f"Gap Fade Backtest  —  min_gap={GAP_MIN_PCT:.1%}  max_gap={GAP_MAX_PCT:.1%}  "
-          f"fill={GAP_TARGET_FILL_PCT:.0%}  stop_buf={GAP_STOP_BUFFER:.3f}")
+    vix_map: dict[str, float] | None = None
+    if args.sweep_vix:
+        vix_map = _load_vix_map()
+        if not vix_map:
+            print("WARNING: no VIX data found in logs/vix_daily.jsonl — run fetch_vix_morning.py first")
+        print(f"Gap × VIX Sweep  —  min_gap={GAP_MIN_PCT:.1%}  max_gap={GAP_MAX_PCT:.1%}  "
+              f"fill={GAP_TARGET_FILL_PCT:.0%}  vix_records={len(vix_map)}")
+    else:
+        print(f"Gap Fade Backtest  —  min_gap={GAP_MIN_PCT:.1%}  max_gap={GAP_MAX_PCT:.1%}  "
+              f"fill={GAP_TARGET_FILL_PCT:.0%}  stop_buf={GAP_STOP_BUFFER:.3f}")
 
     all_trades = []
     for path in paths:
-        run_single(path, args)
-        if not args.sweep and not args.sweep_fill:
+        run_single(path, args, vix_map=vix_map)
+        if not args.sweep and not args.sweep_fill and not args.sweep_vix:
             df = load_candles(path)
             all_trades.extend(run_gap_fade(df.copy()))
 
-    if len(paths) > 1 and not args.sweep and not args.sweep_fill:
+    if len(paths) > 1 and not args.sweep and not args.sweep_fill and not args.sweep_vix:
         print()
         print_gap_fade_summary(all_trades, symbol="COMBINED", days=0)
 
