@@ -131,8 +131,8 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 - [x] VPS cron: `20 13 * * 1-5` (9:20 ET Mon–Fri)
 
 **Phase 3 additions (expanded plan — see route-2-llm-signals.md):**
-- [ ] **ORB setup scorer** — `score_orb_setup()` in `mm/morning_regime.py`, per-trade confidence gate in `_eval_orb`
-- [ ] **Weekly synthesis** — `scripts/weekly_synthesis.py`, Monday 9:00 ET cron, posts to Discord
+- [x] **ORB setup scorer** — `score_orb_setup()` in `mm/morning_regime.py`, per-trade confidence gate in `_eval_orb`; live 2026-07-23 (fixed max_tokens bug + fail-open)
+- [x] **Weekly synthesis** — `scripts/weekly_synthesis.py`, Monday 9:00 ET cron, posts to Discord; live 2026-07-23
 
 **Gate to Phase 4:** shadow mode cleanly running ≥ 5 sessions (✓) + at least one of the Phase 3 additions built.
 

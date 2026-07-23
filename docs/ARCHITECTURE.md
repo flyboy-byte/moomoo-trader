@@ -74,23 +74,34 @@ logs/*.jsonl  ──  structured events: bar_eval, signal_skip, risk_block,
 STRATEGIES=bb_kdj,bb_kdj_loose,orb,vwap_pb,gap_fade
 SYMBOLS=US.IWM,US.SPY,US.QQQ
 KDJ_WINDOW_BARS=3               # look back N bars for KDJ cross vs BB touch
-KDJ_WINDOW_OVERRIDES=US.SPY:0   # SPY uses w=0 (tighter signal)
+KDJ_WINDOW_OVERRIDES=US.SPY:0,US.IWM:0
 MIN_SIGNAL_SCORE=2              # bonus signals required (rsi_oversold, ranging, volume_spike)
 ATR_STOP_MULT=1.0
 ORB_MINUTES=15                  # opening range window; IWM overridden to 30
 ORB_MINUTES_OVERRIDES=US.IWM:30
 ORB_TARGET_MULT=1.5             # target = mult × OR range height (global default)
-ORB_TARGET_MULT_OVERRIDES=US.QQQ:2.0,US.IWM:1.0  # OOS sweep 2024+: QQQ +4.3%, IWM +6%
-ORB_VOL_MULT=1.5                # breakout bar must exceed mult × 20-bar vol MA
-ORB_VOL_MULT_OVERRIDES=US.SPY:2.0  # OOS sweep 2024+: SPY PF 1.156→1.300 (+$18 PnL on 490 trades)
-ORB_SHORTS_ENABLED=true         # kill switch: create STOP_SHORTS.txt to disable at runtime
-ORB_SHORT_SYMBOLS=US.SPY        # per-symbol allow-list; empty = all (QQQ+IWM disabled 2026-07-09)
+ORB_TARGET_MULT_OVERRIDES=US.QQQ:2.0,US.IWM:1.0
+ORB_VOL_MULT=1.5
+ORB_VOL_MULT_OVERRIDES=US.SPY:2.0
+ORB_SHORTS_ENABLED=true
+ORB_SHORT_SYMBOLS=US.SPY        # QQQ+IWM disabled 2026-07-09 (0% win rate on 36 trades)
+ORB_VIX_MAX=                    # global ORB VIX cap; empty = no filter
+ORB_VIX_MAX_OVERRIDES=US.IWM:18  # IWM PF 1.045→1.113 OOS at vix_max=18
+ORB_SETUP_SCORER_ENABLED=true   # Claude per-trade ORB confidence gate (fail-open)
+ORB_ENTRY_MIN_CONFIDENCE=0.65
+GAP_VIX_MAX=                    # global gap_fade VIX cap; empty = no filter
+GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20  # VIX>=20 negative OOS for SPY+QQQ
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
 TOTAL_CAPITAL=100               # total bankroll; divided across symbol×strategy slots
 FRACTIONAL_SHARES=true
 MAX_POSITION_DOLLARS=900        # fallback if TOTAL_CAPITAL not set
 TRD_ENV=SIMULATE                # NEVER change to REAL
 LIVE_TRADING_ENABLED=false      # NEVER change to true
+ANTHROPIC_API_KEY=              # in .env only, never committed
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+REGIME_GATE_ENABLED=true        # blocks bb_kdj/loose on choppy/risk_off regime; fail-open
+REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose
+REGIME_SKIP_LABELS=choppy,risk_off
 ```
 
 ## Kill Switches (runtime, no restart needed)
@@ -103,7 +114,7 @@ LIVE_TRADING_ENABLED=false      # NEVER change to true
 ## Test & Verify Commands
 
 ```bash
-python -m pytest tests/ -q                           # 223 unit tests (3 pre-existing test_data.py failures)
+python -m pytest tests/ -q                           # 234 unit tests (3 pre-existing test_data.py failures)
 python scripts/diagnose_logs.py --date YYYY-MM-DD    # session health check
 python scripts/compare_paper_vs_backtest.py logs/paper_US_SPY_YYYY-MM-DD.jsonl
 ./scripts/verify.sh                                  # all-in-one session verify
