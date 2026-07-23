@@ -1,7 +1,7 @@
 # moomoo-trader: Full Project Map
 
 **AI Context Document** — paste this into any AI session to get full project context without re-deriving.
-Last updated: 2026-07-09.
+Last updated: 2026-07-23.
 
 ---
 
@@ -61,6 +61,9 @@ moomoo-trader/
 │   ├── vwap_signals.py          # VWAP signal scoring (used by vwap crossover only)
 │   ├── ema_momentum.py          # EMA5/EMA20 momentum breakout — RESEARCH ONLY, not deployed
 │   ├── replay.py                # replay(), FakeBroker, symbol_from_csv() — offline replay engine
+│   ├── morning_regime.py        # classify_regime(), load_regime_today(), synthesize_week(),
+│   │                            #   score_orb_setup(), _append_api_usage() — Claude API layer
+│   │                            #   fail-open throughout: API errors never block trades
 │   └── notifications.py         # Discord webhook; no-ops if DISCORD_WEBHOOK_URL not set
 │
 ├── scripts/                     # Runnable entry points (all run from project root)
@@ -92,6 +95,10 @@ moomoo-trader/
 │   ├── analyze_trades.py        # per-strategy P&L, win%, PF from JSONL logs
 │   ├── analyze_portfolio.py     # cross-strategy exposure, daily-loss stacking analysis
 │   ├── fetch_vix_morning.py     # VPS cron: fetch VIX daily data each morning
+│   ├── classify_regime.py       # VPS cron 9:20 ET: Claude regime classification → regime_YYYY-MM-DD.json
+│   ├── weekly_synthesis.py      # VPS cron Mon 9:00 ET: Claude weekly trade summary → Discord
+│   ├── mine_first_bar.py        # H1 research: first-bar direction → 10am-11am return (IS/OOS)
+│   ├── mine_autocorrelation.py  # H3 research: lag-1 autocorr by hour bucket (IS/OOS)
 │   ├── flatten_simulate.py      # flatten Moomoo simulate account to zero positions
 │   └── eod_summary.py           # TradeRecord/SessionSummary, load_summary(), Discord post
 │
@@ -113,8 +120,9 @@ moomoo-trader/
 │   ├── test_metric_consistency.py # 4 tests: backtest metric reimplementation drift guard
 │   ├── test_web_dashboard_config.py # 4 tests: dashboard .env config editor safety
 │   ├── test_data.py             # 4 tests: combined-archive merge/dedup
-│   └── test_replay.py           # 7 tests: replay harness invariants
-│                                # Total: 223 passing tests
+│   ├── test_replay.py           # 7 tests: replay harness invariants
+│   └── test_regime_gate.py      # 11 tests: regime gate logic, fail-open, integration
+│                                # Total: 234 passing tests (3 pre-existing test_data.py failures)
 │
 ├── docs/
 │   ├── PROJECT_MAP.md           # This file — full AI context document
@@ -154,7 +162,22 @@ moomoo-trader/
 
 ---
 
-## Deployed Strategies (VPS, as of 2026-07-09)
+## Deployed Strategies (VPS, as of 2026-07-23)
+
+### Live Performance (2026-06-10 → 2026-07-23, 64 trades, 30 sessions)
+
+| Strategy | Trades | Win% | PF | PnL |
+|----------|--------|------|----|-----|
+| bb_kdj | 3 | 67% | 0.97 | -$0.06 |
+| bb_kdj_loose | 5 | 60% | 1.50 | +$1.89 |
+| gap_fade | 1 | 0% | 0.00 | -$0.64 |
+| orb | 39 | 44% | 0.76 | -$11.04 |
+| vwap_pb | 16 | 38% | 1.75 | +$4.99 |
+| **TOTAL** | **64** | **44%** | **0.92** | **-$4.86** |
+
+Cumulative PnL peaked at +$12.60 (2026-06-11), currently -$4.86. ORB is the main drag (39 of 64 trades, 35 of which exit via TIME_STOP). VIX gate and ORB scorer now live — data accumulating on impact.
+
+---
 
 ### 1. BB+KDJ Mean Reversion (`bb_kdj`)
 **Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM.
@@ -235,6 +258,10 @@ standard by a meaningful margin after ~30 trades, the gates are earning their ke
 - SPY shorts only: `ORB_SHORT_SYMBOLS=US.SPY` (QQQ+IWM disabled 2026-07-09 — 0% win rate on 36 trades)
 - Short kill switch: create `STOP_SHORTS.txt` in project root (no restart needed)
 
+**VIX gate (live 2026-07-23):** `ORB_VIX_MAX_OVERRIDES=US.IWM:18` — IWM entries blocked when prior-day VIX>18 (OOS sweep PF 1.045→1.113). SPY/QQQ unfiltered (VIX filter hurts them at every threshold). Fail-open: missing VIX data = no block. Source: `logs/vix_daily.jsonl`.
+
+**ORB setup scorer (live 2026-07-23, shadow → active):** `ORB_SETUP_SCORER_ENABLED=true`. Before each entry, calls Claude (`claude-haiku-4-5`) with direction/OR range%/vol ratio/VIX/regime. Blocks if `confidence < ORB_ENTRY_MIN_CONFIDENCE=0.65`. Fail-open: API error → confidence=1.0 (trade allowed). Scores logged to `logs/api_usage.jsonl`.
+
 **Exit:**
 - Target: per-symbol mult × OR range. Global `ORB_TARGET_MULT=1.5`; per-symbol overrides via `ORB_TARGET_MULT_OVERRIDES`.
   - OOS (2024+) optimal: QQQ=2.0× (+4.3% PF), IWM=1.0× (+6% PF), SPY=1.5× (marginal)
@@ -273,23 +300,39 @@ standard by a meaningful margin after ~30 trades, the gates are earning their ke
 **Timeframe:** 5-min candles. **Symbols:** SPY, QQQ, IWM. **Fires once per day at 9:35 ET bar.**
 
 **Entry:** Previous close → first bar computes `gap_pct = (today_open - prev_close) / prev_close`
-- Gap must be ≥ 0.5% and ≤ 3.0% (`GAP_MIN_PCT`, `GAP_MAX_PCT` in `mm/gap_fade.py`)
+- Gap must be ≥ 0.3% and ≤ 2.0% (`GAP_MIN_PCT=0.003`, `GAP_MAX_PCT=0.02` in `mm/gap_fade.py`)
 - Gap up + rejection (close < today_open) → short
 - Gap down + rejection (close > today_open) → long
 - `GAP_SHORTS_ENABLED=true` required for short entries
 
 **Exit:**
-- TARGET: 50% gap fill (default `GAP_TARGET_PCT=0.5`)
-- STOP: entry + `GAP_STOP_PCT` × gap size
+- TARGET: 50% gap fill (`GAP_TARGET_FILL_PCT=0.5`)
+- STOP: first-bar extreme × (1 ± `GAP_STOP_BUFFER=0.001`)
 - TIME_STOP: 11:00 ET
 
 **One trade per day** — state persisted in `logs/paper_*_gap_fade_traded.json`.
 
+**VIX gate (live 2026-07-23):** `GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20` — SPY and QQQ entries blocked when prior-day VIX≥20. OOS sweep (2024+): VIX 20-25 gives SPY PF 0.626, QQQ PF 0.655; VIX>25 also negative OOS. IWM positive at all VIX bands — unfiltered. Source: `logs/vix_daily.jsonl`.
+
 **Premarket fill% filter** wired in shadow mode (`GAP_PREMARKET_FILTER_ENABLED=false` default —
 logs `would_filter_skip` without blocking). Validated on 9-month sample; see `strategy_graveyard.md`.
 
-**Config knobs**: self-contained module constants in `mm/gap_fade.py` (not `cfg.*`) — that file
-deliberately does not import `cfg`. Set via `.env` vars with same names.
+**Config knobs**: entry/exit constants in `mm/gap_fade.py` (read from `.env`); VIX gate knobs in `cfg.*` (standard pattern).
+
+### 5. LLM Regime Gate (Route 2 — live 2026-07-23)
+**Module:** `mm/morning_regime.py`. **VPS cron:** 9:20 ET Mon–Fri via `scripts/classify_regime.py`.
+
+**What it does:** Calls Claude (`claude-haiku-4-5`) at market open with prior-day VIX, SPY/QQQ session stats, and macro calendar. Returns one of: `trending_up`, `trending_down`, `choppy`, `risk_off`, `neutral`. Result cached in `logs/regime_YYYY-MM-DD.json`.
+
+**Gate:** `REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose`. When label is in `REGIME_SKIP_LABELS=choppy,risk_off`, all bb_kdj and bb_kdj_loose entries are blocked for the session.
+
+**Fail-open:** API error or missing file → `neutral` → trades proceed normally. `REGIME_GATE_ENABLED=false` restores pre-gate behavior with zero code change.
+
+**Shadow history:** 3 days (2026-07-21 to 2026-07-23), all `neutral` at confidence 0.72. Gate hasn't fired yet — waiting for a genuine choppy/risk-off session.
+
+**Weekly synthesis:** `scripts/weekly_synthesis.py` (VPS cron Mon 9:00 ET) reads last week's position_close + signal_skip JSONL events, sends compact stats to Claude-haiku for structured analysis, writes `logs/synthesis_YYYY-WW.json`, posts to Discord.
+
+**ORB setup scorer:** Per-trade Claude confidence gate before each ORB entry. `score_orb_setup()` in `mm/morning_regime.py`. Scores and reasons logged to `logs/api_usage.jsonl`. Gate threshold: `ORB_ENTRY_MIN_CONFIDENCE=0.65`. Fail-open: API error → confidence=1.0.
 
 ---
 
@@ -376,7 +419,7 @@ Open positions survive process restarts via JSON files:
 ./scripts/verify.sh --date 2026-06-04  # past session
 ./scripts/verify.sh --no-sync          # skip VPS sync
 ```
-Runs: pytest (223 passing tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
+Runs: pytest (234 passing tests) → rsync logs → diagnose_logs → compare_paper_vs_backtest (all 3 symbols) → replay_vs_live diff.
 
 ### `scripts/diagnose_logs.py` — Session health
 ```bash
@@ -426,14 +469,14 @@ moomoo-paper.service      # paper runner — Restart=always
 moomoo-dashboard.service  # web dashboard on :8080 — Restart=always
 ```
 
-### Active `.env` (VPS)
+### Active `.env` (VPS, as of 2026-07-23)
 ```env
 TRD_ENV=SIMULATE
 LIVE_TRADING_ENABLED=false
 STRATEGIES=bb_kdj,bb_kdj_loose,orb,vwap_pb,gap_fade
 SYMBOLS=US.IWM,US.SPY,US.QQQ
 KDJ_WINDOW_BARS=3
-KDJ_WINDOW_OVERRIDES=US.SPY:0
+KDJ_WINDOW_OVERRIDES=US.SPY:0,US.IWM:0
 MIN_SIGNAL_SCORE=2
 ATR_STOP_MULT=1.0
 ORB_MINUTES=15
@@ -441,14 +484,26 @@ ORB_MINUTES_OVERRIDES=US.IWM:30
 ORB_TARGET_MULT=1.5
 ORB_TARGET_MULT_OVERRIDES=US.QQQ:2.0,US.IWM:1.0
 ORB_VOL_MULT=1.5
+ORB_VOL_MULT_OVERRIDES=US.SPY:2.0
 ORB_SHORTS_ENABLED=true
 ORB_SHORT_SYMBOLS=US.SPY       # QQQ+IWM shorts disabled 2026-07-09 (0% win rate, 36 trades)
+ORB_VIX_MAX=
+ORB_VIX_MAX_OVERRIDES=US.IWM:18
+ORB_SETUP_SCORER_ENABLED=true
+ORB_ENTRY_MIN_CONFIDENCE=0.65
+GAP_VIX_MAX=
+GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
 VWAP_PB_MAX_CROSSES=1
 TOTAL_CAPITAL=100
 FRACTIONAL_SHARES=true
 MAX_TRADES_PER_DAY=0           # unlimited (bb_kdj_loose needs room; 5 was too restrictive)
 MAX_DAILY_LOSS=20
+ANTHROPIC_API_KEY=<in .env, never committed>
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+REGIME_GATE_ENABLED=true
+REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose
+REGIME_SKIP_LABELS=choppy,risk_off
 ```
 
 ### Deployment Workflow
@@ -482,10 +537,10 @@ don't trust this table as exact, just directionally current. Check `wc -l` if it
 
 ---
 
-## Test Suite (223 passing tests)
+## Test Suite (234 passing tests)
 
 ```bash
-python -m pytest tests/ -q              # 223 passing (3 pre-existing test_data.py failures)
+python -m pytest tests/ -q              # 234 passing (3 pre-existing test_data.py failures)
 python -m pytest tests/test_risk.py    # risk + sizing (43)
 python -m pytest tests/test_orb_shorts.py  # ORB shorts (19)
 python -m pytest tests/test_paper.py   # evals, execution, events, reconcile (40)
@@ -498,6 +553,7 @@ Coverage by area:
 - **ORB Shorts** (19): long/short entry, stop/target direction, PnL sign, restart recovery
 - **BB+KDJ Loose** (12): no bonus gate, no ADX filter, unlimited trades, dedup, exits
 - **Paper/Evals/Execution** (47): eval functions, fill confirmation, reconcile, events, loose eval
+- **Regime Gate** (11): `_regime_gate()` logic, `load_regime_today()` fail-open, integration replay
 - **Clock/Seam** (4): today() ET-date regression, static clock-seam violation guard
 - **Config Staleness** (6): cfg reload correctness across module reloads
 - **Metric Consistency** (4): backtest metric reimplementation drift guard
@@ -518,10 +574,13 @@ See `docs/expansions/FRAMEWORK.md` for the next phase — data mining and LLM si
 | ATR-normalized sizing (`risk_dollars / (atr × mult)`) | On hold | Needs more live slippage data |
 | IWM-weighted sizing | On hold | Superseded by ATR sizing — do that first |
 | Session filter (BLOCKED_HOURS) | Swept, no universal benefit | Data is definitive |
-| VIX daily regime filter | Graveyard'd | IWM OOS 0.800 vs 1.033 baseline — destroyed edge |
+| VIX daily regime filter on BB+KDJ | Graveyard'd | IWM OOS 0.800 vs 1.033 baseline — destroyed edge |
 | Push architecture (WebSocket exits) | Deferred | slippage_bps shows 60s poll costs real edge |
 | ORB QQQ+IWM shorts | Disabled 2026-07-09 | 0% win rate on 36 live trades; SPY shorts kept |
-| paper.py refactor (split 1,200-line file) | **COMPLETE** 2026-06-16 | 6 commits, cert-diffed |
+| Route 1 data mining (H1/H2/H3) | **COMPLETE** 2026-07-23 | H1 null; H2 deployed as VIX gates; H3 IWM signal documented |
+| Route 2 LLM regime gate | **COMPLETE** 2026-07-23 | classify_regime + gate + scorer + synthesis all live |
+| Gap fade premarket fill% filter | Shadow mode | `GAP_PREMARKET_FILTER_ENABLED=false`; validated empirically but needs forward data |
+| Flip `GAP_PREMARKET_FILTER_ENABLED=true` | Waiting | Need live forward data on gap fade first |
 
 ---
 
