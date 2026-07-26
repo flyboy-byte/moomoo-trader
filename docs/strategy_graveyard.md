@@ -144,6 +144,13 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ## Bugs Found & Fixed (correctness corrections to historical research)
 
+### ORB Scorer signal_skip TypeError — FOUND & FIXED 2026-07-25
+**What it was:** `mm/evals.py::_eval_orb` called `elog.signal_skip("orb_claude_score", ..., reason=scored["reason"])`. The first positional argument to `signal_skip` is already named `reason`, so `reason=` was passed both positionally and as a keyword — a Python TypeError on every scorer block. The exception was swallowed by the paper runner's main loop (`except Exception as e`), logged as an error event, and the entry was blocked by crash rather than by the intended gate. Result: ~90 error events on 7/24, zero `orb_claude_score` skip events in JSONL despite the scorer running and returning low confidence scores. Entries were silently prevented for the 2 days the scorer was live before discovery.
+
+**Why it was hard to see:** The scorer was making real API calls and logging them to `api_usage.jsonl` with confidence values. From the outside it looked like the scorer was working. The only tell was 90 error events and zero scorer skip events in the same session — an unusual ratio that only became visible when auditing the full event log.
+
+**Fix:** Renamed kwarg from `reason=scored["reason"]` to `claude_reason=scored["reason"]` in `mm/evals.py:703`. Added regression test `test_low_confidence_emits_skip_not_error` in `tests/test_orb_scorer.py`. VPS restarted 2026-07-25.
+
 ### KDJ Day-Boundary Signal Leak — FOUND & FIXED 2026-06-17/18
 **What it was:** `mm/strategy.py`'s and `mm/evals.py`'s KDJ_WINDOW_BARS lookback
 (`.rolling(window=N+1)` / `.iloc[-window:]`) operated on a multi-day candle frame with
@@ -645,6 +652,9 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 | EXIT_ON_KDJ_DEATH | false | — | Re-enabling flips SPY PnL from +$2.34 → −$0.83 |
 | ORB_TARGET_MULT | 1.5 global | 1.0–3.0 | Global default 1.5. Per-symbol OOS (2024+) sweep at vol=1.5: QQQ 2.0× PF 1.309→1.352 (+4.3%), IWM 1.0× PF 1.210→1.270 (+6%), SPY flat (marginal gain at 2.5×). Per-symbol overrides deployed 2026-07-12 via ORB_TARGET_MULT_OVERRIDES. Full exit-reason sweep 2026-07-21 confirmed: high TIME_STOP rate is expected (58% QQQ, 51% SPY, 65% IWM) — TIME_STOP exits are net positive in backtest; live -$14 on TIME_STOPs is 34-trade noise. |
 | ORB_VOL_MULT | 1.5 global | 0.0–2.0 | OOS (2024+): QQQ PF 1.162→1.309 (+13%), SPY 1.122→1.156. Full exit-reason sweep 2026-07-21: SPY 2.0× is clearly better (PF 1.156→1.300, PnL $65→$83 on 490 vs 570 trades). QQQ 2.0× loses total PnL ($182→$147 at 468 trades) — stays at 1.5. IWM 2.0× flat ($40→$31) — stays at 1.5. ORB_VOL_MULT_OVERRIDES=US.SPY:2.0 deployed 2026-07-21. |
+| ORB TIME_STOP exits | exits are correct | — | 2026-07-25 post-exit analysis (`--analyze-exits`, OOS 2024+, N=880 TIME_STOP trades across SPY/QQQ/IWM): only 2–6% of TIME_STOP exits would have hit target if held longer (IWM 2%, QQQ 4%, SPY 6%). 57–65% of TIME_STOP trades continued moving against entry after exit. Avg max favorable move after exit: +0.01–0.06%. Conclusion: the 15:45 cutoff is not the problem — entries are wrong, not exits too early. |
+| ORB entry timing | no filter | — | 2026-07-25 entry-lag analysis (`--entry-timing`, OOS 2024+): entries fired <15min after OR close have worst PF (IWM 0.727, SPY 0.648, QQQ 1.442). The 15–45min window has best PF per bucket (IWM 30-45min: PF 2.636, SPY 15-30min: PF 1.494). The >45min bucket holds 70–75% of all trades at marginal PF (1.051–1.315) with 55–72% TIME_STOP rate. Parked: early-entry filter would require a new config knob and re-validation; the PF difference may not survive a clean OOS split given the bucket imbalance. Revisit when: live ORB data provides 50+ trades per timing bucket. |
+| ORB_ENTRY_MIN_CONFIDENCE | 0.50 | 0.65→0.50 | 2026-07-25 offline calibration (`scripts/calibrate_orb_scorer.py`, OOS 2024+, N=1,654 trades across SPY/QQQ/IWM): confidence distribution min=0.32 median=0.58 max=0.72 — model almost never scores above 0.65 (22/1654 = 1.3%). At 0.65 gate the scorer would block 98.7% of entries. Bucket analysis: 0.3–0.5 (N=722, PF 1.119), 0.5–0.65 (N=910, PF 1.224), 0.65–0.8 (N=22, PF 10.269 — too few trades). Threshold 0.50 maximizes PF with ≥50 trades: above=932 trades PF 1.274, below=722 trades PF 1.119. Lowered from 0.65 → 0.50 2026-07-25. Results cached in logs/orb_calibration.jsonl. |
 | VWAP_PB_MAX_CROSSES | 1 | 0–3 | Critical no-chop filter for VWAP PB edge |
 | Timeframe | K_5M | 5M/15M/60M | K_15M produces MORE stops, not fewer |
 | Regime filter | ADX < 25 | 7 alternatives | Confirmed best vs BB width, volume variants |
