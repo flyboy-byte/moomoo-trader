@@ -92,8 +92,17 @@ def _load_vix(logs_dir: Path, date_str: str) -> float | None:
     return None
 
 
-def _load_prior_session(logs_dir: Path, symbol: str) -> tuple[float, float]:
-    """Return (pct_change, range_pct) for the last trading day in the combined CSV."""
+def _load_prior_session(
+    logs_dir: Path,
+    symbol: str,
+    before_date: str | None = None,
+) -> tuple[float, float]:
+    """Return (pct_change, range_pct) for the last trading day in the combined CSV.
+
+    before_date: if given (YYYY-MM-DD), use the last day strictly before this date.
+    Useful for historical classification where the "prior session" must be anchored
+    to the correct date rather than today's CSV tail.
+    """
     import pandas as pd
     sym_slug = symbol.replace(".", "_")
     csv = logs_dir / f"{sym_slug}_K_5M_combined.csv"
@@ -103,6 +112,8 @@ def _load_prior_session(logs_dir: Path, symbol: str) -> tuple[float, float]:
         df = pd.read_csv(csv, usecols=["time_key", "open", "close", "high", "low"])
         df["time_key"] = pd.to_datetime(df["time_key"])
         df["date"] = df["time_key"].dt.date
+        if before_date:
+            df = df[df["date"] < pd.Timestamp(before_date).date()]
         last_day = df["date"].max()
         day_df = df[df["date"] == last_day]
         if day_df.empty:
@@ -171,6 +182,7 @@ def _macro_calendar(date_str: str) -> str:
 def classify_regime(
     date_str: str | None = None,
     logs_dir: Path | None = None,
+    prior_session_date: str | None = None,
 ) -> RegimeResult:
     """
     Call the Claude API with pre-market context and return a RegimeResult.
@@ -189,8 +201,8 @@ def classify_regime(
         logs_dir = cfg.logs_dir
 
     vix = _load_vix(logs_dir, date_str)
-    spy_chg, spy_range = _load_prior_session(logs_dir, "US_SPY")
-    qqq_chg, qqq_range = _load_prior_session(logs_dir, "US_QQQ")
+    spy_chg, spy_range = _load_prior_session(logs_dir, "US_SPY", before_date=prior_session_date)
+    qqq_chg, qqq_range = _load_prior_session(logs_dir, "US_QQQ", before_date=prior_session_date)
     calendar = _macro_calendar(date_str)
 
     prompt = _USER_TEMPLATE.format(

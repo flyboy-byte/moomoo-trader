@@ -131,7 +131,7 @@ class TestPlaceOrderPricing:
 # ---------------------------------------------------------------------------
 
 class TestQtyFallback:
-    """Sub-1 fractional qty must fall back to whole-share (caught June 5 zero-trade session)."""
+    """Fractional qty sizing — notional threshold guards against sub-$1 Moomoo rejections."""
 
     def test_whole_share_mode_returns_int(self, monkeypatch):
         p = _reload_paper(monkeypatch, {"MAX_POSITION_DOLLARS": "900"})
@@ -147,13 +147,13 @@ class TestQtyFallback:
         assert qty >= 1.0
         assert isinstance(qty, float)
 
-    def test_fractional_sub_one_falls_back_to_whole_share(self, monkeypatch):
-        """$12.50 slot at $720/share → 0.017 fractional → must fall back to qty=1."""
+    def test_fractional_sub_one_passes_when_notional_ok(self, monkeypatch):
+        """$12.50 slot at $720/share → 0.017 fractional, $12.50 notional > $1 → returns float."""
         p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "900"})
         import mm.risk; mm.risk._slot_dollars = 12.50
         qty = p._qty(720.0, "US.SPY")
-        assert qty >= 1
-        assert isinstance(qty, int)
+        assert isinstance(qty, float)
+        assert 0.01 < qty < 1.0
 
     def test_fractional_exactly_one_not_fallen_back(self, monkeypatch):
         p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "900"})
@@ -161,11 +161,11 @@ class TestQtyFallback:
         qty = p._qty(720.0, "US.SPY")
         assert qty >= 1.0
 
-    def test_fallback_still_respects_position_cap(self, monkeypatch):
-        """Whole-share fallback returns 0 when even 1 share exceeds the dollar cap."""
-        p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "500"})
-        import mm.risk; mm.risk._slot_dollars = 12.50
-        qty = p._qty(720.0, "US.SPY")
+    def test_fractional_skipped_when_notional_below_minimum(self, monkeypatch):
+        """$0.50 slot at $220/share → 0.002 fractional, $0.50 notional < $1 → returns 0."""
+        p = _reload_paper(monkeypatch, {"FRACTIONAL_SHARES": "true", "MAX_POSITION_DOLLARS": "900"})
+        import mm.risk; mm.risk._slot_dollars = 0.50
+        qty = p._qty(220.0, "US.IWM")
         assert qty == 0
 
     def test_zero_slot_dollars_uses_whole_share(self, monkeypatch):

@@ -182,25 +182,33 @@ def _position_cap(symbol: str) -> float:
     return _config.cfg.symbol_size_overrides.get(symbol, _config.cfg.max_position_dollars)
 
 
+_MIN_FRACTIONAL_NOTIONAL = 1.0  # Moomoo rejects fractional orders below ~$1 notional
+
+
 def _qty(price: float, symbol: str, stop: float | None = None) -> int | float:
     """Return order qty using risk-normalized, fractional, or whole-share logic.
 
     When RISK_DOLLARS_PER_TRADE is set and the caller provides the stop price:
-    qty = risk_dollars / stop_distance, capped by the position dollar cap —
-    every trade risks the same dollars regardless of volatility.
+    qty = risk_dollars / stop_distance, capped by the position dollar cap.
 
-    Else, when TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty
-    derived from the pre-computed per-slot dollar allocation.
-    Falls back to whole-share calc_qty() when fractional result < 1 — Moomoo
-    rejects sub-share orders with "Invalid quantity" and the trade is silently lost.
-    Also falls back when TOTAL_CAPITAL is not set or FRACTIONAL_SHARES=false.
+    When TOTAL_CAPITAL is set and FRACTIONAL_SHARES=true: returns float qty from
+    the per-slot dollar allocation. Skips (returns 0) if the notional falls below
+    _MIN_FRACTIONAL_NOTIONAL to avoid silent Moomoo API rejection.
+
+    Otherwise falls back to whole-share sizing using the position dollar cap.
     """
     if _config.cfg.risk_dollars_per_trade > 0 and stop is not None:
         return calc_qty_risk(price, stop, _config.cfg.risk_dollars_per_trade, _position_cap(symbol))
     if _slot_dollars > 0 and _config.cfg.fractional_shares:
         qty = calc_qty_fractional(price, _slot_dollars)
-        if qty >= 1:
+        notional = qty * price
+        if notional >= _MIN_FRACTIONAL_NOTIONAL:
             return qty
-        log.warning("Fractional qty %.6f < 1 for %s at %.2f — falling back to whole-share",
-                    qty, symbol, price)
-    return calc_qty(price, symbol)
+        log.warning(
+            "Fractional qty %.6f ($%.2f notional) below minimum for %s at %.2f — skipping entry",
+            qty, notional, symbol, price,
+        )
+        return 0
+    # Whole-share: use the position cap (respects _slot_dollars when TOTAL_CAPITAL is set)
+    cap = _position_cap(symbol)
+    return math.floor(cap / price) if cap > 0 and price > 0 else 0
