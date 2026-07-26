@@ -39,15 +39,26 @@ class TestReplayInvariants:
         assert s["reconcile_mismatches"] == 0
         assert s["opens"] > 0  # the window is known to produce trades
 
-    def test_never_fills_means_zero_trades(self, tmp_path):
+    def test_never_fills_means_zero_trades(self, tmp_path, monkeypatch):
         """Broker that fills nothing → no positions, no PnL, only unfilled skips.
         Under the pre-2026-06-10 fire-and-forget layer this scenario produced
-        fictional PnL — this is the regression test for that entire bug class."""
+        fictional PnL — this is the regression test for that entire bug class.
+
+        Scorer is suppressed (api_key="") so ORB entries reach order placement —
+        otherwise the scorer gate blocks them before any order is placed and
+        entry_unfilled stays 0 (correct behaviour, wrong for this test's intent)."""
+        import mm.config as _config
+        import mm.evals as _evals
+        monkeypatch.setattr(_config.cfg, "anthropic_api_key", "")
+        monkeypatch.setattr(_config.cfg, "orb_vix_max", None)
+        monkeypatch.setattr(_config.cfg, "orb_vix_max_overrides", {})
+        _evals._vix_cache.clear()
         s = _run(tmp_path, "never", csvs=[CSV])
         assert s["opens"] == 0
         assert s["closes"] == 0
         assert s["total_pnl"] == 0.0
         assert s["entry_unfilled"] > 0
+        _evals._vix_cache.clear()
 
     def test_entry_only_keeps_positions_open(self, tmp_path):
         """Exits that never fill must keep the position and book nothing
