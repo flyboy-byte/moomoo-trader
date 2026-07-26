@@ -3,11 +3,12 @@
 to actual outcomes to find the optimal confidence threshold.
 
 Usage:
-    python scripts/calibrate_orb_scorer.py               # all combined CSVs
+    python scripts/calibrate_orb_scorer.py                              # all combined CSVs (uses ANTHROPIC_MODEL from .env)
+    python scripts/calibrate_orb_scorer.py --model haiku --quiet        # fast Haiku run, suppress per-trade noise
     python scripts/calibrate_orb_scorer.py --start 2024-01-01
-    python scripts/calibrate_orb_scorer.py --dry-run     # count calls, no API
-    python scripts/calibrate_orb_scorer.py --from-cache  # skip scoring, reload saved results
-    python scripts/calibrate_orb_scorer.py --limit 50    # cap API calls (testing)
+    python scripts/calibrate_orb_scorer.py --dry-run                    # count calls, no API
+    python scripts/calibrate_orb_scorer.py --from-cache                 # skip scoring, reload saved results
+    python scripts/calibrate_orb_scorer.py --limit 50                   # cap API calls (testing)
 
 Writes scored results to logs/orb_calibration.jsonl (append). On re-run,
 already-scored (symbol, entry_time) pairs are skipped.
@@ -22,8 +23,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import config as _config
 from mm.backtest import load_candles, profit_factor
 from mm.indicators import add_all
+from mm.logger import set_quiet_mode
 from mm.morning_regime import score_orb_setup, load_regime_today
 from mm.orb_strategy import run_orb_signals, ORB_TARGET_MULT
 
@@ -158,7 +161,22 @@ def main() -> None:
                         help="Skip scoring, load existing cache and print analysis")
     parser.add_argument("--limit", type=int, default=0,
                         help="Cap new API calls at N (0 = unlimited)")
+    parser.add_argument("--model", metavar="MODEL", default=None,
+                        help="Override ANTHROPIC_MODEL for this run (e.g. haiku, sonnet, or full ID)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
+
+    if args.model:
+        aliases = {
+            "haiku": "claude-haiku-4-5-20251001",
+            "sonnet": "claude-sonnet-5",
+        }
+        _config.cfg.anthropic_model = aliases.get(args.model, args.model)
+        print(f"Model override: {_config.cfg.anthropic_model}")
 
     if args.from_cache:
         records = list(_load_existing_cache().values())

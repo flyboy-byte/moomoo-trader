@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm.research import research_file
 from mm.config import cfg
+from mm.logger import set_quiet_mode
 
 
 def latest_csv() -> Path:
@@ -39,7 +40,12 @@ def main() -> None:
     parser.add_argument("--walk-forward", action="store_true", help="Also run walk-forward per entry variant")
     parser.add_argument("--window", type=int, default=30, help="Walk-forward window days (default: 30)")
     parser.add_argument("--exits", action="store_true", help="Also compare exit-condition variants")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
 
     path = latest_csv() if (args.latest or args.csv is None) else Path(args.csv)
     if not path.exists():

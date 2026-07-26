@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm.backtest import load_candles, profit_factor
 from mm.indicators import add_all
+from mm.logger import set_quiet_mode
 from mm.orb_strategy import run_orb_signals, print_orb_summary, ORB_VOL_MULT, ORB_TARGET_MULT, ORB_MINUTES
 
 
@@ -259,7 +260,12 @@ def main() -> None:
                         help="For TIME_STOP trades: would price have hit target after exit?")
     parser.add_argument("--entry-timing", action="store_true",
                         help="Break down PF/win-pct/TIME_STOP-pct by entry lag after OR formation")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
 
     logs = Path(__file__).parent.parent / "logs"
     vix_map = _load_vix_map(logs) if args.sweep_vix else {}

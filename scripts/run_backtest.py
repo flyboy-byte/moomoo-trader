@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm.backtest import backtest_file
 from mm.config import cfg
+from mm.logger import set_quiet_mode
 
 
 def latest_csv() -> Path:
@@ -32,7 +33,12 @@ def main() -> None:
     group.add_argument("--latest", action="store_true", help="Use newest CSV in logs/")
     parser.add_argument("--start", metavar="YYYY-MM-DD", help="Only include candles on or after this date")
     parser.add_argument("--end", metavar="YYYY-MM-DD", help="Only include candles on or before this date")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
 
     if args.latest or args.csv is None:
         path = latest_csv()

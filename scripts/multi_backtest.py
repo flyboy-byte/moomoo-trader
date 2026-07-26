@@ -20,7 +20,7 @@ from mm.research import _run_parametric, _profit_factor, _summarise as _res_summ
 from mm.indicators import add_all
 from mm.strategy import Trade
 from mm.config import cfg
-from mm.logger import get_logger
+from mm.logger import get_logger, set_quiet_mode
 
 log = get_logger("multi_backtest")
 
@@ -180,7 +180,12 @@ def main() -> None:
     parser.add_argument("--window", type=int, default=90, help="Walk-forward window days for sweep")
     parser.add_argument("--save-trades", action="store_true",
                         help="Save trade log to logs/trades_<ktype>_<date>.csv")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
 
     if args.csvs:
         paths = [Path(p) for p in args.csvs]

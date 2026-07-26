@@ -467,9 +467,51 @@ re-litigate from scratch:
 |---|---|
 | Self-computed GEX/regime tag from Moomoo's free option-chain greeks (Σgamma×OI per strike) | Real and free, but only useful after ~100+ live trades across strategies to test whether mean-reversion outperforms in positive-GEX regimes. Premature at current trade count. |
 | Futures pre-open premium (ES/NQ) as gap-fade confirmation | Research itself flags this as small-sample practitioner-only evidence (~30 cases), not peer-reviewed. Moomoo US accounts are quote-only on futures (no trading); exact ES/NQ/RTY quote-symbol strings were never verified by any of the 3 reports. |
-| Order book / tick-data aggressor-side pressure during pre-market | `get_rt_ticker` exposes trade direction but is real-time-only — no historical tick endpoint exists per research. Would need weeks of live data collection before any backtest is possible. |
+| Order book / tick-data aggressor-side pressure during pre-market | `get_rt_ticker` exposes trade direction but is real-time-only — no historical tick endpoint exists per research. Would need weeks of live data collection before any backtest is possible. See expanded note below. |
 | OpEx calendar regime tag (vol-compressed mornings, "gamma cliff" the following Monday) | Plausible and documented (Ni/Pearson/Poteshman pinning effect), but orthogonal to Gap Fade — touches ORB/BB+KDJ regime logic instead. Separate research track. |
 | External vendor backfill (FirstRate Data / Databento) for pre-market history beyond Moomoo's <2yr retention | Not needed yet — test against whatever window Moomoo actually returns first. Revisit only if that window proves too short for a meaningful sample (<30 gap-fade-eligible days). |
+
+### Tick Data Collection — time-gated, not dead
+
+**What Moomoo exposes:** `get_rt_ticker()` returns real-time tick-level trade data per quote
+subscription: timestamp, price, volume, direction (buy/sell), and whether it was aggressor-side.
+This is richer than candles — you can see intra-bar pressure, large-lot clustering, and tape
+absorption patterns that 5-minute OHLCV completely hides.
+
+**The blocker:** No historical tick endpoint exists in the Moomoo API. You cannot backfill.
+Every other data source in this project (candles, VIX, premarket volume) has a history endpoint.
+Ticks do not. This means zero historical sample to research against until you've collected it live.
+
+**Why it's interesting anyway:**
+- Stop accuracy: our backtest assumes stops are only checked at 5-min bar closes. A tick stream
+  would let you detect intra-bar stop touches and make backtests more realistic.
+- Entry confirmation: a BB touch with heavy sell-aggressor ticks is a weaker mean-reversion
+  signal than a BB touch with buy-aggressor absorption. Candles can't see this.
+- ORB breakout quality: a breakout bar with 80% buy-aggressor ticks is more convincing than one
+  with mixed tape. Haiku could classify tape character cheaply on each setup.
+
+**How to build it when ready:**
+
+1. New script `scripts/collect_ticks.py` — subscribes to `get_rt_ticker()` during market hours
+   (9:30–16:00 ET), appends each tick to `logs/ticks/US_SPY_YYYY-MM-DD.jsonl` (one file per
+   symbol per day). Runs alongside the paper runner, separate process.
+
+2. Schema per record:
+   ```json
+   {"ts": "2026-09-15T09:31:04.123", "price": 551.23, "volume": 300,
+    "direction": "buy", "type": "auto_match", "sequence": 12345678}
+   ```
+
+3. After ~3 months of collection (≈60 trading days), run `scripts/mine_ticks.py`:
+   - For each bb_kdj signal bar: compute buy_aggressor_pct in the 5 min before entry
+   - Bucket by aggressor% (0-40% / 40-60% / 60-100%) and compare PF + win%
+   - Gate: OOS PF ≥ 1.2 with ≥ 50 trades per bucket before deploying
+
+4. If edge found: add `tick_pressure` field to signal dict in `mm/evals._eval_bb_kdj()`,
+   gate on `buy_aggressor_pct > threshold` before entry.
+
+**Revisit when:** paper runner has been stable for 3+ months and disk space allows ~50MB/day
+of tick JSONL. Not hard to build — purely time-gated on collection.
 
 ### ORB Short Live Verification — kill switch REMOVED 2026-06-17, awaiting first live fill
 **Status (2026-06-17):** `STOP_SHORTS.txt` deleted from the VPS. ORB shorts can now fire live in
@@ -654,7 +696,8 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 | ORB_VOL_MULT | 1.5 global | 0.0–2.0 | OOS (2024+): QQQ PF 1.162→1.309 (+13%), SPY 1.122→1.156. Full exit-reason sweep 2026-07-21: SPY 2.0× is clearly better (PF 1.156→1.300, PnL $65→$83 on 490 vs 570 trades). QQQ 2.0× loses total PnL ($182→$147 at 468 trades) — stays at 1.5. IWM 2.0× flat ($40→$31) — stays at 1.5. ORB_VOL_MULT_OVERRIDES=US.SPY:2.0 deployed 2026-07-21. |
 | ORB TIME_STOP exits | exits are correct | — | 2026-07-25 post-exit analysis (`--analyze-exits`, OOS 2024+, N=880 TIME_STOP trades across SPY/QQQ/IWM): only 2–6% of TIME_STOP exits would have hit target if held longer (IWM 2%, QQQ 4%, SPY 6%). 57–65% of TIME_STOP trades continued moving against entry after exit. Avg max favorable move after exit: +0.01–0.06%. Conclusion: the 15:45 cutoff is not the problem — entries are wrong, not exits too early. |
 | ORB entry timing | no filter | — | 2026-07-25 entry-lag analysis (`--entry-timing`, OOS 2024+): entries fired <15min after OR close have worst PF (IWM 0.727, SPY 0.648, QQQ 1.442). The 15–45min window has best PF per bucket (IWM 30-45min: PF 2.636, SPY 15-30min: PF 1.494). The >45min bucket holds 70–75% of all trades at marginal PF (1.051–1.315) with 55–72% TIME_STOP rate. Parked: early-entry filter would require a new config knob and re-validation; the PF difference may not survive a clean OOS split given the bucket imbalance. Revisit when: live ORB data provides 50+ trades per timing bucket. |
-| ORB_ENTRY_MIN_CONFIDENCE | 0.50 | 0.65→0.50 | 2026-07-25 offline calibration (`scripts/calibrate_orb_scorer.py`, OOS 2024+, N=1,654 trades across SPY/QQQ/IWM): confidence distribution min=0.32 median=0.58 max=0.72 — model almost never scores above 0.65 (22/1654 = 1.3%). At 0.65 gate the scorer would block 98.7% of entries. Bucket analysis: 0.3–0.5 (N=722, PF 1.119), 0.5–0.65 (N=910, PF 1.224), 0.65–0.8 (N=22, PF 10.269 — too few trades). Threshold 0.50 maximizes PF with ≥50 trades: above=932 trades PF 1.274, below=722 trades PF 1.119. Lowered from 0.65 → 0.50 2026-07-25. Results cached in logs/orb_calibration.jsonl. |
+| ORB_ENTRY_MIN_CONFIDENCE | 0.50 | 0.65→0.50 | 2026-07-25 offline calibration (`scripts/calibrate_orb_scorer.py`, OOS 2024+, N=1,654 trades across SPY/QQQ/IWM): confidence distribution min=0.32 median=0.58 max=0.72 — model almost never scores above 0.65 (22/1654 = 1.3%). At 0.65 gate the scorer would block 98.7% of entries. Bucket analysis: 0.3–0.5 (N=722, PF 1.119), 0.5–0.65 (N=910, PF 1.224), 0.65–0.8 (N=22, PF 10.269 — too few trades). Threshold 0.50 maximizes PF with ≥50 trades: above=932 trades PF 1.274, below=722 trades PF 1.119. Lowered from 0.65 → 0.50 2026-07-25. Results cached in logs/orb_calibration.jsonl. **2026-07-26 re-calibration attempted with claude-sonnet-5 but aborted:** (1) Haiku calibration data is incompatible — scores not on same scale as Sonnet; Haiku cache backed up to logs/orb_calibration_haiku_backup.jsonl. (2) ThinkingBlock bug found and fixed: `_extract_text()` added to `mm/morning_regime.py` — Sonnet returns thinking blocks before text blocks, `content[0].text` was raising AttributeError on every call silently. Bug was affecting live regime gate and ORB scorer since ANTHROPIC_MODEL switched to sonnet. Fix deployed 2026-07-26. (3) Re-calibration parked: requires ~1000 Sonnet API calls (~$3–5). Run `python scripts/calibrate_orb_scorer.py --start 2025-01-01 --model sonnet --quiet` when ready. Current threshold 0.50 is in shadow mode only — scorer logs would_skip but never blocks. |
+| bb_kdj peer divergence filter (cross-asset) | not deployed — hypothesis disproved | — | 2026-07-26 `scripts/mine_cross_asset.py` (IS=2022-2023, OOS=2024+, 260K bars, SPY/QQQ/IWM). Categorized every bb_kdj signal bar by what peers were doing: **isolated** (peers above bb_middle), **confirmed** (peers also at bb_lower), **neutral** (peers between bands). Hypothesis was isolated=strongest. Result: isolated IS PF=0.924 → OOS PF=0.967 (consistently worst, below 1). Confirmed IS PF=1.133 → OOS PF=1.173 (most consistent, modest edge). Neutral IS PF=0.960 → OOS PF=1.477 (strong OOS but IS/OOS inconsistency is a red flag — likely 2022 bear market regime artifact; IWM neutral OOS=1.754 driving it). No clean deployment: isolated clearly harmful, confirmed doesn't clear 1.2, neutral IS/OOS gap unexplained. Script kept at `scripts/mine_cross_asset.py`. Revisit neutral filter with IS split at 2023-only to test bear-market hypothesis. |
 | REGIME_GATE_ENABLED (bb_kdj) | true, SKIP=trending_up,trending_down | orig: choppy,risk_off → flipped 2026-07-26 | 2026-07-26 batch validation (`scripts/validate_regime.py`, OOS 2024+, N=618 trading days, 356 bb_kdj trades): label distribution: neutral=315d, trending_up=143d, choppy=105d, risk_off=54d, trending_down=1d. Per-label avg PF: trending_up=0.513 (worst — trend continuation kills mean reversion), risk_off=0.743, neutral=0.880, choppy=0.928 (best — ranging markets are where bb_kdj edge lives). Original skip labels (choppy,risk_off) were backwards. **Flipped to REGIME_SKIP_LABELS=trending_up,trending_down 2026-07-26.** ~23% of days gated out. Note: per-day PF noisy (avg 0.6 trades/day, N=32 skip-label days with usable PF) — directional finding is solid but statistical confidence is low; accumulate live data. Validation saves logs/regime_YYYY-MM-DD.json for all 618 classified dates; re-run with `--from-cache` to avoid re-scoring. |
 | VWAP_PB_MAX_CROSSES | 1 | 0–3 | Critical no-chop filter for VWAP PB edge |
 | Timeframe | K_5M | 5M/15M/60M | K_15M produces MORE stops, not fewer |

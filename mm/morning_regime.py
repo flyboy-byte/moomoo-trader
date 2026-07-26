@@ -65,6 +65,18 @@ class RegimeResult:
     ts: str
 
 
+def _extract_text(message) -> str:
+    """Return the first text block from an API response, skipping ThinkingBlocks.
+
+    claude-sonnet-5 (and other extended-thinking models) may prepend a ThinkingBlock
+    before the TextBlock. Accessing content[0].text directly raises AttributeError.
+    """
+    for block in message.content:
+        if hasattr(block, "text"):
+            return block.text.strip()
+    raise ValueError(f"No text block found in API response: {message.content}")
+
+
 def _vix_note(vix: float | None) -> str:
     if vix is None:
         return "unknown"
@@ -226,7 +238,7 @@ def classify_regime(
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
+    raw = _extract_text(message)
     log.debug("Raw API response: %s", raw)
 
     # Strip markdown code fences if the model wraps the JSON despite being told not to
@@ -463,7 +475,7 @@ def synthesize_week(
             ),
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = msg.content[0].text.strip()
+        raw = _extract_text(msg)
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         analysis = json.loads(raw)
@@ -552,7 +564,7 @@ def score_orb_setup(
             system=_ORB_SCORE_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = msg.content[0].text.strip()
+        raw = _extract_text(msg)
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         parsed = json.loads(raw)

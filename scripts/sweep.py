@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm.research import sweep_parameters, analyze_stop_exits, sweep_walk_forward
 from mm.config import cfg
+from mm.logger import set_quiet_mode
 import pandas as pd
 
 
@@ -37,9 +38,14 @@ def main() -> None:
     group.add_argument("--latest", action="store_true")
     parser.add_argument("--entry", default="strict",
                         choices=["strict", "relaxed", "bb_only", "kdj_only"])
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     parser.add_argument("--window", type=int, default=90,
                         help="Walk-forward window in days (default: 90)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
 
     path = latest_csv() if (args.latest or args.csv is None) else Path(args.csv)
     if not path.exists():

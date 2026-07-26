@@ -3,10 +3,11 @@
 with bb_kdj backtest PF to test whether regime labels predict trading performance.
 
 Usage:
-    python scripts/validate_regime.py --start 2024-01-01               # full run
-    python scripts/validate_regime.py --start 2024-01-01 --dry-run     # count dates, no API
-    python scripts/validate_regime.py --start 2024-01-01 --from-cache  # skip classification
-    python scripts/validate_regime.py --start 2024-01-01 --limit 20    # cap API calls
+    python scripts/validate_regime.py --start 2024-01-01                       # full run (uses ANTHROPIC_MODEL from .env)
+    python scripts/validate_regime.py --start 2024-01-01 --model haiku         # override model (haiku/sonnet/full-id)
+    python scripts/validate_regime.py --start 2024-01-01 --dry-run             # count dates, no API
+    python scripts/validate_regime.py --start 2024-01-01 --from-cache          # skip classification
+    python scripts/validate_regime.py --start 2024-01-01 --limit 20 --quiet    # cap calls, suppress log noise
 
 Saves per-day results to logs/regime_validation.csv.
 Writes logs/regime_YYYY-MM-DD.json for any newly classified dates (same as live).
@@ -25,8 +26,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mm import config as _config
 from mm.backtest import load_candles, profit_factor, run_backtest
 from mm.indicators import add_all
+from mm.logger import set_quiet_mode
 from mm.morning_regime import classify_regime, load_regime_today
 
 LOGS = Path(__file__).parent.parent / "logs"
@@ -162,7 +165,22 @@ def main() -> None:
                         help="Skip classification, load existing regime files only")
     parser.add_argument("--limit", type=int, default=0,
                         help="Cap new API calls at N (0 = unlimited)")
+    parser.add_argument("--model", metavar="MODEL", default=None,
+                        help="Override ANTHROPIC_MODEL for this run (e.g. haiku, sonnet, or full ID)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress per-trade log noise (file logs unaffected)")
     args = parser.parse_args()
+
+    if args.quiet:
+        set_quiet_mode()
+
+    if args.model:
+        aliases = {
+            "haiku": "claude-haiku-4-5-20251001",
+            "sonnet": "claude-sonnet-5",
+        }
+        _config.cfg.anthropic_model = aliases.get(args.model, args.model)
+        print(f"Model override: {_config.cfg.anthropic_model}")
 
     # Discover trading days from candle CSVs
     combined_paths = sorted(LOGS.glob("US_*_K_5M_combined.csv"))
