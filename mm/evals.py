@@ -702,7 +702,7 @@ def _eval_orb(
                              symbol, confidence, cfg.orb_entry_min_confidence, scored["reason"])
                     elog.signal_skip("orb_claude_score", score=0, bonus=0, min_score=0,
                                      strategy="orb", confidence=confidence,
-                                     reason=scored["reason"])
+                                     claude_reason=scored["reason"])
                     return position
                 else:
                     log.info("%-8s [orb]    SCORE  confidence=%.2f  %s  (gate=%s)",
