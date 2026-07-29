@@ -220,7 +220,6 @@ def logout() -> Response:
 
 
 @app.route("/api/stats")
-@_require_login
 def api_stats() -> Response:
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
@@ -275,7 +274,7 @@ def api_stats() -> Response:
 
 
 @app.route("/api/scoreboard")
-@_require_login
+
 def api_scoreboard() -> Response:
     """Per-strategy P&L scorecard from all historical JSONL logs.
 
@@ -335,7 +334,7 @@ def api_scoreboard() -> Response:
 
 
 @app.route("/api/pnl_history")
-@_require_login
+
 def api_pnl_history() -> Response:
     """Cumulative P&L per strategy over time, from JSONL position_close events.
 
@@ -377,7 +376,7 @@ def api_pnl_history() -> Response:
 
 
 @app.route("/api/trades")
-@_require_login
+
 def api_trades() -> Response:
     """Recent closed trades from JSONL logs, paired with their entry data.
 
@@ -454,7 +453,7 @@ def api_trades() -> Response:
 
 
 @app.route("/api/today_summary")
-@_require_login
+
 def api_today_summary() -> Response:
     """Live today stats: P&L, win%, PF, regime, VIX. Polled by the dashboard JS every 30s."""
     summary = load_summary(_session_date())
@@ -488,7 +487,7 @@ def api_today_summary() -> Response:
 
 
 @app.route("/api/regime_history")
-@_require_login
+
 def api_regime_history() -> Response:
     """Per-day regime label + bb_kdj P&L. Used by the AI Gate panel."""
     start_str = request.args.get("start", "2024-01-01")
@@ -553,7 +552,7 @@ def api_regime_history() -> Response:
 
 
 @app.route("/api/orb_scorer_history")
-@_require_login
+
 def api_orb_scorer_history() -> Response:
     """ORB scorer confidence scores from signal_skip(orb_claude_score) events."""
     start_str = request.args.get("start", "")
@@ -591,7 +590,7 @@ def api_orb_scorer_history() -> Response:
 
 
 @app.route("/market_conditions_frag")
-@_require_login
+
 def market_conditions_frag() -> str:
     """HTML fragment for the market conditions card, polled by JS every 30s."""
     latest = _load_latest_evals_by_symbol()
@@ -892,7 +891,7 @@ def _runner_status(last_eval: dict | None) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 @app.route("/")
-@_require_login
+
 def index() -> str:
     avail = _available_dates()
     sess_date = _session_date()
