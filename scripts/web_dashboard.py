@@ -694,6 +694,59 @@ def config_editor() -> Response | str:
 
 
 
+def _load_regime_today() -> dict:
+    try:
+        f = cfg.logs_dir / f"regime_{_session_date().strftime('%Y-%m-%d')}.json"
+        return json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        return {}
+
+
+def _load_vix_latest() -> float | None:
+    try:
+        f = cfg.logs_dir / "vix_daily.jsonl"
+        lines = [l for l in f.read_text().splitlines() if l]
+        return json.loads(lines[-1]).get("vix_prev_close") if lines else None
+    except Exception:
+        return None
+
+
+def _load_gap_fade_status() -> dict[str, dict]:
+    date_str = _session_date().strftime("%Y-%m-%d")
+    result: dict[str, dict] = {}
+    for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
+        sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
+        rec: dict = {"status": "watching", "direction": None, "pnl": None,
+                     "reason": None, "entry": None, "stop": None, "close": None}
+        has_gap_fade_data = False
+        for line in f.read_text().splitlines():
+            try:
+                ev = json.loads(line)
+                if ev.get("strategy") != "gap_fade":
+                    continue
+                has_gap_fade_data = True
+                event = ev.get("event")
+                if event == "bar_eval":
+                    rec["close"] = ev.get("close")
+                elif event == "position_open":
+                    rec["status"] = "in_trade"
+                    rec["direction"] = ev.get("direction")
+                    rec["entry"] = ev.get("entry")
+                    rec["stop"] = ev.get("stop")
+                elif event == "position_close":
+                    rec["status"] = "done"
+                    rec["reason"] = ev.get("reason")
+                    rec["pnl"] = ev.get("pnl")
+                elif event == "signal_skip" and rec["status"] == "watching":
+                    rec["status"] = "skipped"
+                    rec["reason"] = ev.get("reason")
+            except json.JSONDecodeError:
+                pass
+        if has_gap_fade_data:
+            result[sym] = rec
+    return result
+
+
 def _session_date() -> date:
     """Return the session date — ?date= param → --date override → today."""
     if _date_override is not None:

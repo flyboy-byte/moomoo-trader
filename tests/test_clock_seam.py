@@ -32,7 +32,7 @@ ALLOWLIST = {
     ("scripts/fetch_vix_morning.py", 49),
     # Display-only — rendered once, never persisted/compared/sorted.
     ("scripts/dashboard.py", 228),
-    ("scripts/web_dashboard.py", 882),
+    ("scripts/web_dashboard.py", 935),
     # Docstring prose, not a call.
     ("mm/replay.py", 13),
 }
