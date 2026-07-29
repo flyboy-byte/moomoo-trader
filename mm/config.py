@@ -188,6 +188,10 @@ class Config:
         if ":" in s and s.strip()
     }
 
+    # orb_latest_entry: no new ORB entries after this ET time (HH:MM). Unset = no limit.
+    # Live data: 13:00 ET bucket worst (2/10 wins). QQQ backtest: PF 1.356→1.438 with <13:00 cutoff.
+    orb_latest_entry: str | None = _get("ORB_LATEST_ENTRY", "") or None
+
     # Gap Fade VIX gate — block gap_fade entries when prior-day VIX > threshold.
     # OOS sweep (2024+): VIX>=20 negative for SPY (PF 0.626) and QQQ (PF 0.655).
     # IWM positive at all VIX bands — use GAP_VIX_MAX_OVERRIDES to filter per-symbol.

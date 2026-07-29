@@ -678,6 +678,16 @@ def _eval_orb(
         above_high = close > or_high
         below_low = close < or_low
 
+        # Late-entry cutoff: skip new entries after ORB_LATEST_ENTRY (e.g. "13:00" ET).
+        if cfg.orb_latest_entry:
+            h, m = (int(x) for x in cfg.orb_latest_entry.split(":"))
+            if bar_clock >= dtime(h, m):
+                if above_high or below_low:
+                    log.info("%-8s [orb]    SKIP  orb_too_late bar=%s latest=%s",
+                             symbol, bar_clock, cfg.orb_latest_entry)
+                    elog.signal_skip("orb_too_late", score=0, bonus=0, min_score=0, strategy="orb")
+                return position
+
         # ORB setup scorer — per-trade Claude confidence gate (shadow mode by default).
         # Runs after VIX gate and before long/short split so it sees direction.
         if cfg.anthropic_api_key and (cfg.orb_setup_scorer_enabled or True):
