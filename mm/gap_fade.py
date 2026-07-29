@@ -50,6 +50,11 @@ GAP_PREMARKET_FILL_PCT_MIN: float = float(os.getenv("GAP_PREMARKET_FILL_PCT_MIN"
 # no separate cfg.* knob (removed 2026-06-17, was dead code that looked functional but
 # nothing ever read it).
 GAP_PREMARKET_FILTER_ENABLED: bool = os.getenv("GAP_PREMARKET_FILTER_ENABLED", "false").lower() in ("true", "1", "yes")
+# Large gap-up short filter: gaps >1.0% are consistently bad for shorts.
+# IS(2022-2023) PF=0.939, OOS(2024+) PF=0.519, N≥49 per period — see strategy_graveyard.md.
+# Shadow-mode by default (logs would_filter_large_short without blocking). Set to true to activate.
+GAP_MAX_SHORT_PCT: float = float(os.getenv("GAP_MAX_SHORT_PCT", "0.01"))   # 1.0% cap on gap-up shorts
+GAP_LARGE_SHORT_FILTER_ENABLED: bool = os.getenv("GAP_LARGE_SHORT_FILTER_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # 5-min bars are labeled at their END time. First bar of session closes at 9:35.
 _FIRST_BAR_TIME = dtime(9, 35)
@@ -122,6 +127,8 @@ def run_gap_fade(
     premarket_sessions: dict | None = None,
     min_premarket_fill_pct: float = GAP_PREMARKET_FILL_PCT_MIN,
     filter_active: bool = GAP_PREMARKET_FILTER_ENABLED,
+    max_short_pct: float = GAP_MAX_SHORT_PCT,
+    large_short_filter_active: bool = GAP_LARGE_SHORT_FILTER_ENABLED,
 ) -> list[GapFadeTrade]:
     """Stateful bar-by-bar gap fade pass. Returns list of completed trades.
 
@@ -222,6 +229,15 @@ def run_gap_fade(
             log.debug("GAP_FADE SKIP  %s  premarket_fill_pct=%.2f < min=%.2f",
                       bar_ts, fill_pct, min_premarket_fill_pct)
             continue
+
+        # Large gap-up short filter (shadow or active)
+        would_filter_large_short = gap_pct > max_short_pct
+        if would_filter_large_short:
+            log.debug("GAP_FADE LARGE_SHORT  %s  gap=%.3f%% > max=%.1f%%  %s",
+                      bar_ts, gap_pct * 100, max_short_pct * 100,
+                      "SKIP" if large_short_filter_active else "would_filter")
+            if large_short_filter_active:
+                continue
 
         # Gap up → short if first bar rejected (closed below open)
         if gap_pct > 0 and first_close < today_open and shorts_enabled:

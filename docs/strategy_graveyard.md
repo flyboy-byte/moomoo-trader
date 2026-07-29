@@ -458,6 +458,36 @@ history "may be less than 2 years" and don't publish exact session boundaries �
 If the win-rate/PF breakdown by volume-ratio and fill-% tier shows a clean split on ≥30
 trades, wire the filter into `mm/gap_fade.py::run_gap_fade()` as a new pre-registered rule.
 
+### Gap Fade Feature Deep-Dive — 2026-07-29 mechanical analysis
+**What was tested:** Full backtest dataset (963 trades, 2022–2026) broken down by gap
+direction, gap size, and symbol. IS=2022-2023, OOS=2024+. Goal: find deployable filters
+beyond the existing premarket-fill% shadow gate.
+
+**Key findings (OOS 2024+):**
+- Overall: 963 trades, 61.7% win, PF=1.137 (IS=1.135 — consistent)
+- SPY: PF=1.259 OOS — solid
+- IWM: PF=1.500 OOS (IS=1.031) — large IS/OOS gap; edge there but not isolated from market structure
+- QQQ: PF=0.994 OOS — dead weight; directional edge absent
+
+**Large gap-up short filter (DEPLOYABLE):**
+- Short trades where gap_pct > 1.0%: IS PF=0.939 (N=49), OOS PF=0.519 (N=58)
+- Consistent degradation IS→OOS; sample size above 50-trade deployment threshold both periods
+- This is a structurally bad entry: large gaps attract continuation buyers, not fade candidates
+- **Action taken:** `GAP_MAX_SHORT_PCT=0.01` added to `mm/gap_fade.py` as shadow-mode knob
+  (`GAP_LARGE_SHORT_FILTER_ENABLED=false` by default). Flip to `true` in `.env` once gap_fade
+  accumulates enough live trades to verify the filter isn't eliminating profitable outliers.
+
+**Large gaps overall (>1.0%):** IS PF=1.006, OOS PF=0.856 — both sides weaker in large gaps
+  but the asymmetry is entirely on the short side (longs with large gaps are roughly neutral).
+
+**What was NOT acted on:**
+- QQQ performance: 1 live trade, no live split possible yet. Research suggests removing QQQ
+  from gap_fade SYMBOLS, but evaluation_criteria.md gate requires live OOS data. Parked.
+- IWM outperformance: 2x IS/OOS gap (1.031→1.500) suggests regime-dependent rather than robust.
+  Not enough evidence to isolate IWM and short QQQ. Monitor over next 3 months.
+
+**Code:** `scripts/backtest_gap_fade.py --all` then pandas groupby in-session analysis.
+
 ### Inferred Features — NOT BUILT, parked (2026-06-16 deep research pass)
 Five ideas surfaced by the same three research reports that are plausible but premature,
 speculative, or high-effort relative to current trade volume. Logged so future sessions don't
