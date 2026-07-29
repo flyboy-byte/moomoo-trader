@@ -1033,6 +1033,78 @@ def config_editor() -> Response | str:
 
   // Load trade log on page load
   loadTrades(0);
+
+  // --- Live polling (today view only) ---
+  var _isToday = {is_today_js};
+
+  function _fmt_pnl(v) {{
+    return v >= 0 ? '+$' + v.toFixed(2) : '-$' + Math.abs(v).toFixed(2);
+  }}
+
+  function _pf_color(v) {{
+    if (v === null) return '#4caf50';
+    return v >= 1.5 ? '#4caf50' : v >= 1.0 ? '#ff9800' : '#f44336';
+  }}
+
+  function _pollSummary() {{
+    fetch('/api/today_summary').then(r => r.json()).then(function(d) {{
+      var pEl = document.getElementById('stat-pnl');
+      if (pEl) {{
+        pEl.textContent = _fmt_pnl(d.pnl);
+        pEl.style.color = d.pnl >= 0 ? '#4caf50' : '#f44336';
+      }}
+      var setTxt = function(id, v) {{ var el = document.getElementById(id); if (el) el.textContent = v; }};
+      setTxt('stat-winpct', d.win_pct.toFixed(1) + '%');
+      var pfEl = document.getElementById('stat-pf');
+      if (pfEl) {{
+        pfEl.textContent = d.pf === null ? '∞' : d.pf.toFixed(2);
+        pfEl.style.color = _pf_color(d.pf);
+      }}
+      setTxt('stat-trades', d.trades);
+      setTxt('stat-wins', d.wins);
+      setTxt('stat-losses', d.losses);
+      setTxt('stat-targets', d.targets);
+      setTxt('stat-stops', d.stops);
+      setTxt('stat-bars', d.bar_evals);
+
+      // Regime badge
+      var rEl = document.getElementById('regime-badge');
+      if (rEl && d.regime) {{
+        var icon = d.regime_blocked ? '⊘' : '◉';
+        var col = d.regime_blocked ? '#f44336' : '#4caf50';
+        var conf = d.regime_confidence ? ' ' + Math.round(d.regime_confidence * 100) + '%' : '';
+        rEl.textContent = icon + ' ' + d.regime + conf;
+        rEl.style.color = col;
+      }}
+
+      // VIX badge
+      var vEl = document.getElementById('vix-display');
+      if (vEl && d.vix !== null) {{
+        vEl.textContent = 'VIX ' + d.vix.toFixed(1);
+        vEl.style.color = d.vix >= 25 ? '#f44336' : d.vix >= 20 ? '#ff9800' : d.vix >= 15 ? '#ffeb3b' : '#4caf50';
+      }}
+
+      // Last-updated timestamp
+      var lu = document.getElementById('last-updated');
+      if (lu) {{
+        var now = new Date();
+        lu.textContent = 'updated ' + now.getHours().toString().padStart(2,'0') + ':' +
+          now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
+      }}
+    }}).catch(function() {{}});
+  }}
+
+  function _pollMarketConditions() {{
+    fetch('/market_conditions_frag').then(r => r.text()).then(function(html) {{
+      var el = document.getElementById('market-cond-container');
+      if (el) el.innerHTML = html;
+    }}).catch(function() {{}});
+  }}
+
+  if (_isToday) {{
+    setInterval(_pollSummary, 30000);
+    setInterval(_pollMarketConditions, 30000);
+  }}
   </script>
 
   <!-- Kill switches -->
@@ -1738,37 +1810,43 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
   <div class="status-bar">
     <span class="runner-status">{status_label if is_today else f'HISTORY · {date_str}'}</span>
     {date_picker}
+    {regime_html}
+    {vix_html}
     <span class="meta">mode: {cfg.strategy_mode}</span>
     <span class="meta">symbol: {', '.join(cfg.symbols)}</span>
     <span class="meta">last price: {last_close}  score: {last_score}</span>
-    <span class="meta" style="margin-left:auto">updated {now_str} · refreshes every 30s</span>
+    <span class="meta" id="last-updated" style="margin-left:auto">updated {now_str}</span>
     <a href="/config" style="font-size:11px;color:#555;margin-left:8px;text-decoration:none"
        title="Config editor">⚙</a>
   </div>
 
   <div class="card">
-    <div class="card-title">TODAY</div>
+    <div class="card-title">TODAY &nbsp;<span style="color:#444;font-size:10px">{date_str}</span></div>
     <div class="summary-grid">
       <div class="stat"><div class="stat-label">P&L</div>
-        <div class="stat-value" style="color:{pnl_col}">{pnl_str}</div></div>
+        <div id="stat-pnl" class="stat-value" style="color:{pnl_col}">{pnl_str}</div></div>
+      <div class="stat"><div class="stat-label">WIN%</div>
+        <div id="stat-winpct" class="stat-value">{_win_pct:.1f}%</div></div>
+      <div class="stat"><div class="stat-label">PF</div>
+        <div id="stat-pf" class="stat-value" style="color:{pf_col}">{pf_str}</div></div>
       <div class="stat"><div class="stat-label">TRADES</div>
-        <div class="stat-value">{len(ct)}</div></div>
+        <div id="stat-trades" class="stat-value">{len(ct)}</div></div>
       <div class="stat"><div class="stat-label">WINS</div>
-        <div class="stat-value" style="color:#4caf50">{summary.wins}</div></div>
+        <div id="stat-wins" class="stat-value" style="color:#4caf50">{summary.wins}</div></div>
       <div class="stat"><div class="stat-label">LOSSES</div>
-        <div class="stat-value" style="color:#f44336">{summary.losses}</div></div>
-      <div class="stat"><div class="stat-label">BARS EVAL</div>
-        <div class="stat-value">{summary.bar_evals}</div></div>
+        <div id="stat-losses" class="stat-value" style="color:#f44336">{summary.losses}</div></div>
       <div class="stat"><div class="stat-label">TARGETS</div>
-        <div class="stat-value">{summary.targets}</div></div>
+        <div id="stat-targets" class="stat-value">{summary.targets}</div></div>
       <div class="stat"><div class="stat-label">STOPS</div>
-        <div class="stat-value">{summary.stops}</div></div>
+        <div id="stat-stops" class="stat-value">{summary.stops}</div></div>
+      <div class="stat"><div class="stat-label">BARS EVAL</div>
+        <div id="stat-bars" class="stat-value" style="font-size:16px">{summary.bar_evals}</div></div>
     </div>
   </div>
 
   {open_html}
   {trades_html}
-  {market_cond_html}
+  <div id="market-cond-container">{market_cond_html}</div>
 
   <div class="card" id="pnl-chart-card">
     <div class="card-title">CUMULATIVE P&L BY STRATEGY
@@ -1868,8 +1946,11 @@ def index() -> str:
     evals = _load_recent_evals()
     latest = _load_latest_evals_by_symbol()
     skips = _load_recent_skips()
+    regime = _load_regime_today()
+    vix = _load_vix_latest()
     market_cond_html = _render_market_conditions(latest, skips)
-    return _render(summary, evals, market_cond_html, available_dates=avail, latest=latest)
+    return _render(summary, evals, market_cond_html, available_dates=avail, latest=latest,
+                   regime=regime, vix=vix)
 
 
 # ---------------------------------------------------------------------------
