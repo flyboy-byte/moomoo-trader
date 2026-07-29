@@ -731,6 +731,19 @@ def config_editor() -> Response | str:
     current = _read_env()
     kills = _kill_switch_state()
 
+    # Fill in live cfg defaults for keys absent from .env so UI reflects reality
+    _cfg_defaults: dict[str, str] = {
+        "STRATEGIES":           ",".join(cfg.active_strategies),
+        "SYMBOLS":              ",".join(cfg.symbols),
+        "VWAP_PB_SYMBOLS":      ",".join(cfg.vwap_pb_symbols),
+        "ORB_SHORT_SYMBOLS":    ",".join(cfg.orb_short_symbols),
+        "REGIME_GATE_STRATEGIES": ",".join(cfg.regime_gate_strategies),
+        "REGIME_SKIP_LABELS":   ",".join(cfg.regime_skip_labels),
+    }
+    for k, v in _cfg_defaults.items():
+        if k not in current:
+            current[k] = v
+
     def _is_true(key: str) -> bool:
         return current.get(key, "false").lower() in ("true", "1", "yes")
 
