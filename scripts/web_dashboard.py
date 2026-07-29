@@ -701,25 +701,33 @@ def config_editor() -> Response | str:
         elif action == "save_config":
             changed = []
             rejected = []
+            existing = _read_env()
             for key in _CFG_BOOL_KEYS:
                 val = "true" if request.form.get(key) else "false"
+                if val == existing.get(key):
+                    continue
                 if _write_env_key(key, val):
                     changed.append(key)
                 else:
                     rejected.append(key)
             for key in _CFG_MULTISELECT_KEYS:
                 val = ",".join(request.form.getlist(key))
+                if val == existing.get(key, ""):
+                    continue
                 if _write_env_key(key, val):
                     changed.append(key)
                 else:
                     rejected.append(key)
             for key in _CFG_NUMERIC_KEYS:
-                if key in request.form:
-                    val = request.form[key].strip()
-                    if _write_env_key(key, val):
-                        changed.append(key)
-                    else:
-                        rejected.append(key)
+                if key not in request.form:
+                    continue
+                val = request.form[key].strip()
+                if val == existing.get(key, ""):
+                    continue
+                if _write_env_key(key, val):
+                    changed.append(key)
+                else:
+                    rejected.append(key)
             if rejected:
                 msg = f"Rejected (invalid value): {', '.join(sorted(rejected))}."
                 msg_type = "err"
@@ -733,12 +741,15 @@ def config_editor() -> Response | str:
 
     # Fill in live cfg defaults for keys absent from .env so UI reflects reality
     _cfg_defaults: dict[str, str] = {
-        "STRATEGIES":           ",".join(cfg.active_strategies),
-        "SYMBOLS":              ",".join(cfg.symbols),
-        "VWAP_PB_SYMBOLS":      ",".join(cfg.vwap_pb_symbols),
-        "ORB_SHORT_SYMBOLS":    ",".join(cfg.orb_short_symbols),
+        "STRATEGIES":             ",".join(cfg.active_strategies),
+        "SYMBOLS":                ",".join(cfg.symbols),
+        "VWAP_PB_SYMBOLS":        ",".join(cfg.vwap_pb_symbols),
+        "ORB_SHORT_SYMBOLS":      ",".join(cfg.orb_short_symbols),
         "REGIME_GATE_STRATEGIES": ",".join(cfg.regime_gate_strategies),
-        "REGIME_SKIP_LABELS":   ",".join(cfg.regime_skip_labels),
+        "REGIME_SKIP_LABELS":     ",".join(cfg.regime_skip_labels),
+        # Only ORB_SHORTS_ENABLED has a non-False default; include it so the toggle
+        # shows ON when the key is absent from .env (matching live cfg behaviour).
+        "ORB_SHORTS_ENABLED":     "true" if cfg.orb_shorts_enabled else "false",
     }
     for k, v in _cfg_defaults.items():
         if k not in current:
