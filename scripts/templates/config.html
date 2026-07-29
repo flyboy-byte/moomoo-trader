@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Config — moomoo-trader{% endblock %}
+
+{% block body %}
+<!-- ── Header ──────────────────────────────────────────────────────── -->
+<header class="site-header">
+  <div class="site-logo">◈ moomoo-trader</div>
+  <nav class="tab-nav">
+    <a href="/" style="color:var(--muted);font-size:11px;font-family:monospace;text-decoration:none;padding:0 14px;display:flex;align-items:center;">← dashboard</a>
+  </nav>
+  <div class="header-links">
+    <a href="/logout">logout</a>
+  </div>
+</header>
+
+<div class="page-body">
+
+{% if not cfg.dashboard_password %}
+<div class="card accent-red">
+  <div class="card-title" style="color:var(--red)">CONFIG EDITOR DISABLED</div>
+  <p style="color:var(--muted);font-size:13px">
+    Set <code style="font-family:monospace">DASHBOARD_PASSWORD=yourpassword</code> in
+    <code style="font-family:monospace">.env</code> and restart the dashboard to enable the editor.
+  </p>
+</div>
+{% else %}
+
+{% if msg %}
+<div class="alert {{ msg_type }}">{{ msg }}</div>
+{% endif %}
+
+<!-- Kill switches -->
+<div class="card">
+  <div class="card-title">KILL SWITCHES</div>
+
+  <div class="kill-row">
+    <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="toggle_stop_trading">
+      <button type="submit" class="btn {{ 'ok' if kills.STOP_TRADING else 'danger' }}">
+        {{ 'Resume Trading' if kills.STOP_TRADING else 'Pause Trading' }}
+      </button>
+    </form>
+    <span class="kill-state" style="color:{{ 'var(--red)' if kills.STOP_TRADING else 'var(--green)' }}">
+      STOP_TRADING.txt: {{ 'ACTIVE — paused' if kills.STOP_TRADING else 'inactive' }}
+    </span>
+  </div>
+
+  <div class="kill-row">
+    <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="toggle_stop_shorts">
+      <button type="submit" class="btn {{ 'ok' if kills.STOP_SHORTS else 'warn' }}">
+        {{ 'Re-enable ORB Shorts' if kills.STOP_SHORTS else 'Disable ORB Shorts' }}
+      </button>
+    </form>
+    <span class="kill-state" style="color:{{ 'var(--orange)' if kills.STOP_SHORTS else 'var(--green)' }}">
+      STOP_SHORTS.txt: {{ 'ACTIVE — shorts off' if kills.STOP_SHORTS else 'inactive' }}
+    </span>
+  </div>
+</div>
+
+<!-- Runner control -->
+<div class="card">
+  <div class="card-title">RUNNER CONTROL</div>
+  <form method="POST" style="display:flex;align-items:center;gap:14px">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="restart_runner">
+    <button type="submit" class="btn warn">Restart moomoo-paper.service</button>
+    <span class="muted" style="font-size:11px">Config changes only take effect after restart.</span>
+  </form>
+</div>
+
+<!-- .env editor -->
+<form id="cfg-form" method="POST">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="save_config">
+
+  <div class="card">
+    <div class="card-title">RISK / SIZING</div>
+    {{ fields_numeric|safe }}
+  </div>
+
+  <div class="card">
+    <div class="card-title">STRATEGY / SYMBOL LISTS</div>
+    {{ fields_list|safe }}
+  </div>
+
+  <div class="card">
+    <div class="card-title">FLAGS (true/false)</div>
+    {{ fields_bool|safe }}
+  </div>
+
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px">
+    <button type="submit" class="btn primary" style="padding:10px 24px">Save to .env</button>
+    <span class="muted" style="font-size:11px">Writes to .env only — restart runner to apply.</span>
+  </div>
+</form>
+
+<!-- System stats -->
+<div class="card">
+  <div class="card-title-row">
+    <span class="card-title" style="margin-bottom:0">SYSTEM STATS</span>
+    <button id="stats-toggle" class="btn ok" onclick="toggleStats()">▶ Start Live Feed</button>
+  </div>
+  <div id="stats-body" style="display:none;margin-top:14px">
+    <!-- CPU cores -->
+    <div style="margin-bottom:14px">
+      <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:6px">
+        CPU &nbsp;<span id="sys-load"></span>
+      </div>
+      <div id="sys-cores" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+    </div>
+    <!-- Mem / Disk / Net -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:14px">
+      <div>
+        <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:4px">MEMORY</div>
+        <div class="sys-bar-track"><div id="sys-mem-bar" class="sys-bar-fill green" style="width:0%"></div></div>
+        <div id="sys-mem-lbl" class="muted" style="font-size:11px;margin-top:3px;font-family:monospace">—</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:4px">DISK</div>
+        <div class="sys-bar-track"><div id="sys-disk-bar" class="sys-bar-fill green" style="width:0%"></div></div>
+        <div id="sys-disk-lbl" class="muted" style="font-size:11px;margin-top:3px;font-family:monospace">—</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:4px">NETWORK</div>
+        <div id="sys-net" class="muted" style="font-size:12px;margin-top:4px;font-family:monospace">—</div>
+      </div>
+    </div>
+    <!-- Processes -->
+    <div>
+      <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:6px">TOP PROCESSES</div>
+      <table class="data-table" style="font-size:12px">
+        <thead>
+          <tr>
+            <th>PID</th><th>Name</th>
+            <th class="right">CPU%</th><th class="right">MEM%</th><th class="right">S</th>
+          </tr>
+        </thead>
+        <tbody id="sys-procs-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+</div><!-- /page-body -->
+{% endblock %}

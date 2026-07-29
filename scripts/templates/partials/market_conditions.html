@@ -1,0 +1,171 @@
+{% if not latest and not skips and not gap_status %}{% else %}
+<div class="card">
+  <div class="card-title">MARKET CONDITIONS
+    <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">
+      — {{ bar_time_label }}
+    </span>
+  </div>
+
+  <!-- Symbol cards (per-symbol, all strategies) -->
+  {% if latest %}
+  <div class="symbol-grid">
+    {% for sym in latest|sort %}
+    {% set sym_evals = latest[sym] %}
+    {% set any_eval = sym_evals.values()|list|first if sym_evals else none %}
+    <div class="symbol-card">
+      <div class="symbol-card-header">
+        <span class="symbol-name">{{ sym.replace('US.', '') }}</span>
+        {% if any_eval %}
+        <span class="symbol-price mono">${{ '%.2f'|format(any_eval.get('close', 0)) }}</span>
+        <span class="symbol-time">{{ any_eval.get('ts', '')[:16].replace('T',' ')[11:] }}</span>
+        {% endif %}
+      </div>
+
+      <!-- BB+KDJ row -->
+      {% if sym_evals.get('bb_kdj') %}
+      {% set e = sym_evals['bb_kdj'] %}
+      {% set sig = e.get('signals', {}) %}
+      {% set bonus = e.get('bonus_score', 0) %}
+      {% set bb = sig.get('bb_touch', false) %}
+      {% set kdj = sig.get('kdj_cross', false) %}
+      {% set ranging = sig.get('ranging', false) %}
+      {% set bb_lower = sig.get('bb_lower', 0) %}
+      {% set close = e.get('close', 0) %}
+      <div class="strat-row">
+        <span class="strat-name" style="color:var(--strat-bb-kdj)">BB+KDJ</span>
+        <span class="strat-status">
+          {% if bb and kdj and bonus >= cfg.min_signal_score %}
+          <span class="green" style="font-weight:700">READY ▲</span>
+          {% elif bb and not kdj %}
+          <span class="orange">BB ✓ · need KDJ</span>
+          {% elif kdj and not bb %}
+          {% if bb_lower and close %}
+          <span class="muted">KDJ ✓ · BB {{ '+%.2f'|format((close - bb_lower) / close * 100) }}% away</span>
+          {% else %}
+          <span class="muted">KDJ ✓ · wait BB</span>
+          {% endif %}
+          {% else %}
+          {% if bb_lower and close %}
+          <span class="muted">{{ '+%.2f'|format((close - bb_lower) / close * 100) }}% to BB</span>
+          {% else %}
+          <span class="muted">watching</span>
+          {% endif %}
+          {% endif %}
+        </span>
+        <span class="muted" style="font-size:10px;margin-left:auto">{{ bonus }}/{{ cfg.min_signal_score }}</span>
+      </div>
+      {% endif %}
+
+      <!-- ORB row -->
+      {% if sym_evals.get('orb') %}
+      {% set e = sym_evals['orb'] %}
+      {% set sig = e.get('signals', {}) %}
+      {% set close = e.get('close', 0) %}
+      {% set or_high = sig.get('or_high', 0) %}
+      {% set or_low = sig.get('or_low', 0) %}
+      {% set or_valid = sig.get('or_valid', false) %}
+      <div class="strat-row">
+        <span class="strat-name" style="color:var(--strat-orb)">ORB</span>
+        <span class="strat-status">
+          {% if not or_valid %}
+          <span class="muted">building OR…</span>
+          {% elif close > or_high %}
+          <span class="green" style="font-weight:700">LONG READY ▲</span>
+          {% elif or_low and close < or_low %}
+          <span class="red" style="font-weight:700">SHORT READY ▼</span>
+          {% elif or_high %}
+          <span class="muted">inside · +{{ '+%.2f'|format((or_high - close) / close * 100) }}% to H</span>
+          {% else %}
+          <span class="muted">inside range</span>
+          {% endif %}
+        </span>
+        {% if or_valid %}
+        <span class="muted" style="font-size:10px;margin-left:auto">{{ '%.2f'|format(or_low) }}–{{ '%.2f'|format(or_high) }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- VWAP PB row -->
+      {% if sym_evals.get('vwap_pb') %}
+      {% set e = sym_evals['vwap_pb'] %}
+      {% set sig = e.get('signals', {}) %}
+      {% set crosses = sig.get('cross_count', 0) %}
+      {% set above = sig.get('close_above_vwap', false) %}
+      {% set wick = sig.get('wick_below', false) %}
+      <div class="strat-row">
+        <span class="strat-name" style="color:var(--strat-vwap-pb)">VWAP PB</span>
+        <span class="strat-status">
+          {% if crosses > cfg.vwap_pb_max_crosses %}
+          <span class="muted">choppy ({{ crosses }}× > {{ cfg.vwap_pb_max_crosses }})</span>
+          {% elif wick and above %}
+          <span class="green" style="font-weight:700">READY ▲</span>
+          {% elif wick and not above %}
+          <span class="orange">wick ✓ · below VWAP</span>
+          {% else %}
+          <span class="muted">watching</span>
+          {% endif %}
+        </span>
+        <span class="muted" style="font-size:10px;margin-left:auto">{{ crosses }}×</span>
+      </div>
+      {% endif %}
+
+      <!-- Gap Fade row -->
+      {% if sym in gap_status %}
+      {% set gf = gap_status[sym] %}
+      <div class="strat-row">
+        <span class="strat-name" style="color:var(--strat-gap-fade)">GAP FADE</span>
+        <span class="strat-status">
+          {% if gf.status == 'in_trade' %}
+          <span class="{{ 'red' if gf.direction == 'short' else 'green' }}" style="font-weight:700">
+            IN TRADE {{ (gf.direction or 'long')|upper }}
+          </span>
+          {% elif gf.status == 'done' %}
+          {% set gf_pnl = gf.pnl or 0 %}
+          <span class="{{ 'green' if gf_pnl >= 0 else 'red' }}">
+            {{ '✓' if gf.reason == 'TARGET' else '✗' }} {{ gf.reason or '?' }}
+            &nbsp;{{ ('+$' if gf_pnl >= 0 else '-$') + '%.2f'|format(gf_pnl|abs) }}
+          </span>
+          {% elif gf.status == 'skipped' %}
+          <span class="muted">SKIP · {{ gf.reason or '?' }}</span>
+          {% else %}
+          <span class="muted">watching</span>
+          {% endif %}
+        </span>
+      </div>
+      {% endif %}
+
+    </div><!-- /symbol-card -->
+    {% endfor %}
+  </div><!-- /symbol-grid -->
+  {% endif %}
+
+  <!-- Recent skips -->
+  {% if skips %}
+  <div class="skips-section">
+    <div class="card-title" style="margin-bottom:8px">RECENT SKIPS</div>
+    <table class="data-table" style="font-size:12px">
+      <thead>
+        <tr>
+          <th>Time</th><th>Symbol</th><th>Strategy</th><th>Reason</th><th class="right">Score/Min</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in skips|reverse %}
+        {% set ts = e.get('ts', '')[:16].replace('T',' ')[11:] %}
+        {% set reason = e.get('reason', '?') %}
+        {% set is_block = 'block' in reason or 'risk' in reason or 'vix' in reason %}
+        <tr>
+          <td class="muted">{{ ts }}</td>
+          <td><b>{{ e.get('symbol', '?').replace('US.', '') }}</b></td>
+          <td class="muted">{{ e.get('strategy', '?') }}</td>
+          <td style="color:{{ 'var(--red)' if is_block else 'var(--muted)' }}">{{ reason }}</td>
+          <td class="right muted">{{ e.get('score', 0) }}/{{ e.get('min_score', '?') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</div>
+{% endif %}

@@ -22,16 +22,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 import psutil
-from flask import Flask, Response, abort, jsonify, redirect, render_template_string, request, session, url_for
-from markupsafe import escape
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
+from markupsafe import Markup, escape
 from mm import clock
 from mm.config import cfg
 from eod_summary import SessionSummary, load_summary
 
 _PROJECT_ROOT = Path(__file__).parent.parent
+_SCRIPTS_DIR = Path(__file__).parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 
-app = Flask(__name__)
+app = Flask(__name__,
+            static_folder=str(_SCRIPTS_DIR / "static"),
+            template_folder=str(_SCRIPTS_DIR / "templates"))
 # Random per-process secret: sessions reset on restart (deploys), which is fine.
 # Never derive this from the password — the derivation scheme is public in this
 # repo, so a deterministic key would turn any captured session cookie into
@@ -51,6 +54,11 @@ _login_fails: dict[str, list[float]] = {}
 
 import logging as _logging
 _auth_log = _logging.getLogger("dashboard.auth")
+
+
+@app.context_processor
+def _inject_template_globals():
+    return {"csrf_token": _csrf_token, "cfg": cfg}
 
 
 def _client_ip() -> str:
@@ -162,40 +170,6 @@ def _kill_switch_state() -> dict[str, bool]:
     }
 
 
-_CSS_BASE = """
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: monospace; background: #111; color: #ddd; padding: 24px; font-size: 14px; }
-h1 { font-size: 18px; margin-bottom: 20px; color: #fff; }
-h2 { font-size: 13px; color: #666; letter-spacing: 1px; margin: 20px 0 10px; }
-.card { background: #1a1a1a; border-radius: 6px; padding: 16px 18px; margin-bottom: 16px; }
-input[type=password], input[type=text] {
-  background: #222; border: 1px solid #333; color: #ddd; padding: 8px 10px;
-  border-radius: 4px; font-family: monospace; font-size: 13px; width: 100%;
-}
-input[type=password]:focus, input[type=text]:focus {
-  border-color: #555; outline: none;
-}
-button, .btn {
-  background: #2a2a2a; border: 1px solid #444; color: #ddd; padding: 7px 14px;
-  border-radius: 4px; font-family: monospace; font-size: 13px; cursor: pointer;
-}
-button:hover, .btn:hover { background: #333; border-color: #666; }
-.btn-danger { border-color: #f44336; color: #f44336; }
-.btn-danger:hover { background: #1a0000; }
-.btn-warn { border-color: #ff9800; color: #ff9800; }
-.btn-warn:hover { background: #1a0f00; }
-.btn-ok { border-color: #4caf50; color: #4caf50; }
-.btn-ok:hover { background: #001a00; }
-.msg { padding: 8px 12px; border-radius: 4px; margin-bottom: 14px; font-size: 13px; }
-.msg-ok { background: #001a00; border: 1px solid #4caf50; color: #4caf50; }
-.msg-err { background: #1a0000; border: 1px solid #f44336; color: #f44336; }
-.kv-row { display: grid; grid-template-columns: 220px 1fr 90px; gap: 8px;
-           align-items: center; margin-bottom: 6px; }
-.kv-label { color: #888; font-size: 12px; }
-.switch-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
-a { color: #888; text-decoration: none; }
-a:hover { color: #ddd; }
-"""
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -216,7 +190,6 @@ def login() -> Response | str:
             session.permanent = True
             _login_fails.pop(ip, None)
             _auth_log.info("login success ip=%s", ip)
-            # only same-site relative redirects (block open-redirect via ?next=)
             nxt = request.args.get("next", "")
             if not nxt.startswith("/") or nxt.startswith("//"):
                 nxt = url_for("index")
@@ -225,21 +198,7 @@ def login() -> Response | str:
             _login_fails.setdefault(ip, []).append(time.time())
             _auth_log.warning("login failed ip=%s total_fails=%d", ip, len(_login_fails[ip]))
             error = "Wrong password."
-    return render_template_string(f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Login</title>
-<style>{_CSS_BASE}</style></head>
-<body>
-  <h1>moomoo-trader</h1>
-  <div class="card" style="max-width:340px">
-    <h2>DASHBOARD LOGIN</h2>
-    {('<div class="msg msg-err">' + error + '</div>') if error else ''}
-    <form method="POST">
-      <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
-      <input type="password" name="password" placeholder="Password" autofocus style="margin-bottom:10px">
-      <button type="submit" style="width:100%">Sign in</button>
-    </form>
-  </div>
-</body></html>""", error=error)
+    return render_template("login.html", error=error)
 
 
 @app.route("/logout")
@@ -516,35 +475,130 @@ def api_today_summary() -> Response:
     })
 
 
+@app.route("/api/regime_history")
+@_require_login
+def api_regime_history() -> Response:
+    """Per-day regime label + bb_kdj P&L. Used by the AI Gate panel."""
+    start_str = request.args.get("start", "2024-01-01")
+    regime_by_date: dict[str, dict] = {}
+    for f in cfg.logs_dir.glob("regime_*.json"):
+        try:
+            date_str = f.stem.split("_", 1)[1]
+            if date_str < start_str:
+                continue
+            d = json.loads(f.read_text())
+            regime_by_date[date_str] = {"label": d.get("regime", ""), "confidence": d.get("confidence")}
+        except Exception:
+            continue
+
+    pnl_by_date: dict[str, dict] = {}
+    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
+        date_part = f.stem.rsplit("_", 1)[-1]
+        if date_part < start_str:
+            continue
+        try:
+            for line in f.read_text().splitlines():
+                if not line:
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != "position_close":
+                    continue
+                if ev.get("strategy") not in ("bb_kdj", "bb_kdj_loose"):
+                    continue
+                pnl = float(ev.get("pnl", 0))
+                s = pnl_by_date.setdefault(date_part, {"pnl": 0.0, "trades": 0, "gross_win": 0.0, "gross_loss": 0.0})
+                s["pnl"] = round(s["pnl"] + pnl, 4)
+                s["trades"] += 1
+                if pnl > 0:
+                    s["gross_win"] = round(s["gross_win"] + pnl, 4)
+                else:
+                    s["gross_loss"] = round(s["gross_loss"] - pnl, 4)
+        except Exception:
+            continue
+
+    skip_lbls = list(getattr(cfg, "regime_skip_labels", None) or [])
+    regime_enabled = bool(getattr(cfg, "regime_gate_enabled", False))
+    all_dates = sorted(set(list(regime_by_date) + list(pnl_by_date)))
+
+    history = []
+    for d in all_dates:
+        r = regime_by_date.get(d, {})
+        p = pnl_by_date.get(d, {})
+        label = r.get("label", "")
+        blocked = regime_enabled and label in skip_lbls
+        history.append({
+            "date": d,
+            "label": label,
+            "confidence": r.get("confidence"),
+            "blocked": blocked,
+            "trades": p.get("trades", 0),
+            "pnl": p.get("pnl", 0.0),
+            "gross_win": p.get("gross_win", 0.0),
+            "gross_loss": p.get("gross_loss", 0.0),
+        })
+
+    return jsonify({"history": history, "skip_labels": skip_lbls})
+
+
+@app.route("/api/orb_scorer_history")
+@_require_login
+def api_orb_scorer_history() -> Response:
+    """ORB scorer confidence scores from signal_skip(orb_claude_score) events."""
+    start_str = request.args.get("start", "")
+    setups: list[dict] = []
+
+    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
+        date_part = f.stem.rsplit("_", 1)[-1]
+        if start_str and date_part < start_str:
+            continue
+        try:
+            for line in f.read_text().splitlines():
+                if not line:
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != "signal_skip":
+                    continue
+                if ev.get("reason") != "orb_claude_score":
+                    continue
+                conf = ev.get("confidence") or ev.get("score")
+                if conf is not None:
+                    setups.append({"date": date_part, "confidence": float(conf)})
+        except Exception:
+            continue
+
+    avg = round(sum(s["confidence"] for s in setups) / len(setups), 3) if setups else None
+    threshold = getattr(cfg, "orb_entry_min_confidence", None)
+    above = sum(1 for s in setups if s["confidence"] >= (threshold or 0.5)) if setups else 0
+
+    return jsonify({
+        "setups": setups[-200:],
+        "avg_confidence": avg,
+        "threshold": threshold,
+        "above_threshold": above,
+    })
+
+
 @app.route("/market_conditions_frag")
 @_require_login
 def market_conditions_frag() -> str:
     """HTML fragment for the market conditions card, polled by JS every 30s."""
     latest = _load_latest_evals_by_symbol()
     skips = _load_recent_skips()
-    html = _render_market_conditions(latest, skips)
-    return html or '<div class="card" id="market-cond-inner"><div class="card-title">MARKET CONDITIONS</div><span style="color:#555">No data yet.</span></div>'
+    gap_status = _load_gap_fade_status()
+    date_str = _session_date().strftime("%Y-%m-%d")
+    bar_time_label = date_str
+    return render_template("partials/market_conditions.html",
+                           latest=latest, skips=skips, gap_status=gap_status,
+                           bar_time_label=bar_time_label)
 
 
 @app.route("/config", methods=["GET", "POST"])
 @_require_login
 def config_editor() -> Response | str:
     if not cfg.dashboard_password:
-        return render_template_string(f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Config — moomoo-trader</title>
-<style>{_CSS_BASE}</style></head>
-<body>
-  <h1>moomoo-trader &nbsp;<span style="color:#555;font-size:13px">/ config</span></h1>
-  <a href="/">← back to dashboard</a>
-  <div class="card" style="margin-top:20px;border-left:3px solid #f44336">
-    <h2 style="color:#f44336">CONFIG EDITOR DISABLED</h2>
-    <p style="margin-top:10px;color:#aaa">
-      Set <code>DASHBOARD_PASSWORD=yourpassword</code> in <code>.env</code> and restart
-      the dashboard service to enable the config editor.<br><br>
-      Without a password the editor is open to anyone who can reach port 8080.
-    </p>
-  </div>
-</body></html>""")
+        return render_template("config.html",
+            msg="", msg_type="ok", kills={},
+            fields_numeric=Markup(""), fields_list=Markup(""), fields_bool=Markup(""))
     msg = ""
     msg_type = "ok"
 
@@ -608,8 +662,8 @@ def config_editor() -> Response | str:
 
     def _field(key: str) -> str:
         val = escape(current.get(key, ""))
-        return (f'<div class="kv-row">'
-                f'<span class="kv-label">{key}</span>'
+        return (f'<div class="kv-grid">'
+                f'<span class="kv-key">{key}</span>'
                 f'<input type="text" name="{key}" value="{val}" form="cfg-form">'
                 f'</div>')
 
@@ -631,541 +685,13 @@ def config_editor() -> Response | str:
     fields_list = "\n".join(_field(k) for k in list_keys)
     fields_bool = "\n".join(_field(k) for k in bool_keys)
 
-    stop_btn_cls = "btn-danger" if not kills["STOP_TRADING"] else "btn-ok"
-    stop_btn_lbl = "Pause Trading (create STOP_TRADING.txt)" if not kills["STOP_TRADING"] else "Resume Trading (remove STOP_TRADING.txt)"
-    stop_active = '<span style="color:#f44336">ACTIVE — trading paused</span>' if kills["STOP_TRADING"] else '<span style="color:#4caf50">inactive</span>'
+    return render_template("config.html",
+        msg=msg, msg_type=msg_type, kills=kills,
+        fields_numeric=Markup(fields_numeric),
+        fields_list=Markup(fields_list),
+        fields_bool=Markup(fields_bool),
+    )
 
-    shorts_btn_cls = "btn-warn" if not kills["STOP_SHORTS"] else "btn-ok"
-    shorts_btn_lbl = "Disable ORB Shorts (create STOP_SHORTS.txt)" if not kills["STOP_SHORTS"] else "Re-enable ORB Shorts (remove STOP_SHORTS.txt)"
-    shorts_active = '<span style="color:#ff9800">ACTIVE — shorts disabled</span>' if kills["STOP_SHORTS"] else '<span style="color:#4caf50">inactive</span>'
-
-    msg_html = f'<div class="msg msg-{escape(msg_type)}">{escape(msg)}</div>' if msg else ""
-
-    return render_template_string(f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Config — moomoo-trader</title>
-<style>{_CSS_BASE}</style></head>
-<body>
-  <h1>moomoo-trader &nbsp;<span style="color:#555;font-size:13px">/ config</span></h1>
-  <a href="/" style="font-size:12px">← back to dashboard</a>
-  &nbsp;&nbsp;
-  <a href="/logout" style="font-size:12px">logout</a>
-
-  {msg_html}
-
-  <!-- System stats (htop-style, toggle on/off) -->
-  <div class="card" id="stats-card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h2 style="margin:0">SYSTEM</h2>
-      <button id="stats-toggle" onclick="toggleStats()"
-              class="btn btn-ok" style="font-size:11px;padding:4px 10px">▶ Start Live Feed</button>
-    </div>
-    <div id="stats-body" style="display:none">
-      <!-- CPU cores -->
-      <div style="margin-bottom:14px">
-        <div class="kv-label" style="margin-bottom:6px">CPU CORES &nbsp;<span id="s-load" style="color:#666"></span></div>
-        <div id="s-cores" style="display:flex;flex-wrap:wrap;gap:4px"></div>
-      </div>
-      <!-- Mem / Disk / Net row -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:14px">
-        <div>
-          <div class="kv-label" style="margin-bottom:4px">MEMORY</div>
-          <div class="stat-bar-track"><div id="s-mem-bar" class="stat-bar" style="width:0%"></div></div>
-          <div id="s-mem-lbl" style="font-size:11px;color:#888;margin-top:3px">—</div>
-        </div>
-        <div>
-          <div class="kv-label" style="margin-bottom:4px">DISK</div>
-          <div class="stat-bar-track"><div id="s-disk-bar" class="stat-bar" style="width:0%"></div></div>
-          <div id="s-disk-lbl" style="font-size:11px;color:#888;margin-top:3px">—</div>
-        </div>
-        <div>
-          <div class="kv-label" style="margin-bottom:4px">NETWORK (total)</div>
-          <div id="s-net" style="font-size:12px;color:#aaa;margin-top:4px">—</div>
-        </div>
-      </div>
-      <!-- Top processes -->
-      <div>
-        <div class="kv-label" style="margin-bottom:6px">TOP PROCESSES</div>
-        <table id="s-procs" style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="color:#555">
-            <th style="text-align:left;padding:2px 6px">PID</th>
-            <th style="text-align:left;padding:2px 6px">NAME</th>
-            <th style="text-align:right;padding:2px 6px">CPU%</th>
-            <th style="text-align:right;padding:2px 6px">MEM%</th>
-            <th style="text-align:right;padding:2px 6px">S</th>
-          </tr></thead>
-          <tbody id="s-procs-body"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  <style>
-  .stat-bar-track {{ background:#222; border-radius:3px; height:10px; overflow:hidden; }}
-  .stat-bar {{ background:#4caf50; height:10px; border-radius:3px; transition:width 0.4s; }}
-  .stat-bar.warn {{ background:#ff9800; }}
-  .stat-bar.crit {{ background:#f44336; }}
-  .core-bar {{ display:inline-flex;flex-direction:column;align-items:center;gap:2px; }}
-  .core-track {{ width:18px;height:60px;background:#222;border-radius:2px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden; }}
-  .core-fill {{ width:100%;background:#4caf50;transition:height 0.4s; }}
-  .core-fill.warn {{ background:#ff9800; }}
-  .core-fill.crit {{ background:#f44336; }}
-  .core-lbl {{ font-size:9px;color:#555; }}
-  </style>
-  <script>
-  var _statsInterval = null;
-
-  function toggleStats() {{
-    var btn = document.getElementById("stats-toggle");
-    var body = document.getElementById("stats-body");
-    if (_statsInterval) {{
-      clearInterval(_statsInterval);
-      _statsInterval = null;
-      btn.textContent = "▶ Start Live Feed";
-      btn.className = "btn btn-ok";
-    }} else {{
-      body.style.display = "block";
-      fetchStats();
-      _statsInterval = setInterval(fetchStats, 2000);
-      btn.textContent = "■ Stop";
-      btn.className = "btn btn-danger";
-    }}
-  }}
-
-  function bar(pct) {{
-    var cls = pct >= 90 ? "crit" : pct >= 70 ? "warn" : "";
-    return cls;
-  }}
-
-  function fetchStats() {{
-    fetch("/api/stats").then(r => r.json()).then(d => {{
-      // CPU cores
-      var cDiv = document.getElementById("s-cores");
-      cDiv.innerHTML = "";
-      d.cores.forEach(function(c, i) {{
-        var cls = bar(c);
-        cDiv.innerHTML += '<div class="core-bar">'
-          + '<div class="core-track"><div class="core-fill ' + cls + '" style="height:' + c + '%"></div></div>'
-          + '<div class="core-lbl">' + c.toFixed(0) + '</div>'
-          + '</div>';
-      }});
-      document.getElementById("s-load").textContent = "load " + d.load[0] + " " + d.load[1] + " " + d.load[2];
-
-      // Memory
-      var mb = document.getElementById("s-mem-bar");
-      mb.style.width = d.mem_pct + "%";
-      mb.className = "stat-bar " + bar(d.mem_pct);
-      document.getElementById("s-mem-lbl").textContent = d.mem_used_gb + " / " + d.mem_total_gb + " GB (" + d.mem_pct + "%)";
-
-      // Disk
-      var db = document.getElementById("s-disk-bar");
-      db.style.width = d.disk_pct + "%";
-      db.className = "stat-bar " + bar(d.disk_pct);
-      document.getElementById("s-disk-lbl").textContent = d.disk_used_gb + " / " + d.disk_total_gb + " GB (" + d.disk_pct + "%)";
-
-      // Network
-      document.getElementById("s-net").textContent = "↑ " + d.net_sent_mb + " MB  ↓ " + d.net_recv_mb + " MB";
-
-      // Processes
-      var tbody = document.getElementById("s-procs-body");
-      tbody.innerHTML = "";
-      d.procs.forEach(function(p) {{
-        var cpu_color = p.cpu > 50 ? "#f44336" : p.cpu > 20 ? "#ff9800" : "#aaa";
-        tbody.innerHTML += "<tr style='border-top:1px solid #1f1f1f'>"
-          + "<td style='padding:3px 6px;color:#555'>" + p.pid + "</td>"
-          + "<td style='padding:3px 6px;color:#ccc'>" + p.name + "</td>"
-          + "<td style='padding:3px 6px;text-align:right;color:" + cpu_color + "'>" + p.cpu + "</td>"
-          + "<td style='padding:3px 6px;text-align:right;color:#888'>" + p.mem + "</td>"
-          + "<td style='padding:3px 6px;text-align:right;color:#555'>" + p.status + "</td>"
-          + "</tr>";
-      }});
-    }}).catch(function() {{}});
-  }}
-
-  function loadScoreboard(days) {{
-    var url = "/api/scoreboard";
-    if (days > 0) {{
-      var d = new Date();
-      d.setDate(d.getDate() - days);
-      var pad = n => String(n).padStart(2, "0");
-      url += "?start=" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
-    }}
-    fetch(url).then(r => r.json()).then(function(rows) {{
-      var tbody = document.getElementById("scorecard-tbody");
-      if (!rows.length) {{
-        tbody.innerHTML = "<tr><td colspan='6' style='color:#555;padding:6px'>No trades yet.</td></tr>";
-        return;
-      }}
-      tbody.innerHTML = "";
-      rows.forEach(function(r) {{
-        var pnl_col = r.net_pnl > 0 ? "#4caf50" : r.net_pnl < 0 ? "#f44336" : "#888";
-        var pf_str = r.pf === null ? "∞" : r.pf.toFixed(2);
-        var pf_col = r.pf === null || r.pf >= 1.5 ? "#4caf50" : r.pf >= 1.0 ? "#ff9800" : "#f44336";
-        tbody.innerHTML += "<tr style='border-top:1px solid #1f1f1f'>"
-          + "<td style='padding:4px 6px;color:#ccc'>" + r.strategy + "</td>"
-          + "<td style='padding:4px 6px;text-align:right;color:#888'>" + r.trades + "</td>"
-          + "<td style='padding:4px 6px;text-align:right;color:#888'>" + r.win_pct + "%</td>"
-          + "<td style='padding:4px 6px;text-align:right;color:" + pf_col + "'>" + pf_str + "</td>"
-          + "<td style='padding:4px 6px;text-align:right;color:" + pnl_col + ";font-variant-numeric:tabular-nums'>$" + r.net_pnl.toFixed(2) + "</td>"
-          + "<td style='padding:4px 6px;text-align:right;color:#555'>" + r.last_trade + "</td>"
-          + "</tr>";
-      }});
-    }}).catch(function() {{
-      document.getElementById("scorecard-tbody").innerHTML =
-        "<tr><td colspan='6' style='color:#555;padding:6px'>Failed to load.</td></tr>";
-    }});
-  }}
-
-  // Load scorecard on page load
-  loadScoreboard(0);
-
-  // Strategy colors for P&L chart
-  var STRAT_COLORS = {{
-    "bb_kdj":       "#4caf50",
-    "bb_kdj_loose": "#81c784",
-    "orb":          "#2196f3",
-    "vwap_pb":      "#ff9800",
-    "gap_fade":     "#e91e63",
-    "vwap":         "#9c27b0",
-    "unknown":      "#888"
-  }};
-
-  function loadPnlChart(days) {{
-    var url = "/api/pnl_history";
-    if (days > 0) {{
-      var d = new Date();
-      d.setDate(d.getDate() - days);
-      var pad = n => String(n).padStart(2, "0");
-      url += "?start=" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
-    }}
-    fetch(url).then(r => r.json()).then(function(data) {{
-      var canvas = document.getElementById("pnl-canvas");
-      var legend = document.getElementById("pnl-legend");
-      var strategies = Object.keys(data);
-      if (!strategies.length) {{
-        legend.innerHTML = '<span style="color:#555">No trades yet.</span>';
-        return;
-      }}
-
-      // Collect all unique dates across all strategies
-      var allDates = [];
-      strategies.forEach(function(s) {{ data[s].forEach(function(p) {{ allDates.push(p.date); }}); }});
-      allDates = Array.from(new Set(allDates)).sort();
-      if (!allDates.length) return;
-
-      // Build per-strategy cumulative series indexed by date
-      var series = {{}};
-      strategies.forEach(function(s) {{
-        var lastVal = 0;
-        var byDate = {{}};
-        data[s].forEach(function(p) {{ byDate[p.date] = p.cumulative; }});
-        var pts = [];
-        allDates.forEach(function(dt) {{
-          if (byDate[dt] !== undefined) lastVal = byDate[dt];
-          pts.push(lastVal);
-        }});
-        series[s] = pts;
-      }});
-
-      // Find value range for scaling
-      var allVals = [];
-      strategies.forEach(function(s) {{ series[s].forEach(function(v) {{ allVals.push(v); }}); }});
-      var minV = Math.min(0, Math.min.apply(null, allVals));
-      var maxV = Math.max(0, Math.max.apply(null, allVals));
-      var span = maxV - minV || 1;
-
-      // Draw
-      var dpr = window.devicePixelRatio || 1;
-      var W = canvas.offsetWidth || 600;
-      var H = 200;
-      canvas.width = W * dpr;
-      canvas.height = H * dpr;
-      canvas.style.width = W + "px";
-      canvas.style.height = H + "px";
-      var ctx = canvas.getContext("2d");
-      ctx.scale(dpr, dpr);
-
-      // Background
-      ctx.fillStyle = "#0d0d0d";
-      ctx.fillRect(0, 0, W, H);
-
-      var PAD_L = 48, PAD_R = 8, PAD_T = 10, PAD_B = 20;
-      var chartW = W - PAD_L - PAD_R;
-      var chartH = H - PAD_T - PAD_B;
-
-      function xOf(i) {{ return PAD_L + (i / Math.max(allDates.length - 1, 1)) * chartW; }}
-      function yOf(v) {{ return PAD_T + chartH - ((v - minV) / span) * chartH; }}
-
-      // Zero line
-      ctx.strokeStyle = "#333";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(PAD_L, yOf(0));
-      ctx.lineTo(W - PAD_R, yOf(0));
-      ctx.stroke();
-
-      // Y axis labels (min, 0, max)
-      ctx.fillStyle = "#555";
-      ctx.font = "10px monospace";
-      ctx.textAlign = "right";
-      [[minV, yOf(minV)], [0, yOf(0)], [maxV, yOf(maxV)]].forEach(function(p) {{
-        ctx.fillText("$" + p[0].toFixed(0), PAD_L - 4, p[1] + 4);
-      }});
-
-      // X axis date labels (first and last)
-      if (allDates.length > 1) {{
-        ctx.textAlign = "left";
-        ctx.fillText(allDates[0].slice(5), PAD_L, H - 4);
-        ctx.textAlign = "right";
-        ctx.fillText(allDates[allDates.length-1].slice(5), W - PAD_R, H - 4);
-      }}
-
-      // Draw each strategy line
-      strategies.forEach(function(s) {{
-        var pts = series[s];
-        var color = STRAT_COLORS[s] || "#888";
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        pts.forEach(function(v, i) {{
-          if (i === 0) ctx.moveTo(xOf(i), yOf(v));
-          else ctx.lineTo(xOf(i), yOf(v));
-        }});
-        ctx.stroke();
-        // endpoint dot
-        var lastPt = pts[pts.length-1];
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(xOf(pts.length-1), yOf(lastPt), 3, 0, Math.PI*2);
-        ctx.fill();
-      }});
-
-      // Legend
-      legend.innerHTML = "";
-      strategies.forEach(function(s) {{
-        var lastVal = series[s][series[s].length - 1];
-        var sign = lastVal >= 0 ? "+" : "";
-        var color = STRAT_COLORS[s] || "#888";
-        legend.innerHTML += '<span style="color:' + color + '">'
-          + '■ ' + s + ' ' + sign + lastVal.toFixed(2) + '</span>';
-      }});
-    }}).catch(function() {{
-      document.getElementById("pnl-legend").innerHTML = '<span style="color:#555">Failed to load.</span>';
-    }});
-  }}
-
-  // Load P&L chart on page load
-  loadPnlChart(0);
-
-  // Trade log
-  var _tradeRows = [];
-  var _tradeSortKey = "ts";
-  var _tradeSortAsc = false;
-
-  function loadTrades(days) {{
-    var url = "/api/trades";
-    if (days > 0) {{
-      var d = new Date();
-      d.setDate(d.getDate() - days);
-      var pad = n => String(n).padStart(2, "0");
-      url += "?start=" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
-    }}
-    fetch(url).then(r => r.json()).then(function(rows) {{
-      _tradeRows = rows;
-      _tradeSortKey = "ts";
-      _tradeSortAsc = false;
-      renderTrades();
-    }}).catch(function() {{
-      document.getElementById("tradelog-tbody").innerHTML =
-        "<tr><td colspan='9' style='color:#555;padding:6px'>Failed to load.</td></tr>";
-    }});
-  }}
-
-  function sortTrades(key) {{
-    if (_tradeSortKey === key) {{
-      _tradeSortAsc = !_tradeSortAsc;
-    }} else {{
-      _tradeSortKey = key;
-      _tradeSortAsc = key !== "ts";  // date defaults newest-first; others ascending
-    }}
-    renderTrades();
-  }}
-
-  function renderTrades() {{
-    var rows = _tradeRows.slice();
-    var key = _tradeSortKey;
-    var asc = _tradeSortAsc;
-    rows.sort(function(a, b) {{
-      var av = a[key] === null ? "" : a[key];
-      var bv = b[key] === null ? "" : b[key];
-      if (av < bv) return asc ? -1 : 1;
-      if (av > bv) return asc ? 1 : -1;
-      return 0;
-    }});
-    document.getElementById("tradelog-sort-label").textContent =
-      "sort: " + key + " " + (asc ? "▲" : "▼");
-    var tbody = document.getElementById("tradelog-tbody");
-    if (!rows.length) {{
-      tbody.innerHTML = "<tr><td colspan='9' style='color:#555;padding:6px'>No trades.</td></tr>";
-      return;
-    }}
-    tbody.innerHTML = "";
-    rows.forEach(function(r) {{
-      var pnl = r.pnl !== null ? r.pnl : 0;
-      var pnl_col = pnl > 0 ? "#4caf50" : pnl < 0 ? "#f44336" : "#888";
-      var dir_col = r.direction === "short" ? "#ff9800" : "#4fc3f7";
-      var reason_col = r.reason === "TARGET" ? "#4caf50" : r.reason === "STOP" ? "#f44336" : "#888";
-      var strat_color = STRAT_COLORS[r.strategy] || "#888";
-      var entry_str = r.entry !== null ? r.entry.toFixed(2) : "—";
-      var exit_str = r.exit !== null ? r.exit.toFixed(2) : "—";
-      var pnl_str = r.pnl !== null ? (pnl >= 0 ? "+" : "") + pnl.toFixed(2) : "—";
-      tbody.innerHTML += "<tr style='border-top:1px solid #1f1f1f'>"
-        + "<td style='padding:3px 6px;color:#555'>" + (r.date || "?") + "</td>"
-        + "<td style='padding:3px 6px;color:#ccc'>" + (r.symbol || "").replace("US.", "") + "</td>"
-        + "<td style='padding:3px 6px;color:" + strat_color + "'>" + (r.strategy || "?") + "</td>"
-        + "<td style='padding:3px 6px;color:" + dir_col + "'>" + (r.direction || "long") + "</td>"
-        + "<td style='padding:3px 6px;text-align:right;color:#888;font-variant-numeric:tabular-nums'>" + entry_str + "</td>"
-        + "<td style='padding:3px 6px;text-align:right;color:#888;font-variant-numeric:tabular-nums'>" + exit_str + "</td>"
-        + "<td style='padding:3px 6px;text-align:right;color:" + pnl_col + ";font-variant-numeric:tabular-nums'>" + pnl_str + "</td>"
-        + "<td style='padding:3px 6px;text-align:right;color:#555'>" + (r.hold_bars || 0) + "</td>"
-        + "<td style='padding:3px 6px;color:" + reason_col + "'>" + (r.reason || "?") + "</td>"
-        + "</tr>";
-    }});
-  }}
-
-  // Load trade log on page load
-  loadTrades(0);
-
-  // --- Live polling (today view only) ---
-  var _isToday = {is_today_js};
-
-  function _fmt_pnl(v) {{
-    return v >= 0 ? '+$' + v.toFixed(2) : '-$' + Math.abs(v).toFixed(2);
-  }}
-
-  function _pf_color(v) {{
-    if (v === null) return '#4caf50';
-    return v >= 1.5 ? '#4caf50' : v >= 1.0 ? '#ff9800' : '#f44336';
-  }}
-
-  function _pollSummary() {{
-    fetch('/api/today_summary').then(r => r.json()).then(function(d) {{
-      var pEl = document.getElementById('stat-pnl');
-      if (pEl) {{
-        pEl.textContent = _fmt_pnl(d.pnl);
-        pEl.style.color = d.pnl >= 0 ? '#4caf50' : '#f44336';
-      }}
-      var setTxt = function(id, v) {{ var el = document.getElementById(id); if (el) el.textContent = v; }};
-      setTxt('stat-winpct', d.win_pct.toFixed(1) + '%');
-      var pfEl = document.getElementById('stat-pf');
-      if (pfEl) {{
-        pfEl.textContent = d.pf === null ? '∞' : d.pf.toFixed(2);
-        pfEl.style.color = _pf_color(d.pf);
-      }}
-      setTxt('stat-trades', d.trades);
-      setTxt('stat-wins', d.wins);
-      setTxt('stat-losses', d.losses);
-      setTxt('stat-targets', d.targets);
-      setTxt('stat-stops', d.stops);
-      setTxt('stat-bars', d.bar_evals);
-
-      // Regime badge
-      var rEl = document.getElementById('regime-badge');
-      if (rEl && d.regime) {{
-        var icon = d.regime_blocked ? '⊘' : '◉';
-        var col = d.regime_blocked ? '#f44336' : '#4caf50';
-        var conf = d.regime_confidence ? ' ' + Math.round(d.regime_confidence * 100) + '%' : '';
-        rEl.textContent = icon + ' ' + d.regime + conf;
-        rEl.style.color = col;
-      }}
-
-      // VIX badge
-      var vEl = document.getElementById('vix-display');
-      if (vEl && d.vix !== null) {{
-        vEl.textContent = 'VIX ' + d.vix.toFixed(1);
-        vEl.style.color = d.vix >= 25 ? '#f44336' : d.vix >= 20 ? '#ff9800' : d.vix >= 15 ? '#ffeb3b' : '#4caf50';
-      }}
-
-      // Last-updated timestamp
-      var lu = document.getElementById('last-updated');
-      if (lu) {{
-        var now = new Date();
-        lu.textContent = 'updated ' + now.getHours().toString().padStart(2,'0') + ':' +
-          now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
-      }}
-    }}).catch(function() {{}});
-  }}
-
-  function _pollMarketConditions() {{
-    fetch('/market_conditions_frag').then(r => r.text()).then(function(html) {{
-      var el = document.getElementById('market-cond-container');
-      if (el) el.innerHTML = html;
-    }}).catch(function() {{}});
-  }}
-
-  if (_isToday) {{
-    setInterval(_pollSummary, 30000);
-    setInterval(_pollMarketConditions, 30000);
-  }}
-  </script>
-
-  <!-- Kill switches -->
-  <div class="card">
-    <h2>KILL SWITCHES</h2>
-    <div class="switch-row">
-      <form method="POST">
-        <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
-        <input type="hidden" name="action" value="toggle_stop_trading">
-        <button type="submit" class="btn {stop_btn_cls}">{stop_btn_lbl}</button>
-      </form>
-      <span style="font-size:12px">STOP_TRADING.txt: {stop_active}</span>
-    </div>
-    <div class="switch-row">
-      <form method="POST">
-        <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
-        <input type="hidden" name="action" value="toggle_stop_shorts">
-        <button type="submit" class="btn {shorts_btn_cls}">{shorts_btn_lbl}</button>
-      </form>
-      <span style="font-size:12px">STOP_SHORTS.txt: {shorts_active}</span>
-    </div>
-  </div>
-
-  <!-- Restart -->
-  <div class="card">
-    <h2>RUNNER CONTROL</h2>
-    <form method="POST">
-      <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
-      <input type="hidden" name="action" value="restart_runner">
-      <button type="submit" class="btn btn-warn">Restart moomoo-paper.service</button>
-    </form>
-    <div style="color:#555;font-size:11px;margin-top:6px">Config changes only take effect after restart.</div>
-  </div>
-
-  <!-- .env editor -->
-  <form id="cfg-form" method="POST">
-    <input type="hidden" name="_csrf_token" value="{_csrf_token()}">
-    <input type="hidden" name="action" value="save_config">
-
-    <div class="card">
-      <h2>RISK / SIZING</h2>
-      {fields_numeric}
-    </div>
-
-    <div class="card">
-      <h2>STRATEGY / SYMBOL LISTS</h2>
-      {fields_list}
-    </div>
-
-    <div class="card">
-      <h2>FLAGS (true/false)</h2>
-      {fields_bool}
-    </div>
-
-    <button type="submit" form="cfg-form" class="btn btn-ok"
-            style="padding:10px 24px;font-size:14px">Save to .env</button>
-    <span style="color:#555;font-size:11px;margin-left:10px">
-      Writes to .env only — restart runner to apply.
-    </span>
-  </form>
-</body></html>""")
 
 
 def _session_date() -> date:
@@ -1271,686 +797,117 @@ def _runner_status(last_eval: dict | None) -> tuple[str, str]:
         return "UNKNOWN", "#888"
 
 
-def _signal_dot(val: bool) -> str:
-    return '<span style="color:#4caf50">●</span>' if val else '<span style="color:#444">○</span>'
-
-
-def _pnl_color(v: float) -> str:
-    return "#4caf50" if v >= 0 else "#f44336"
-
-
-def _fmt_pnl(v: float) -> str:
-    return f"+${v:.2f}" if v >= 0 else f"-${abs(v):.2f}"
-
-
-def _bb_kdj_status(sig: dict, bonus: int) -> str:
-    bb = sig.get("bb_touch", False)
-    kdj = sig.get("kdj_cross", False)
-    bb_lower = sig.get("bb_lower", 0.0)
-    bb_middle = sig.get("bb_middle", 0.0)
-    close = sig.get("close", 0.0)
-    min_bonus = cfg.min_signal_score
-    if bb and kdj and bonus >= min_bonus:
-        return '<span style="color:#4caf50;font-weight:bold">READY ▲</span>'
-    if bb and not kdj:
-        return '<span style="color:#ffeb3b">BB ✓ · need KDJ</span>'
-    if kdj and not bb:
-        if bb_lower and close:
-            pct = (close - bb_lower) / close * 100
-            return f'<span style="color:#888">KDJ ✓ · BB {pct:+.2f}%</span>'
-        return '<span style="color:#888">KDJ ✓ · wait BB</span>'
-    # neither — show distance to BB lower
-    if bb_lower and close:
-        pct = (close - bb_lower) / close * 100
-        color = "#ffeb3b" if pct < 0.10 else "#555"
-        return f'<span style="color:{color}">BB {pct:+.2f}% away</span>'
-    return '<span style="color:#555">watching</span>'
-
-
-def _orb_status(sig: dict, close: float) -> str:
-    if not sig.get("or_valid"):
-        return '<span style="color:#555">no OR yet</span>'
-    or_high = sig.get("or_high", 0.0)
-    or_low = sig.get("or_low", 0.0)
-    if close > or_high:
-        return '<span style="color:#4caf50;font-weight:bold">LONG READY ▲</span>'
-    if or_low and close < or_low:
-        return '<span style="color:#ff5252;font-weight:bold">SHORT READY ▼</span>'
-    if or_high:
-        pct_to_high = (or_high - close) / close * 100
-        pct_to_low = (close - or_low) / close * 100 if or_low else 0
-        return f'<span style="color:#555">inside · +{pct_to_high:.2f}% to H · -{pct_to_low:.2f}% to L</span>'
-    return '<span style="color:#555">inside range</span>'
-
-
-def _vwap_status(sig: dict) -> str:
-    crosses = sig.get("cross_count", 0)
-    above = sig.get("close_above_vwap", False)
-    wick = sig.get("wick_below", False)
-    max_crosses = cfg.vwap_pb_max_crosses
-    if crosses > max_crosses:
-        return f'<span style="color:#555">choppy ({crosses} crosses > {max_crosses})</span>'
-    if wick and above:
-        return '<span style="color:#4caf50;font-weight:bold">READY ▲</span>'
-    if wick and not above:
-        return '<span style="color:#888">wick ✓ · close below VWAP</span>'
-    return '<span style="color:#555">watching</span>'
-
-
-def _load_regime_today() -> dict:
-    """Read today's regime classification from logs/regime_YYYY-MM-DD.json."""
-    try:
-        f = cfg.logs_dir / f"regime_{_session_date().strftime('%Y-%m-%d')}.json"
-        return json.loads(f.read_text()) if f.exists() else {}
-    except Exception:
-        return {}
-
-
-def _load_vix_latest() -> float | None:
-    """Return the most recent vix_prev_close from vix_daily.jsonl."""
-    try:
-        f = cfg.logs_dir / "vix_daily.jsonl"
-        lines = [l for l in f.read_text().splitlines() if l]
-        return json.loads(lines[-1]).get("vix_prev_close") if lines else None
-    except Exception:
-        return None
-
-
-def _load_gap_fade_status() -> dict[str, dict]:
-    """Return {symbol: {status, direction, pnl, reason, entry, stop}} for gap_fade today."""
-    date_str = _session_date().strftime("%Y-%m-%d")
-    result: dict[str, dict] = {}
-    for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
-        sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
-        rec: dict = {"status": "watching", "direction": None, "pnl": None,
-                     "reason": None, "entry": None, "stop": None, "close": None}
-        has_gap_fade_data = False
-        for line in f.read_text().splitlines():
-            try:
-                ev = json.loads(line)
-                if ev.get("strategy") != "gap_fade":
-                    continue
-                has_gap_fade_data = True
-                event = ev.get("event")
-                if event == "bar_eval":
-                    rec["close"] = ev.get("close")
-                elif event == "position_open":
-                    rec["status"] = "in_trade"
-                    rec["direction"] = ev.get("direction")
-                    rec["entry"] = ev.get("entry")
-                    rec["stop"] = ev.get("stop")
-                elif event == "position_close":
-                    rec["status"] = "done"
-                    rec["reason"] = ev.get("reason")
-                    rec["pnl"] = ev.get("pnl")
-                elif event == "signal_skip" and rec["status"] == "watching":
-                    rec["status"] = "skipped"
-                    rec["reason"] = ev.get("reason")
-            except json.JSONDecodeError:
-                pass
-        if has_gap_fade_data:
-            result[sym] = rec
-    return result
-
-
-# ---------------------------------------------------------------------------
-# HTML rendering
-# ---------------------------------------------------------------------------
-
-def _render_market_conditions(
-    latest: dict[str, dict[str, dict]],
-    skips: list[dict],
-) -> str:
-    if not latest and not skips:
-        return ""
-
-    # --- BB+KDJ section ---
-    bb_rows = ""
-    for sym in sorted(latest):
-        e = latest[sym].get("bb_kdj")
-        if not e:
-            continue
-        sig = e.get("signals", {})
-        sig["close"] = e.get("close", 0.0)
-        close = e.get("close", 0.0)
-        bb_lower = sig.get("bb_lower", 0.0)
-        bb_middle = sig.get("bb_middle", 0.0)
-        bonus = e.get("bonus_score", 0)
-        ranging = sig.get("ranging", False)
-        regime_col = "#4caf50" if ranging else "#ff9800"
-        regime_txt = "RANGING" if ranging else "TRENDING"
-        bar_time = e.get("ts", "")[:16].replace("T", " ")[11:]
-        bb_rows += f"""<tr>
-          <td><b>{sym.replace("US.", "")}</b></td>
-          <td style="color:#666">{bar_time}</td>
-          <td>${close:.3f}</td>
-          <td style="color:#888">${bb_lower:.3f}</td>
-          <td style="color:#888">${bb_middle:.3f}</td>
-          <td style="color:{regime_col};font-size:11px;letter-spacing:.5px">{regime_txt}</td>
-          <td>{_signal_dot(sig.get("bb_touch", False))}</td>
-          <td>{_signal_dot(sig.get("kdj_cross", False))}</td>
-          <td>{_signal_dot(sig.get("rsi_oversold", False))}</td>
-          <td>{_signal_dot(ranging)}</td>
-          <td>{_signal_dot(sig.get("volume_spike", False))}</td>
-          <td style="color:#666;font-size:11px">{bonus}/{cfg.min_signal_score}</td>
-          <td>{_bb_kdj_status(sig, bonus)}</td>
-        </tr>"""
-
-    # --- ORB section ---
-    orb_rows = ""
-    for sym in sorted(latest):
-        e = latest[sym].get("orb")
-        if not e:
-            continue
-        sig = e.get("signals", {})
-        close = e.get("close", 0.0)
-        or_valid = sig.get("or_valid", False)
-        or_high = sig.get("or_high", 0.0)
-        or_low = sig.get("or_low", 0.0)
-        bar_time = e.get("ts", "")[:16].replace("T", " ")[11:]
-        or_valid_html = '<span style="color:#4caf50">✓</span>' if or_valid else '<span style="color:#444">—</span>'
-        or_high_str = f"${or_high:.3f}" if or_high else "—"
-        or_low_str = f"${or_low:.3f}" if or_low else "—"
-        orb_rows += f"""<tr>
-          <td><b>{sym.replace("US.", "")}</b></td>
-          <td style="color:#666">{bar_time}</td>
-          <td>${close:.3f}</td>
-          <td style="color:#888">{or_high_str}</td>
-          <td style="color:#888">{or_low_str}</td>
-          <td>{or_valid_html}</td>
-          <td>{_orb_status(sig, close)}</td>
-        </tr>"""
-
-    # --- VWAP PB section ---
-    vwap_rows = ""
-    for sym in sorted(latest):
-        e = latest[sym].get("vwap_pb")
-        if not e:
-            continue
-        sig = e.get("signals", {})
-        close = e.get("close", 0.0)
-        crosses = sig.get("cross_count", 0)
-        above = sig.get("close_above_vwap", False)
-        wick = sig.get("wick_below", False)
-        bar_time = e.get("ts", "")[:16].replace("T", " ")[11:]
-        cross_col = "#f44336" if crosses > cfg.vwap_pb_max_crosses else "#4caf50"
-        vwap_rows += f"""<tr>
-          <td><b>{sym.replace("US.", "")}</b></td>
-          <td style="color:#666">{bar_time}</td>
-          <td>${close:.3f}</td>
-          <td style="color:{cross_col}">{crosses}</td>
-          <td>{_signal_dot(above)}</td>
-          <td>{_signal_dot(wick)}</td>
-          <td>{_vwap_status(sig)}</td>
-        </tr>"""
-
-    # --- Skip reasons ---
-    skip_rows = ""
-    for e in reversed(skips):
-        ts = e.get("ts", "")[:16].replace("T", " ")[11:]
-        sym = e.get("symbol", "?").replace("US.", "")
-        strat = e.get("strategy", "?")
-        reason = e.get("reason", "?")
-        score = e.get("score", 0)
-        min_s = e.get("min_score", "?")
-        r_col = "#f44336" if "block" in reason or "risk" in reason else "#888"
-        skip_rows += f"""<tr>
-          <td style="color:#666">{ts}</td>
-          <td><b>{sym}</b></td>
-          <td style="color:#555;font-size:11px">{strat}</td>
-          <td style="color:{r_col}">{reason}</td>
-          <td style="color:#555;font-size:11px">{score}/{min_s}</td>
-        </tr>"""
-
-    section_label = '<div style="font-size:11px;color:#555;letter-spacing:1px;margin:12px 0 6px">'
-    divider = '<div style="border-top:1px solid #222;margin:10px 0"></div>'
-
-    bb_section = f"""
-        {section_label}BB+KDJ</div>
-        <table>
-          <tr class="th">
-            <th>Symbol</th><th>Bar</th><th>Price</th>
-            <th title="Bollinger lower band">BB Low</th>
-            <th title="Bollinger middle band">BB Mid</th>
-            <th>Regime</th>
-            <th title="Price ≤ BB lower">BB</th>
-            <th title="KDJ golden cross">KDJ</th>
-            <th title="RSI < 35">RSI</th>
-            <th title="ADX < 25">RNG</th>
-            <th title="Volume spike 1.5×">VOL</th>
-            <th>Bonus</th><th>Status</th>
-          </tr>
-          {bb_rows}
-        </table>""" if bb_rows else ""
-
-    orb_section = f"""
-        {divider}
-        {section_label}ORB</div>
-        <table>
-          <tr class="th">
-            <th>Symbol</th><th>Bar</th><th>Price</th>
-            <th>OR High</th><th>OR Low</th>
-            <th title="Opening range built">OR</th>
-            <th>Status</th>
-          </tr>
-          {orb_rows}
-        </table>""" if orb_rows else ""
-
-    vwap_section = f"""
-        {divider}
-        {section_label}VWAP PULLBACK</div>
-        <table>
-          <tr class="th">
-            <th>Symbol</th><th>Bar</th><th>Price</th>
-            <th title="VWAP crosses today">Crosses</th>
-            <th title="Close above VWAP">Above</th>
-            <th title="Wick below VWAP">Wick</th>
-            <th>Status</th>
-          </tr>
-          {vwap_rows}
-        </table>""" if vwap_rows else ""
-
-    skips_section = f"""
-        {divider}
-        {section_label}RECENT SKIPS</div>
-        <table>
-          <tr class="th">
-            <th>Time</th><th>Symbol</th><th>Strategy</th><th>Reason</th><th>Score/Min</th>
-          </tr>
-          {skip_rows}
-        </table>""" if skip_rows else ""
-
-    # --- Gap Fade section ---
-    gap_fade_rows = ""
-    gap_status = _load_gap_fade_status()
-    for sym, rec in sorted(gap_status.items()):
-        status = rec["status"]
-        close_str = f"${rec['close']:.3f}" if rec["close"] else "—"
-        if status == "in_trade":
-            dir_col = "#ff5252" if rec["direction"] == "short" else "#4caf50"
-            dir_lbl = rec["direction"] or "long"
-            entry_str = f"${rec['entry']:.3f}" if rec["entry"] else "—"
-            stop_str = f"${rec['stop']:.3f}" if rec["stop"] else "—"
-            status_html = (f'<span style="color:{dir_col};font-weight:bold">IN TRADE '
-                           f'{dir_lbl.upper()} · entry={entry_str} stop={stop_str}</span>')
-        elif status == "done":
-            reason = rec["reason"] or "?"
-            pnl = rec["pnl"]
-            pnl_str = (_fmt_pnl(pnl) if pnl is not None else "?")
-            pnl_col = _pnl_color(pnl if pnl is not None else 0)
-            icon = "✓" if reason == "TARGET" else "✗"
-            status_html = f'<span style="color:{pnl_col}">{icon} {reason} &nbsp;{pnl_str}</span>'
-        elif status == "skipped":
-            reason = rec["reason"] or "?"
-            reason_col = "#f44336" if "vix" in reason.lower() or "risk" in reason.lower() else "#888"
-            status_html = f'<span style="color:{reason_col}">SKIP · {reason}</span>'
-        else:
-            status_html = '<span style="color:#555">watching (pre-9:35 or no gap)</span>'
-        gap_fade_rows += f"""<tr>
-          <td><b>{sym.replace("US.", "")}</b></td>
-          <td>{close_str}</td>
-          <td>{status_html}</td>
-        </tr>"""
-
-    gap_fade_section = f"""
-        {divider}
-        {section_label}GAP FADE</div>
-        <table>
-          <tr class="th"><th>Symbol</th><th>Close</th><th>Status</th></tr>
-          {gap_fade_rows}
-        </table>""" if gap_fade_rows else ""
-
-    return f"""
-    <div class="card" id="market-cond-inner">
-      <div class="card-title">MARKET CONDITIONS</div>
-      {bb_section}{orb_section}{vwap_section}{gap_fade_section}{skips_section}
-    </div>"""
-
-
-def _render_gate_progress() -> str:
-    """Gate-progress card: confirmed-fill trades vs pre-registered gate samples."""
-    try:
-        from weekly_report import build_report
-        body = build_report().replace("**", "")
-    except Exception as e:
-        body = f"unavailable: {e}"
-    return ('<div class="card"><div class="card-title">GATE PROGRESS '
-            '<span style="color:#555;font-size:11px">(pre-registered, confirmed fills only)</span></div>'
-            f'<pre style="margin:0;color:#aaa;font-size:12px;line-height:1.6">{body}</pre></div>')
-
-
-def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "",
-            available_dates: list[date] | None = None,
-            latest: dict | None = None,
-            regime: dict | None = None,
-            vix: float | None = None) -> str:
-    last_eval = evals[-1] if evals else None
-    status_label, status_color = _runner_status(last_eval)
-    now_str = datetime.now().strftime("%H:%M:%S")
-    sess_date = _session_date()
-    date_str = sess_date.strftime("%Y-%m-%d (%A)")
-    is_today = sess_date == clock.today()
-
-    # Date nav
-    avail = available_dates or []
-    prev_date = next((d for d in avail if d < sess_date), None)
-    next_date = next((d for d in reversed(avail) if d > sess_date), None)
-    prev_link = f'<a href="/?date={prev_date}" style="color:#555;text-decoration:none" title="Previous session">◀</a>' if prev_date else '<span style="color:#2a2a2a">◀</span>'
-    next_link = f'<a href="/?date={next_date}" style="color:#555;text-decoration:none" title="Next session">▶</a>' if next_date else ('<a href="/" style="color:#555;text-decoration:none" title="Today">▶</a>' if not is_today else '<span style="color:#2a2a2a">▶</span>')
-    today_link = '' if is_today else '<a href="/" style="font-size:11px;color:#555;margin-left:4px" title="Jump to today">today</a>'
-    date_opts = "".join(
-        f'<option value="{d}" {"selected" if d == sess_date else ""}>{d.strftime("%Y-%m-%d (%a)")}</option>'
-        for d in avail
-    )
-    date_picker = f"""<span class="meta" style="display:flex;align-items:center;gap:5px">
-      {prev_link}
-      <form method="GET" style="display:inline;margin:0">
-        <select name="date" onchange="this.form.submit()" style="background:#1a1a1a;border:1px solid #333;color:#aaa;font-family:monospace;font-size:12px;padding:2px 4px;border-radius:3px">
-          {date_opts}
-        </select>
-      </form>
-      {next_link}{today_link}
-    </span>"""
-    is_today_js = "true" if is_today else "false"
-
-    last_score = str(last_eval.get("signal_score", "—")) if last_eval else "—"
-    last_close = "—"
-
-    ct = summary.closed_trades
-    pnl = summary.realized_pnl
-    pnl_str = _fmt_pnl(pnl)
-    pnl_col = _pnl_color(pnl)
-
-    # Win% and PF
-    gross_win = sum(t.pnl for t in ct if t.pnl > 0)
-    gross_loss = sum(-t.pnl for t in ct if t.pnl <= 0)
-    _pf = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
-    _win_pct = round(summary.wins / len(ct) * 100, 1) if ct else 0.0
-    pf_str = f"{_pf:.2f}" if _pf is not None else "∞"
-    pf_col = "#4caf50" if (_pf is None or _pf >= 1.5) else "#ff9800" if _pf >= 1.0 else "#f44336"
-
-    # Regime badge
-    _regime = regime or {}
-    _regime_label = _regime.get("regime", "")
-    _skip_lbls = list(getattr(cfg, "regime_skip_labels", None) or [])
-    _regime_blocked = bool(getattr(cfg, "regime_gate_enabled", False) and _regime_label in _skip_lbls)
-    _regime_enabled = bool(getattr(cfg, "regime_gate_enabled", False))
-    if _regime_label:
-        _r_icon = "⊘" if _regime_blocked else "◉"
-        _r_col = "#f44336" if _regime_blocked else "#4caf50" if not _regime_blocked else "#ff9800"
-        _conf_str = f" {int(_regime.get('confidence', 0) * 100)}%" if _regime.get("confidence") else ""
-        regime_html = (f'<span id="regime-badge" class="meta" style="color:{_r_col}">'
-                       f'{_r_icon} {_regime_label}{_conf_str}</span>')
-    elif _regime_enabled:
-        regime_html = '<span id="regime-badge" class="meta" style="color:#555">regime: pending</span>'
-    else:
-        regime_html = ''
-
-    # VIX badge
-    if vix is not None:
-        _vix_col = "#f44336" if vix >= 25 else "#ff9800" if vix >= 20 else "#ffeb3b" if vix >= 15 else "#4caf50"
-        vix_html = f'<span id="vix-display" class="meta" style="color:{_vix_col}">VIX {vix:.1f}</span>'
-    else:
-        vix_html = ''
-
-    # Open position block
-    open_html = ""
-    if summary.open_at_close:
-        tr = summary.open_at_close[0]
-        is_short = tr.direction == "short"
-        unrealized = ""
-        # Look up last close for the open position's symbol specifically.
-        # last_eval is the most recent eval across all symbols (wrong for P&L).
-        sym_evals = (latest or {}).get(tr.symbol, {})
-        sym_last = (max(sym_evals.values(), key=lambda e: e.get("ts", ""))
-                    if sym_evals else None)
-        if sym_last:
-            unreal = ((tr.entry_price - sym_last["close"]) if is_short
-                      else (sym_last["close"] - tr.entry_price)) * tr.qty
-            unrealized = f'<span style="color:{_pnl_color(unreal)}">{_fmt_pnl(unreal)} unrealized</span>'
-        last_close = f"${sym_last['close']:.3f}" if sym_last else "—"
-        dir_badge = (f'<span style="color:#f44336;font-weight:bold">SHORT</span>' if is_short
-                     else f'<span style="color:#4caf50;font-weight:bold">LONG</span>')
-        open_html = f"""
-        <div class="card open-pos">
-          <div class="card-title">OPEN POSITION</div>
-          <table><tr>
-            <td>Symbol</td><td><b>{tr.symbol}</b> {dir_badge}</td>
-            <td>Entry</td><td>${tr.entry_price:.3f}</td>
-            <td>Stop</td><td>${tr.stop_price:.3f}</td>
-            <td>Qty</td><td>{tr.qty}</td>
-            <td>Last</td><td>{last_close}</td>
-            <td>P&L</td><td>{unrealized}</td>
-          </tr></table>
-        </div>"""
-
-    # Trades table
-    trades_html = ""
-    if ct:
-        rows = ""
-        for tr in ct:
-            et = tr.entry_time[11:16] if tr.entry_time else "?"
-            xt = tr.exit_time[11:16] if tr.exit_time else "?"
-            icon = "✓" if "TARGET" in tr.exit_reason.upper() or tr.exit_reason == "target" else "✗"
-            col = _pnl_color(tr.pnl)
-            # Slippage: 0.0 in SIMULATE, non-zero when live
-            slip = tr.exit_slippage_bps
-            slip_col = "#f44336" if slip > 5 else "#ff9800" if slip > 1 else "#555"
-            slip_str = f"{slip:+.1f}" if slip != 0.0 else "—"
-            strat_short = tr.strategy[:3].upper() if tr.strategy else "?"
-            dir_badge = (' <span style="color:#f44336;font-size:11px" title="short">▼S</span>'
-                         if tr.direction == "short" else "")
-            rows += f"""<tr>
-              <td>{tr.symbol.replace("US.", "")} <span style="color:#555;font-size:11px">{strat_short}</span>{dir_badge}</td>
-              <td>{et}</td><td>{xt}</td>
-              <td>${tr.entry_price:.3f}</td><td>${tr.exit_price:.3f}</td>
-              <td style="color:{col}"><b>{_fmt_pnl(tr.pnl)}</b></td>
-              <td>{icon} {tr.exit_reason}</td>
-              <td>{tr.hold_minutes}m</td>
-              <td style="color:{slip_col};font-size:11px" title="exit slippage bps">{slip_str}</td>
-            </tr>"""
-        trades_html = f"""
-        <div class="card">
-          <div class="card-title">TRADES</div>
-          <table>
-            <tr class="th"><th>Symbol</th><th>Entry</th><th>Exit</th>
-            <th>Entry$</th><th>Exit$</th><th>P&L</th><th>Reason</th>
-            <th>Hold</th><th title="Exit slippage (basis points). — = 0 in SIMULATE.">Slip</th></tr>
-            {rows}
-          </table>
-        </div>"""
-
-    # Signal feed
-    sig_rows = ""
-    for e in reversed(evals):
-        sig = e.get("signals", {})
-        t = e.get("ts", "")[:19].replace("T", " ")
-        entry_flag = "▲" if (sig.get("bb_touch") and sig.get("kdj_cross")) else ""
-        sig_rows += f"""<tr>
-          <td>{t[11:]}</td>
-          <td>${e.get('close', 0):.3f}</td>
-          <td>{_signal_dot(sig.get('bb_touch', False))}</td>
-          <td>{_signal_dot(sig.get('kdj_cross', False))}</td>
-          <td>{_signal_dot(sig.get('rsi_oversold', False))}</td>
-          <td>{_signal_dot(sig.get('ranging', False))}</td>
-          <td>{_signal_dot(sig.get('volume_spike', False))}</td>
-          <td>{e.get('bonus_score', 0)}</td>
-          <td style="color:#4caf50"><b>{entry_flag}</b></td>
-        </tr>"""
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>moomoo-trader</title>
-  <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{ font-family: monospace; background: #111; color: #ddd; padding: 16px; font-size: 14px; }}
-    h1 {{ font-size: 18px; margin-bottom: 12px; color: #fff; }}
-    .status-bar {{ display: flex; gap: 24px; align-items: center; margin-bottom: 16px;
-                   background: #1a1a1a; padding: 10px 14px; border-radius: 6px; }}
-    .runner-status {{ font-size: 15px; font-weight: bold; color: {status_color}; }}
-    .meta {{ color: #888; font-size: 12px; }}
-    .card {{ background: #1a1a1a; border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; }}
-    .card-title {{ font-size: 11px; color: #666; letter-spacing: 1px; margin-bottom: 8px; }}
-    .open-pos {{ border-left: 3px solid #ff9800; }}
-    .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }}
-    .stat {{ background: #222; border-radius: 4px; padding: 10px 12px; }}
-    .stat-label {{ font-size: 11px; color: #666; margin-bottom: 4px; }}
-    .stat-value {{ font-size: 20px; font-weight: bold; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    td, th {{ padding: 5px 8px; text-align: left; border-bottom: 1px solid #222; }}
-    .th th {{ color: #666; font-size: 11px; letter-spacing: 0.5px; }}
-    tr:last-child td {{ border-bottom: none; }}
-  </style>
-</head>
-<body>
-  <h1>moomoo-trader</h1>
-
-  <div class="status-bar">
-    <span class="runner-status">{status_label if is_today else f'HISTORY · {date_str}'}</span>
-    {date_picker}
-    {regime_html}
-    {vix_html}
-    <span class="meta">mode: {cfg.strategy_mode}</span>
-    <span class="meta">symbol: {', '.join(cfg.symbols)}</span>
-    <span class="meta">last price: {last_close}  score: {last_score}</span>
-    <span class="meta" id="last-updated" style="margin-left:auto">updated {now_str}</span>
-    <a href="/config" style="font-size:11px;color:#555;margin-left:8px;text-decoration:none"
-       title="Config editor">⚙</a>
-  </div>
-
-  <div class="card">
-    <div class="card-title">TODAY &nbsp;<span style="color:#444;font-size:10px">{date_str}</span></div>
-    <div class="summary-grid">
-      <div class="stat"><div class="stat-label">P&L</div>
-        <div id="stat-pnl" class="stat-value" style="color:{pnl_col}">{pnl_str}</div></div>
-      <div class="stat"><div class="stat-label">WIN%</div>
-        <div id="stat-winpct" class="stat-value">{_win_pct:.1f}%</div></div>
-      <div class="stat"><div class="stat-label">PF</div>
-        <div id="stat-pf" class="stat-value" style="color:{pf_col}">{pf_str}</div></div>
-      <div class="stat"><div class="stat-label">TRADES</div>
-        <div id="stat-trades" class="stat-value">{len(ct)}</div></div>
-      <div class="stat"><div class="stat-label">WINS</div>
-        <div id="stat-wins" class="stat-value" style="color:#4caf50">{summary.wins}</div></div>
-      <div class="stat"><div class="stat-label">LOSSES</div>
-        <div id="stat-losses" class="stat-value" style="color:#f44336">{summary.losses}</div></div>
-      <div class="stat"><div class="stat-label">TARGETS</div>
-        <div id="stat-targets" class="stat-value">{summary.targets}</div></div>
-      <div class="stat"><div class="stat-label">STOPS</div>
-        <div id="stat-stops" class="stat-value">{summary.stops}</div></div>
-      <div class="stat"><div class="stat-label">BARS EVAL</div>
-        <div id="stat-bars" class="stat-value" style="font-size:16px">{summary.bar_evals}</div></div>
-    </div>
-  </div>
-
-  {open_html}
-  {trades_html}
-  <div id="market-cond-container">{market_cond_html}</div>
-
-  <div class="card" id="pnl-chart-card">
-    <div class="card-title">CUMULATIVE P&L BY STRATEGY
-      <span style="float:right;font-size:11px;color:#555;font-weight:normal">
-        <a href="#" onclick="loadPnlChart(30);return false" style="color:#555;margin-right:8px">30d</a>
-        <a href="#" onclick="loadPnlChart(90);return false" style="color:#555;margin-right:8px">90d</a>
-        <a href="#" onclick="loadPnlChart(0);return false" style="color:#555">all</a>
-      </span>
-    </div>
-    <canvas id="pnl-canvas" style="width:100%;height:200px;display:block"></canvas>
-    <div id="pnl-legend" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:11px"></div>
-  </div>
-
-  <div class="card" id="scorecard-card">
-    <div class="card-title">ALL-TIME SCORECARD
-      <span style="float:right;font-size:11px;color:#555;font-weight:normal">
-        <a href="#" onclick="loadScoreboard(30);return false" style="color:#555;margin-right:8px">30d</a>
-        <a href="#" onclick="loadScoreboard(90);return false" style="color:#555;margin-right:8px">90d</a>
-        <a href="#" onclick="loadScoreboard(0);return false" style="color:#555">all</a>
-      </span>
-    </div>
-    <div id="scorecard-body">
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead>
-          <tr class="th">
-            <th style="text-align:left;padding:4px 6px">STRATEGY</th>
-            <th style="text-align:right;padding:4px 6px">TRADES</th>
-            <th style="text-align:right;padding:4px 6px">WIN%</th>
-            <th style="text-align:right;padding:4px 6px">PF</th>
-            <th style="text-align:right;padding:4px 6px">NET P&L</th>
-            <th style="text-align:right;padding:4px 6px">LAST</th>
-          </tr>
-        </thead>
-        <tbody id="scorecard-tbody"><tr><td colspan="6" style="color:#555;padding:6px">Loading...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card" id="tradelog-card">
-    <div class="card-title">TRADE LOG
-      <span style="float:right;font-size:11px;color:#555;font-weight:normal">
-        <a href="#" onclick="loadTrades(30);return false" style="color:#555;margin-right:8px">30d</a>
-        <a href="#" onclick="loadTrades(90);return false" style="color:#555;margin-right:8px">90d</a>
-        <a href="#" onclick="loadTrades(0);return false" style="color:#555;margin-right:8px">all</a>
-        <span id="tradelog-sort-label" style="color:#444;margin-left:12px">sort: newest</span>
-      </span>
-    </div>
-    <div style="overflow-x:auto">
-      <table id="tradelog-table" style="width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap">
-        <thead>
-          <tr class="th">
-            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('date')">DATE</th>
-            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('symbol')">SYM</th>
-            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('strategy')">STRAT</th>
-            <th style="padding:4px 6px;text-align:left">DIR</th>
-            <th style="padding:4px 6px;text-align:right;cursor:pointer" onclick="sortTrades('entry')">ENTRY</th>
-            <th style="padding:4px 6px;text-align:right;cursor:pointer" onclick="sortTrades('exit')">EXIT</th>
-            <th style="padding:4px 6px;text-align:right;cursor:pointer" onclick="sortTrades('pnl')">P&L</th>
-            <th style="padding:4px 6px;text-align:right">BARS</th>
-            <th style="padding:4px 6px;text-align:left;cursor:pointer" onclick="sortTrades('reason')">REASON</th>
-          </tr>
-        </thead>
-        <tbody id="tradelog-tbody"><tr><td colspan="9" style="color:#555;padding:6px">Loading...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-
-  {_render_gate_progress()}
-
-  <div class="card">
-    <div class="card-title">SIGNAL FEED (last 20 bars · bb_kdj only)</div>
-    <table>
-      <tr class="th">
-        <th>Time</th><th>Close</th>
-        <th title="BB touch">BB</th>
-        <th title="KDJ cross">KDJ</th>
-        <th title="RSI oversold">RSI</th>
-        <th title="ADX ranging">RNG</th>
-        <th title="Volume spike">VOL</th>
-        <th>Score</th><th>Entry</th>
-      </tr>
-      {sig_rows}
-    </table>
-  </div>
-</body>
-</html>"""
-
-
 # ---------------------------------------------------------------------------
 # Route
 # ---------------------------------------------------------------------------
 
 @app.route("/")
+@_require_login
 def index() -> str:
     avail = _available_dates()
-    summary = load_summary(_session_date())
+    sess_date = _session_date()
+    is_today = sess_date == clock.today()
+    summary = load_summary(sess_date)
     evals = _load_recent_evals()
     latest = _load_latest_evals_by_symbol()
     skips = _load_recent_skips()
     regime = _load_regime_today()
     vix = _load_vix_latest()
-    market_cond_html = _render_market_conditions(latest, skips)
-    return _render(summary, evals, market_cond_html, available_dates=avail, latest=latest,
-                   regime=regime, vix=vix)
+    gap_status = _load_gap_fade_status()
+
+    # Runner status
+    last_eval = evals[-1] if evals else None
+    status_label, status_color = _runner_status(last_eval)
+    if "#4caf50" in status_color:
+        status_pill_cls = "alive"
+    elif "#ff9800" in status_color:
+        status_pill_cls = "stale"
+    else:
+        status_pill_cls = "dead"
+
+    # Date nav
+    prev_date = next((d for d in avail if d < sess_date), None)
+    next_date = next((d for d in reversed(avail) if d > sess_date), None)
+
+    # Summary stats
+    ct = summary.closed_trades
+    pnl = summary.realized_pnl
+    pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+    gross_win = sum(t.pnl for t in ct if t.pnl > 0)
+    gross_loss = sum(-t.pnl for t in ct if t.pnl <= 0)
+    _pf = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
+    _win_pct = round(summary.wins / len(ct) * 100, 1) if ct else 0.0
+    pf_str = f"{_pf:.2f}" if _pf is not None else "∞"
+    pf_color = ("var(--green)" if (_pf is None or _pf >= 1.5)
+                else "var(--orange)" if _pf >= 1.0 else "var(--red)")
+
+    # Regime
+    regime_label = regime.get("regime", "")
+    skip_lbls = list(getattr(cfg, "regime_skip_labels", None) or [])
+    regime_blocked = bool(getattr(cfg, "regime_gate_enabled", False) and regime_label in skip_lbls)
+    regime_enabled = bool(getattr(cfg, "regime_gate_enabled", False))
+
+    # Open position unrealized P&L
+    open_pos_last = "—"
+    open_pos_unreal_str = "—"
+    open_pos_unreal_color = "var(--muted)"
+    if summary.open_at_close:
+        pos = summary.open_at_close[0]
+        sym_evals = latest.get(pos.symbol, {})
+        sym_last = (max(sym_evals.values(), key=lambda e: e.get("ts", ""))
+                    if sym_evals else None)
+        if sym_last:
+            open_pos_last = f"${sym_last['close']:.3f}"
+            is_short = pos.direction == "short"
+            unreal = ((pos.entry_price - sym_last["close"]) if is_short
+                      else (sym_last["close"] - pos.entry_price)) * pos.qty
+            open_pos_unreal_str = f"+${unreal:.2f}" if unreal >= 0 else f"-${abs(unreal):.2f}"
+            open_pos_unreal_color = "var(--green)" if unreal >= 0 else "var(--red)"
+
+    # Market conditions partial (initial render; JS polls every 30s for updates)
+    date_str = sess_date.strftime("%Y-%m-%d")
+    market_cond_html = render_template(
+        "partials/market_conditions.html",
+        latest=latest, skips=skips, gap_status=gap_status, bar_time_label=date_str,
+    )
+
+    # Gate progress text
+    gate_progress = ""
+    try:
+        from weekly_report import build_report
+        gate_progress = build_report().replace("**", "")
+    except Exception as e:
+        gate_progress = f"unavailable: {e}"
+
+    now_str = datetime.now().strftime("%H:%M:%S")
+
+    return render_template("index.html",
+        sess_date=sess_date,
+        is_today=is_today,
+        avail=avail,
+        prev_date=prev_date,
+        next_date=next_date,
+        summary=summary,
+        evals=evals,
+        pnl=pnl,
+        pnl_str=pnl_str,
+        win_pct=_win_pct,
+        pf_str=pf_str,
+        pf_color=pf_color,
+        status_label=status_label,
+        status_pill_cls=status_pill_cls,
+        regime=regime,
+        regime_label=regime_label,
+        regime_blocked=regime_blocked,
+        regime_enabled=regime_enabled,
+        vix=vix,
+        open_pos_last=open_pos_last,
+        open_pos_unreal_str=open_pos_unreal_str,
+        open_pos_unreal_color=open_pos_unreal_color,
+        market_cond_html=market_cond_html,
+        gate_progress=gate_progress,
+        now_str=now_str,
+    )
 
 
 # ---------------------------------------------------------------------------

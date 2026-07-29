@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+{% block title %}moomoo-trader{% endblock %}
+
+{% block body %}
+<!-- ── Header ──────────────────────────────────────────────────────── -->
+<header class="site-header">
+  <div class="site-logo">◈ moomoo-trader</div>
+
+  <nav class="tab-nav">
+    <button class="tab-btn" data-tab="today" onclick="switchTab('today')">TODAY</button>
+    <button class="tab-btn" data-tab="scorecard" onclick="switchTab('scorecard')">SCORECARD</button>
+    <button class="tab-btn" data-tab="ai-gate" onclick="switchTab('ai-gate')">AI GATE</button>
+  </nav>
+
+  <div class="header-meta">
+    {% if regime_label %}
+    <span id="regime-badge" class="regime-badge {{ 'blocked' if regime_blocked else 'open' }}">
+      {{ '⊘' if regime_blocked else '◉' }}
+      {{ regime_label }}{% if regime.confidence %} {{ (regime.confidence * 100)|int }}%{% endif %}
+    </span>
+    {% elif regime_enabled %}
+    <span id="regime-badge" class="regime-badge pending">◌ pending</span>
+    {% else %}
+    <span id="regime-badge"></span>
+    {% endif %}
+
+    {% if vix is not none %}
+    {% set vix_col = 'var(--red)' if vix >= 25 else 'var(--orange)' if vix >= 20 else 'var(--yellow)' if vix >= 15 else 'var(--green)' %}
+    <span id="vix-badge" class="vix-badge" style="color:{{ vix_col }}">VIX {{ '%.1f'|format(vix) }}</span>
+    {% else %}
+    <span id="vix-badge"></span>
+    {% endif %}
+
+    <span id="last-updated" class="muted" style="font-size:11px">{{ now_str }}</span>
+  </div>
+
+  <div class="header-links">
+    <a href="/config">config</a>
+    {% if cfg.dashboard_password %}<a href="/logout">logout</a>{% endif %}
+  </div>
+</header>
+
+<!-- ── Status bar ───────────────────────────────────────────────────── -->
+<div class="status-bar">
+  {% if is_today %}
+  <span class="status-pill {{ status_pill_cls }}">{{ status_label }}</span>
+  {% else %}
+  <span class="status-pill hist">HISTORY</span>
+  {% endif %}
+
+  <!-- Date nav -->
+  <span style="display:flex;align-items:center;gap:6px;font-size:12px">
+    {% if prev_date %}
+    <a href="/?date={{ prev_date }}" style="color:var(--muted);text-decoration:none">◀</a>
+    {% else %}
+    <span style="color:var(--border)">◀</span>
+    {% endif %}
+
+    <form method="GET" style="display:inline;margin:0">
+      <select name="date" onchange="this.form.submit()"
+              style="background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
+                     font-family:monospace;font-size:11px;padding:2px 6px;border-radius:3px">
+        {% for d in avail %}
+        <option value="{{ d }}" {{ 'selected' if d == sess_date }}>{{ d.strftime('%Y-%m-%d (%a)') }}</option>
+        {% endfor %}
+      </select>
+    </form>
+
+    {% if next_date %}
+    <a href="/?date={{ next_date }}" style="color:var(--muted);text-decoration:none">▶</a>
+    {% elif not is_today %}
+    <a href="/" style="color:var(--muted);text-decoration:none">▶</a>
+    {% else %}
+    <span style="color:var(--border)">▶</span>
+    {% endif %}
+    {% if not is_today %}<a href="/" style="font-size:11px;color:var(--muted)">today</a>{% endif %}
+  </span>
+
+  <span class="muted">{{ ', '.join(cfg.symbols) }}</span>
+  <span class="muted">{{ cfg.strategy_mode }}</span>
+  <span class="muted" style="margin-left:auto;font-size:11px">{{ cfg.strategies|join(', ') }}</span>
+</div>
+
+<!-- ── Page body ─────────────────────────────────────────────────────── -->
+<div class="page-body">
+
+<!-- ════════════════════════════════════════════════════
+     TAB: TODAY
+════════════════════════════════════════════════════ -->
+<div id="tab-today" class="tab-panel">
+
+  <!-- Stats strip -->
+  <div class="stats-strip">
+    <div class="stat-box pnl {{ 'positive' if pnl >= 0 else 'negative' }}">
+      <div class="label">P&amp;L</div>
+      <div class="value {{ 'green' if pnl >= 0 else 'red' }}" id="stat-pnl">
+        {{ pnl_str }}
+      </div>
+    </div>
+    <div class="stat-box">
+      <div class="label">WIN%</div>
+      <div class="value mono" id="stat-winpct">{{ '%.1f'|format(win_pct) }}%</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">PF</div>
+      <div class="value mono" id="stat-pf" style="color:{{ pf_color }}">{{ pf_str }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">TRADES</div>
+      <div class="value mono" id="stat-trades">{{ summary.closed_trades|length }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">WINS</div>
+      <div class="value mono green" id="stat-wins">{{ summary.wins }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">LOSSES</div>
+      <div class="value mono red" id="stat-losses">{{ summary.losses }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">TARGETS</div>
+      <div class="value mono" id="stat-targets">{{ summary.targets }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">STOPS</div>
+      <div class="value mono" id="stat-stops">{{ summary.stops }}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">BARS</div>
+      <div class="value mono" id="stat-bars" style="font-size:17px">{{ summary.bar_evals }}</div>
+    </div>
+  </div>
+
+  <!-- Open position -->
+  {% if summary.open_at_close %}
+  {% set pos = summary.open_at_close[0] %}
+  <div class="card accent-{{ 'red' if pos.direction == 'short' else 'orange' }}" style="margin-bottom:16px">
+    <div class="card-title">
+      OPEN POSITION &nbsp;
+      <span class="dir-badge {{ pos.direction }}">{{ pos.direction.upper() }}</span>
+    </div>
+    <div class="open-pos-grid">
+      <div class="kv"><div class="k">Symbol</div><div class="v">{{ pos.symbol }}</div></div>
+      <div class="kv"><div class="k">Strategy</div><div class="v">{{ pos.strategy }}</div></div>
+      <div class="kv"><div class="k">Entry</div><div class="v mono">${{ '%.3f'|format(pos.entry_price) }}</div></div>
+      <div class="kv"><div class="k">Stop</div><div class="v mono red">${{ '%.3f'|format(pos.stop_price) }}</div></div>
+      <div class="kv"><div class="k">Qty</div><div class="v mono">{{ pos.qty }}</div></div>
+      <div class="kv"><div class="k">Last</div><div class="v mono" id="open-pos-last">{{ open_pos_last }}</div></div>
+      <div class="kv"><div class="k">Unrealized</div>
+        <div class="v mono" id="open-pos-unreal" style="color:{{ open_pos_unreal_color }}">{{ open_pos_unreal_str }}</div></div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Today's trades -->
+  {% if summary.closed_trades %}
+  <div class="card">
+    <div class="card-title">TRADES &nbsp;<span class="muted" style="font-size:10px">{{ sess_date }}</span></div>
+    <div class="scroll-x">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Strat</th><th>Dir</th>
+            <th>Entry</th><th>Exit</th><th class="right">P&amp;L</th>
+            <th>Reason</th><th class="right">Hold</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tr in summary.closed_trades %}
+          {% set et = tr.entry_time[11:16] if tr.entry_time else '?' %}
+          {% set xt = tr.exit_time[11:16] if tr.exit_time else '?' %}
+          {% set pnl_cls = 'green' if tr.pnl > 0 else 'red' %}
+          {% set pnl_str = ('+$' if tr.pnl >= 0 else '-$') + '%.2f'|format(tr.pnl|abs) %}
+          {% set reason_cls = 'TARGET' if 'TARGET' in tr.exit_reason.upper() else 'STOP' if tr.exit_reason == 'STOP' else 'TIME_STOP' %}
+          <tr>
+            <td><b>{{ tr.symbol.replace('US.', '') }}</b> <span class="muted" style="font-size:10px">{{ et }}→{{ xt }}</span></td>
+            <td><span class="strat-badge {{ tr.strategy or '' }}">{{ tr.strategy or '?' }}</span></td>
+            <td><span class="dir-badge {{ tr.direction or 'long' }}">{{ (tr.direction or 'long')|upper }}</span></td>
+            <td class="mono">${{ '%.3f'|format(tr.entry_price) }}</td>
+            <td class="mono">${{ '%.3f'|format(tr.exit_price) }}</td>
+            <td class="right mono {{ pnl_cls }}"><b>{{ pnl_str }}</b></td>
+            <td><span class="reason-badge {{ reason_cls }}">{{ tr.exit_reason }}</span></td>
+            <td class="right muted">{{ tr.hold_minutes }}m</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Market conditions -->
+  <div id="market-cond-container">{{ market_cond_html|safe }}</div>
+
+  <!-- Signal feed (bb_kdj) -->
+  {% if evals %}
+  <div class="card">
+    <div class="card-title">SIGNAL FEED &nbsp;<span class="muted" style="font-size:10px">last {{ evals|length }} bars · bb_kdj</span></div>
+    <div class="scroll-x">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Time</th><th>Close</th>
+            <th title="BB touch">BB</th>
+            <th title="KDJ cross">KDJ</th>
+            <th title="RSI oversold">RSI</th>
+            <th title="Ranging (ADX)">RNG</th>
+            <th title="Volume spike">VOL</th>
+            <th>Score</th><th>Entry</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in evals|reverse %}
+          {% set sig = e.get('signals', {}) %}
+          {% set t = e.get('ts', '')[:19].replace('T', ' ') %}
+          <tr>
+            <td class="muted">{{ t[11:] }}</td>
+            <td class="mono">${{ '%.3f'|format(e.get('close', 0)) }}</td>
+            <td>{% if sig.get('bb_touch') %}<span class="dot on"></span>{% else %}<span class="dot off"></span>{% endif %}</td>
+            <td>{% if sig.get('kdj_cross') %}<span class="dot on"></span>{% else %}<span class="dot off"></span>{% endif %}</td>
+            <td>{% if sig.get('rsi_oversold') %}<span class="dot on"></span>{% else %}<span class="dot off"></span>{% endif %}</td>
+            <td>{% if sig.get('ranging') %}<span class="dot on"></span>{% else %}<span class="dot off"></span>{% endif %}</td>
+            <td>{% if sig.get('volume_spike') %}<span class="dot on"></span>{% else %}<span class="dot off"></span>{% endif %}</td>
+            <td class="muted mono">{{ e.get('bonus_score', 0) }}</td>
+            <td>{% if sig.get('bb_touch') and sig.get('kdj_cross') %}<span class="green">▲</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div><!-- /tab-today -->
+
+
+<!-- ════════════════════════════════════════════════════
+     TAB: SCORECARD
+════════════════════════════════════════════════════ -->
+<div id="tab-scorecard" class="tab-panel">
+
+  <!-- P&L chart -->
+  <div class="card">
+    <div class="card-title-row">
+      <span class="card-title" style="margin-bottom:0">CUMULATIVE P&amp;L BY STRATEGY</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn pnl-range-btn" data-days="30" onclick="loadPnlChart(30)">30d</button>
+        <button class="btn pnl-range-btn" data-days="90" onclick="loadPnlChart(90)">90d</button>
+        <button class="btn pnl-range-btn active" data-days="0" onclick="loadPnlChart(0)">all</button>
+      </div>
+    </div>
+    <div class="chart-wrap" style="margin-top:14px">
+      <canvas id="pnl-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- All-time scorecard -->
+  <div class="card">
+    <div class="card-title-row">
+      <span class="card-title" style="margin-bottom:0">ALL-TIME SCORECARD</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn score-range-btn" data-days="30" onclick="loadScoreboard(30)">30d</button>
+        <button class="btn score-range-btn" data-days="90" onclick="loadScoreboard(90)">90d</button>
+        <button class="btn score-range-btn active" data-days="0" onclick="loadScoreboard(0)">all</button>
+      </div>
+    </div>
+    <div class="scroll-x" style="margin-top:14px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th class="right">Trades</th>
+            <th class="right">Win%</th>
+            <th class="right">PF</th>
+            <th class="right">Net P&amp;L</th>
+            <th class="right">Last</th>
+          </tr>
+        </thead>
+        <tbody id="scorecard-tbody">
+          <tr><td colspan="6" class="muted" style="padding:8px 10px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Trade log -->
+  <div class="card">
+    <div class="card-title-row">
+      <span class="card-title" style="margin-bottom:0">TRADE LOG</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn trade-range-btn" data-days="30" onclick="loadTradeLog(30)">30d</button>
+        <button class="btn trade-range-btn" data-days="90" onclick="loadTradeLog(90)">90d</button>
+        <button class="btn trade-range-btn active" data-days="0" onclick="loadTradeLog(0)">all</button>
+        <span id="tradelog-sort-label" class="muted" style="font-size:11px;margin-left:8px"></span>
+      </div>
+    </div>
+    <div class="scroll-x" style="margin-top:14px">
+      <table class="data-table" style="white-space:nowrap">
+        <thead>
+          <tr>
+            <th style="cursor:pointer" onclick="sortTradeLog('date')">Date</th>
+            <th style="cursor:pointer" onclick="sortTradeLog('symbol')">Sym</th>
+            <th style="cursor:pointer" onclick="sortTradeLog('strategy')">Strat</th>
+            <th>Dir</th>
+            <th class="right" style="cursor:pointer" onclick="sortTradeLog('entry')">Entry</th>
+            <th class="right" style="cursor:pointer" onclick="sortTradeLog('exit')">Exit</th>
+            <th class="right" style="cursor:pointer" onclick="sortTradeLog('pnl')">P&amp;L</th>
+            <th class="right">Bars</th>
+            <th style="cursor:pointer" onclick="sortTradeLog('reason')">Reason</th>
+          </tr>
+        </thead>
+        <tbody id="tradelog-tbody">
+          <tr><td colspan="9" class="muted" style="padding:8px 10px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /tab-scorecard -->
+
+
+<!-- ════════════════════════════════════════════════════
+     TAB: AI GATE
+════════════════════════════════════════════════════ -->
+<div id="tab-ai-gate" class="tab-panel">
+
+  <!-- Gate value banner -->
+  <div class="gate-value-banner">
+    <div class="gate-value-item">
+      <div class="gv-label">Blocked Days</div>
+      <div class="gv-value mono" id="gv-blocked-days">—</div>
+    </div>
+    <div class="gate-value-item">
+      <div class="gv-label">bb_kdj P&amp;L on Blocked Days</div>
+      <div class="gv-value mono" id="gv-pnl-avoided">—</div>
+    </div>
+    <div class="gate-value-item">
+      <div class="gv-label">bb_kdj P&amp;L on Open Days</div>
+      <div class="gv-value mono" id="gv-open-pnl">—</div>
+    </div>
+    <div class="gate-value-item" style="margin-left:auto;text-align:right">
+      <div class="gv-label">Gate Status</div>
+      <div class="gv-value" style="font-size:14px">
+        {% if regime_enabled %}
+        <span class="{{ 'red' if regime_blocked else 'green' }}">
+          {% if regime_label %}{{ '⊘ BLOCKING' if regime_blocked else '◉ OPEN' }}{% else %}◌ PENDING{% endif %}
+        </span>
+        {% else %}
+        <span class="muted">DISABLED</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Regime label PF bars -->
+  <div class="card">
+    <div class="card-title">REGIME GATE PERFORMANCE
+      <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">
+        — bb_kdj P&amp;L per label, all classified days
+      </span>
+    </div>
+    <div class="regime-bars" id="regime-bars">
+      <div class="muted" style="font-size:12px;padding:8px 0">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Regime calendar -->
+  <div class="card">
+    <div class="card-title">REGIME CALENDAR
+      <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">
+        — last 90 classified trading days · hover for details
+      </span>
+    </div>
+    <div class="regime-calendar" id="regime-calendar">
+      <div class="muted" style="font-size:12px">Loading…</div>
+    </div>
+    <div class="calendar-legend">
+      <div class="calendar-legend-item"><div class="cal-swatch" style="background:#3fb950;opacity:0.45"></div> neutral (open)</div>
+      <div class="calendar-legend-item"><div class="cal-swatch" style="background:#d29922;opacity:0.45"></div> choppy (open)</div>
+      <div class="calendar-legend-item"><div class="cal-swatch" style="background:#f85149"></div> trending (blocked)</div>
+      <div class="calendar-legend-item"><div class="cal-swatch" style="background:#30363d"></div> no data</div>
+    </div>
+  </div>
+
+  <!-- ORB scorer (shadow mode) -->
+  <div class="card" id="orb-scorer-section">
+    <div class="card-title">ORB SETUP SCORER
+      <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">
+        — shadow mode, not blocking trades
+      </span>
+    </div>
+    <div class="scorer-grid">
+      <div class="scorer-stat">
+        <div class="ss-label">Setups Scored</div>
+        <div class="ss-value mono" id="scorer-total">—</div>
+      </div>
+      <div class="scorer-stat">
+        <div class="ss-label">Avg Confidence</div>
+        <div class="ss-value mono" id="scorer-avg">—</div>
+      </div>
+      <div class="scorer-stat">
+        <div class="ss-label">Threshold</div>
+        <div class="ss-value mono" id="scorer-threshold">—</div>
+      </div>
+      <div class="scorer-stat">
+        <div class="ss-label">Above Threshold</div>
+        <div class="ss-value mono green" id="scorer-above">—</div>
+      </div>
+    </div>
+    <div class="card-title" style="margin-top:4px">CONFIDENCE DISTRIBUTION</div>
+    <div class="score-histogram" id="score-histogram">
+      <div class="muted" style="font-size:12px;align-self:center">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Gate progress (weekly report) -->
+  <div class="card">
+    <div class="card-title">GATE PROGRESS
+      <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">
+        — pre-registered sample gates, confirmed fills only
+      </span>
+    </div>
+    <pre style="color:var(--muted);font-size:12px;line-height:1.7;white-space:pre-wrap;word-break:break-word">{{ gate_progress }}</pre>
+  </div>
+
+</div><!-- /tab-ai-gate -->
+
+</div><!-- /page-body -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Inject server state into JS
+  var _isToday = {{ 'true' if is_today else 'false' }};
+</script>
+{% endblock %}
