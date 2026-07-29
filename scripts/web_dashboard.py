@@ -211,6 +211,9 @@ def login() -> Response | str:
             if use_totp:
                 code = request.form.get("code", "").strip().replace(" ", "")
                 ok = pyotp.TOTP(cfg.totp_secret).verify(code, valid_window=1)
+                # Password fallback during TOTP bootstrap (when both are configured)
+                if not ok and cfg.dashboard_password:
+                    ok = hmac.compare_digest(request.form.get("code", ""), cfg.dashboard_password)
             else:
                 ok = hmac.compare_digest(request.form.get("password", ""), cfg.dashboard_password)
             if ok:
