@@ -295,8 +295,9 @@ def classify_regime(
     return result
 
 
-# Module-level cache: date_str → regime label. Avoids re-reading the file on every bar.
+# Module-level caches: date_str → label / confidence. Avoids re-reading the file on every bar.
 _regime_cache: dict[str, str] = {}
+_regime_confidence_cache: dict[str, float] = {}
 
 
 def load_regime_today(date_str: str, logs_dir: Path | None = None) -> str:
@@ -323,16 +324,28 @@ def load_regime_today(date_str: str, logs_dir: Path | None = None) -> str:
         if label not in VALID_LABELS:
             label = "neutral"
         _regime_cache[date_str] = label
+        _regime_confidence_cache[date_str] = float(data.get("confidence", 0.5))
         return label
     except (json.JSONDecodeError, OSError) as e:
         log.warning("Failed to read regime file %s (%s) — using neutral", path, e)
         _regime_cache[date_str] = "neutral"
+        _regime_confidence_cache[date_str] = 0.5
         return "neutral"
+
+
+def load_regime_confidence_today(date_str: str, logs_dir: Path | None = None) -> float:
+    """Return the confidence for today's regime classification, or 0.5 if unavailable.
+    Reads the regime file only if load_regime_today() hasn't already cached it.
+    """
+    if date_str not in _regime_confidence_cache:
+        load_regime_today(date_str, logs_dir)
+    return _regime_confidence_cache.get(date_str, 0.5)
 
 
 def clear_regime_cache() -> None:
     """Clear the in-process cache. Used in tests to reset state between runs."""
     _regime_cache.clear()
+    _regime_confidence_cache.clear()
 
 
 # ---------------------------------------------------------------------------

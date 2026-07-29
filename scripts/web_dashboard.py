@@ -482,6 +482,50 @@ def api_trades() -> Response:
     return jsonify(trades)
 
 
+@app.route("/api/today_summary")
+@_require_login
+def api_today_summary() -> Response:
+    """Live today stats: P&L, win%, PF, regime, VIX. Polled by the dashboard JS every 30s."""
+    summary = load_summary(_session_date())
+    ct = summary.closed_trades
+    gross_win = sum(t.pnl for t in ct if t.pnl > 0)
+    gross_loss = sum(-t.pnl for t in ct if t.pnl <= 0)
+    pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else None
+    win_pct = round(summary.wins / len(ct) * 100, 1) if ct else 0.0
+
+    regime = _load_regime_today()
+    vix = _load_vix_latest()
+    regime_label = regime.get("regime", "")
+    skip_lbls = list(getattr(cfg, "regime_skip_labels", None) or [])
+    regime_blocked = bool(getattr(cfg, "regime_gate_enabled", False) and regime_label in skip_lbls)
+
+    return jsonify({
+        "pnl": summary.realized_pnl,
+        "trades": len(ct),
+        "wins": summary.wins,
+        "losses": summary.losses,
+        "win_pct": win_pct,
+        "pf": pf,
+        "targets": summary.targets,
+        "stops": summary.stops,
+        "bar_evals": summary.bar_evals,
+        "regime": regime_label,
+        "regime_confidence": regime.get("confidence"),
+        "regime_blocked": regime_blocked,
+        "vix": vix,
+    })
+
+
+@app.route("/market_conditions_frag")
+@_require_login
+def market_conditions_frag() -> str:
+    """HTML fragment for the market conditions card, polled by JS every 30s."""
+    latest = _load_latest_evals_by_symbol()
+    skips = _load_recent_skips()
+    html = _render_market_conditions(latest, skips)
+    return html or '<div class="card" id="market-cond-inner"><div class="card-title">MARKET CONDITIONS</div><span style="color:#555">No data yet.</span></div>'
+
+
 @app.route("/config", methods=["GET", "POST"])
 @_require_login
 def config_editor() -> Response | str:
@@ -1221,6 +1265,62 @@ def _vwap_status(sig: dict) -> str:
     return '<span style="color:#555">watching</span>'
 
 
+def _load_regime_today() -> dict:
+    """Read today's regime classification from logs/regime_YYYY-MM-DD.json."""
+    try:
+        f = cfg.logs_dir / f"regime_{_session_date().strftime('%Y-%m-%d')}.json"
+        return json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        return {}
+
+
+def _load_vix_latest() -> float | None:
+    """Return the most recent vix_prev_close from vix_daily.jsonl."""
+    try:
+        f = cfg.logs_dir / "vix_daily.jsonl"
+        lines = [l for l in f.read_text().splitlines() if l]
+        return json.loads(lines[-1]).get("vix_prev_close") if lines else None
+    except Exception:
+        return None
+
+
+def _load_gap_fade_status() -> dict[str, dict]:
+    """Return {symbol: {status, direction, pnl, reason, entry, stop}} for gap_fade today."""
+    date_str = _session_date().strftime("%Y-%m-%d")
+    result: dict[str, dict] = {}
+    for f in sorted(cfg.logs_dir.glob(f"paper_US_*_{date_str}.jsonl")):
+        sym = f.stem.removeprefix("paper_").removesuffix(f"_{date_str}").replace("_", ".", 1)
+        rec: dict = {"status": "watching", "direction": None, "pnl": None,
+                     "reason": None, "entry": None, "stop": None, "close": None}
+        has_gap_fade_data = False
+        for line in f.read_text().splitlines():
+            try:
+                ev = json.loads(line)
+                if ev.get("strategy") != "gap_fade":
+                    continue
+                has_gap_fade_data = True
+                event = ev.get("event")
+                if event == "bar_eval":
+                    rec["close"] = ev.get("close")
+                elif event == "position_open":
+                    rec["status"] = "in_trade"
+                    rec["direction"] = ev.get("direction")
+                    rec["entry"] = ev.get("entry")
+                    rec["stop"] = ev.get("stop")
+                elif event == "position_close":
+                    rec["status"] = "done"
+                    rec["reason"] = ev.get("reason")
+                    rec["pnl"] = ev.get("pnl")
+                elif event == "signal_skip" and rec["status"] == "watching":
+                    rec["status"] = "skipped"
+                    rec["reason"] = ev.get("reason")
+            except json.JSONDecodeError:
+                pass
+        if has_gap_fade_data:
+            result[sym] = rec
+    return result
+
+
 # ---------------------------------------------------------------------------
 # HTML rendering
 # ---------------------------------------------------------------------------
@@ -1388,10 +1488,50 @@ def _render_market_conditions(
           {skip_rows}
         </table>""" if skip_rows else ""
 
+    # --- Gap Fade section ---
+    gap_fade_rows = ""
+    gap_status = _load_gap_fade_status()
+    for sym, rec in sorted(gap_status.items()):
+        status = rec["status"]
+        close_str = f"${rec['close']:.3f}" if rec["close"] else "—"
+        if status == "in_trade":
+            dir_col = "#ff5252" if rec["direction"] == "short" else "#4caf50"
+            dir_lbl = rec["direction"] or "long"
+            entry_str = f"${rec['entry']:.3f}" if rec["entry"] else "—"
+            stop_str = f"${rec['stop']:.3f}" if rec["stop"] else "—"
+            status_html = (f'<span style="color:{dir_col};font-weight:bold">IN TRADE '
+                           f'{dir_lbl.upper()} · entry={entry_str} stop={stop_str}</span>')
+        elif status == "done":
+            reason = rec["reason"] or "?"
+            pnl = rec["pnl"]
+            pnl_str = (_fmt_pnl(pnl) if pnl is not None else "?")
+            pnl_col = _pnl_color(pnl if pnl is not None else 0)
+            icon = "✓" if reason == "TARGET" else "✗"
+            status_html = f'<span style="color:{pnl_col}">{icon} {reason} &nbsp;{pnl_str}</span>'
+        elif status == "skipped":
+            reason = rec["reason"] or "?"
+            reason_col = "#f44336" if "vix" in reason.lower() or "risk" in reason.lower() else "#888"
+            status_html = f'<span style="color:{reason_col}">SKIP · {reason}</span>'
+        else:
+            status_html = '<span style="color:#555">watching (pre-9:35 or no gap)</span>'
+        gap_fade_rows += f"""<tr>
+          <td><b>{sym.replace("US.", "")}</b></td>
+          <td>{close_str}</td>
+          <td>{status_html}</td>
+        </tr>"""
+
+    gap_fade_section = f"""
+        {divider}
+        {section_label}GAP FADE</div>
+        <table>
+          <tr class="th"><th>Symbol</th><th>Close</th><th>Status</th></tr>
+          {gap_fade_rows}
+        </table>""" if gap_fade_rows else ""
+
     return f"""
-    <div class="card">
+    <div class="card" id="market-cond-inner">
       <div class="card-title">MARKET CONDITIONS</div>
-      {bb_section}{orb_section}{vwap_section}{skips_section}
+      {bb_section}{orb_section}{vwap_section}{gap_fade_section}{skips_section}
     </div>"""
 
 
@@ -1409,7 +1549,9 @@ def _render_gate_progress() -> str:
 
 def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = "",
             available_dates: list[date] | None = None,
-            latest: dict | None = None) -> str:
+            latest: dict | None = None,
+            regime: dict | None = None,
+            vix: float | None = None) -> str:
     last_eval = evals[-1] if evals else None
     status_label, status_color = _runner_status(last_eval)
     now_str = datetime.now().strftime("%H:%M:%S")
@@ -1437,7 +1579,7 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
       </form>
       {next_link}{today_link}
     </span>"""
-    auto_refresh = '<meta http-equiv="refresh" content="30">' if is_today else ''
+    is_today_js = "true" if is_today else "false"
 
     last_score = str(last_eval.get("signal_score", "—")) if last_eval else "—"
     last_close = "—"
@@ -1446,6 +1588,38 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
     pnl = summary.realized_pnl
     pnl_str = _fmt_pnl(pnl)
     pnl_col = _pnl_color(pnl)
+
+    # Win% and PF
+    gross_win = sum(t.pnl for t in ct if t.pnl > 0)
+    gross_loss = sum(-t.pnl for t in ct if t.pnl <= 0)
+    _pf = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
+    _win_pct = round(summary.wins / len(ct) * 100, 1) if ct else 0.0
+    pf_str = f"{_pf:.2f}" if _pf is not None else "∞"
+    pf_col = "#4caf50" if (_pf is None or _pf >= 1.5) else "#ff9800" if _pf >= 1.0 else "#f44336"
+
+    # Regime badge
+    _regime = regime or {}
+    _regime_label = _regime.get("regime", "")
+    _skip_lbls = list(getattr(cfg, "regime_skip_labels", None) or [])
+    _regime_blocked = bool(getattr(cfg, "regime_gate_enabled", False) and _regime_label in _skip_lbls)
+    _regime_enabled = bool(getattr(cfg, "regime_gate_enabled", False))
+    if _regime_label:
+        _r_icon = "⊘" if _regime_blocked else "◉"
+        _r_col = "#f44336" if _regime_blocked else "#4caf50" if not _regime_blocked else "#ff9800"
+        _conf_str = f" {int(_regime.get('confidence', 0) * 100)}%" if _regime.get("confidence") else ""
+        regime_html = (f'<span id="regime-badge" class="meta" style="color:{_r_col}">'
+                       f'{_r_icon} {_regime_label}{_conf_str}</span>')
+    elif _regime_enabled:
+        regime_html = '<span id="regime-badge" class="meta" style="color:#555">regime: pending</span>'
+    else:
+        regime_html = ''
+
+    # VIX badge
+    if vix is not None:
+        _vix_col = "#f44336" if vix >= 25 else "#ff9800" if vix >= 20 else "#ffeb3b" if vix >= 15 else "#4caf50"
+        vix_html = f'<span id="vix-display" class="meta" style="color:{_vix_col}">VIX {vix:.1f}</span>'
+    else:
+        vix_html = ''
 
     # Open position block
     open_html = ""
@@ -1536,7 +1710,6 @@ def _render(summary: SessionSummary, evals: list[dict], market_cond_html: str = 
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  {auto_refresh}
   <title>moomoo-trader</title>
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
