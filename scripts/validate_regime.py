@@ -35,8 +35,12 @@ from mm.morning_regime import classify_regime, load_regime_today
 LOGS = Path(__file__).parent.parent / "logs"
 RESULTS_FILE = LOGS / "regime_validation.csv"
 VALID_LABELS = ("neutral", "trending_up", "trending_down", "choppy", "risk_off")
-# Labels the live gate would skip
-SKIP_LABELS = ("choppy", "risk_off")
+# Labels the live gate would skip — read from config so this matches the live .env
+def _get_skip_labels() -> tuple[str, ...]:
+    labels = getattr(_config.cfg, "regime_skip_labels", None)
+    if labels:
+        return tuple(labels)
+    return ("choppy", "risk_off")
 # Rate-limit: seconds between API calls (Haiku is fast but be polite)
 API_DELAY = 0.5
 
@@ -265,7 +269,7 @@ def main() -> None:
             "confidence": r.get("confidence", 0.0),
             "trades": len(day_trades),
             "pf": round(pf, 3) if pf is not None and pf != float("inf") else ("inf" if pf == float("inf") else ""),
-            "would_block": r.get("regime", "neutral") in SKIP_LABELS,
+            "would_block": r.get("regime", "neutral") in _get_skip_labels(),
         })
 
     # Save CSV
@@ -292,14 +296,15 @@ def main() -> None:
         avg_pf = sum(float(r["pf"]) for r in pf_rows) / len(pf_rows) if pf_rows else None
         avg_trades = sum(r["trades"] for r in subset) / len(subset)
         blocked = sum(1 for r in subset if r["would_block"])
-        gate_str = "YES" if label in SKIP_LABELS else "no"
+        gate_str = "YES" if label in _get_skip_labels() else "no"
         avg_pf_str = f"{avg_pf:.3f}" if avg_pf is not None else "n/a"
         print(f"  {label:<16}  {len(subset):>5}  {avg_pf_str:>7}  {avg_trades:>15.1f}  "
               f"{gate_str:>12}  {blocked:>17}")
 
     # Overall gate assessment
-    skip_rows = [r for r in rows if r["regime"] in SKIP_LABELS and r["pf"] not in ("", "inf")]
-    keep_rows = [r for r in rows if r["regime"] not in SKIP_LABELS and r["pf"] not in ("", "inf")]
+    _skip = _get_skip_labels()
+    skip_rows = [r for r in rows if r["regime"] in _skip and r["pf"] not in ("", "inf")]
+    keep_rows = [r for r in rows if r["regime"] not in _skip and r["pf"] not in ("", "inf")]
     if skip_rows and keep_rows:
         skip_pf = sum(float(r["pf"]) for r in skip_rows) / len(skip_rows)
         keep_pf = sum(float(r["pf"]) for r in keep_rows) / len(keep_rows)

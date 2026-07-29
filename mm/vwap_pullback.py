@@ -50,6 +50,7 @@ class VWAPPBTrade:
     exit_time: pd.Timestamp
     exit_price: float
     exit_reason: str
+    cross_count: int = 0
     pnl: float = field(init=False)
 
     def __post_init__(self) -> None:
@@ -85,6 +86,7 @@ def run_vwap_pullback(
         entry_time: pd.Timestamp
         entry_price: float
         stop_price: float
+        cross_count: int = 0
 
     position: Position | None = None
 
@@ -116,6 +118,7 @@ def run_vwap_pullback(
                     exit_time=bar_time,
                     exit_price=close,
                     exit_reason=exit_reason,
+                    cross_count=position.cross_count,
                 ))
                 log.info("VWAP_PB EXIT  bar=%s price=%.4f pnl=%+.4f reason=%s",
                          bar_time, close, trades[-1].pnl, exit_reason)
@@ -137,6 +140,7 @@ def run_vwap_pullback(
                 entry_time=bar_time,
                 entry_price=close,
                 stop_price=stop,
+                cross_count=int(row.get("vwap_cross_count", 0)),
             )
             log.info("VWAP_PB ENTRY bar=%s price=%.4f stop=%.4f vwap=%.4f crosses=%d",
                      bar_time, close, stop, vwap, int(row.get("vwap_cross_count", 0)))

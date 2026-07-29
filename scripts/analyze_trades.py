@@ -87,10 +87,15 @@ def section(title: str) -> None:
 
 
 def _to_et(ts_str: str) -> datetime:
-    """Parse UTC ISO timestamp and convert to Eastern Time."""
+    """Parse event timestamp and return as Eastern Time.
+
+    events.py writes ts = clock.now_et().isoformat() (fixed 2026-06-18, previously UTC).
+    Naive timestamps are assumed to be ET — attaching ZoneInfo is needed only for
+    astimezone() to work; no offset conversion should happen.
+    """
     dt = datetime.fromisoformat(ts_str)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt = dt.replace(tzinfo=ZoneInfo("America/New_York"))
     return dt.astimezone(ZoneInfo("America/New_York"))
 
 
