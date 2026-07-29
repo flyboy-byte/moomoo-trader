@@ -206,6 +206,8 @@ def main() -> None:
                         help="Suppress per-trade log noise (file logs unaffected)")
     parser.add_argument("--details", action="store_true",
                         help="Show per-symbol breakdown within each category")
+    parser.add_argument("--is-start", default="2022-01-01", metavar="YYYY-MM-DD",
+                        help="IS period start date (default: 2022-01-01)")
     args = parser.parse_args()
 
     if args.quiet:
@@ -222,9 +224,10 @@ def main() -> None:
     total_bars = sum(len(df) for df in dfs.values())
     print(f"  Loaded {total_bars:,} total bars across {len(SYMBOLS)} symbols")
 
+    is_label = f"IS {args.is_start[:4]}-{IS_END[:4]}"
     is_summary = None
     if not args.oos_only:
-        is_summary = _run_analysis(dfs, "2022-01-01", IS_END, "IS 2022-2023", args.details)
+        is_summary = _run_analysis(dfs, args.is_start, IS_END, is_label, args.details)
 
     oos_summary = _run_analysis(dfs, OOS_START, "2099-12-31", "OOS 2024+", args.details)
 
