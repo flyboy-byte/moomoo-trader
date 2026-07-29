@@ -1,7 +1,7 @@
 # moomoo-trader: Full Project Map
 
 **AI Context Document** — paste this into any AI session to get full project context without re-deriving.
-Last updated: 2026-07-23.
+Last updated: 2026-07-29.
 
 ---
 
@@ -162,9 +162,9 @@ moomoo-trader/
 
 ---
 
-## Deployed Strategies (VPS, as of 2026-07-23)
+## Deployed Strategies (VPS, as of 2026-07-29)
 
-### Live Performance (2026-06-10 → 2026-07-23, 64 trades, 30 sessions)
+### Live Performance (2026-06-10 → 2026-07-29, 65 trades)
 
 | Strategy | Trades | Win% | PF | PnL |
 |----------|--------|------|----|-----|
@@ -172,10 +172,10 @@ moomoo-trader/
 | bb_kdj_loose | 5 | 60% | 1.50 | +$1.89 |
 | gap_fade | 1 | 0% | 0.00 | -$0.64 |
 | orb | 39 | 44% | 0.76 | -$11.04 |
-| vwap_pb | 16 | 38% | 1.75 | +$4.99 |
-| **TOTAL** | **64** | **44%** | **0.92** | **-$4.86** |
+| vwap_pb | 17 | 41% | 1.88 | +$5.89 |
+| **TOTAL** | **65** | **45%** | **0.93** | **-$3.96** |
 
-Cumulative PnL peaked at +$12.60 (2026-06-11), currently -$4.86. ORB is the main drag (39 of 64 trades, 35 of which exit via TIME_STOP). VIX gate and ORB scorer now live — data accumulating on impact.
+ORB is the main drag (35/39 exit via TIME_STOP — structural entry timing issue). Regime gate live with corrected skip labels (trending_up/trending_down) since 2026-07-26. Gap large-short filter active since 2026-07-29.
 
 ---
 
@@ -314,6 +314,8 @@ standard by a meaningful margin after ~30 trades, the gates are earning their ke
 
 **VIX gate (live 2026-07-23):** `GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20` — SPY and QQQ entries blocked when prior-day VIX≥20. OOS sweep (2024+): VIX 20-25 gives SPY PF 0.626, QQQ PF 0.655; VIX>25 also negative OOS. IWM positive at all VIX bands — unfiltered. Source: `logs/vix_daily.jsonl`.
 
+**Large-gap-short filter (live 2026-07-29):** `GAP_LARGE_SHORT_FILTER_ENABLED=true`, `GAP_MAX_SHORT_PCT=0.01`. Blocks gap-up short entries when gap > 1.0%. Validated: IS PF=0.939, OOS PF=0.519 on N≥49 trades — consistent bad edge.
+
 **Premarket fill% filter** wired in shadow mode (`GAP_PREMARKET_FILTER_ENABLED=false` default —
 logs `would_filter_skip` without blocking). Validated on 9-month sample; see `strategy_graveyard.md`.
 
@@ -324,15 +326,15 @@ logs `would_filter_skip` without blocking). Validated on 9-month sample; see `st
 
 **What it does:** Calls Claude (`claude-haiku-4-5`) at market open with prior-day VIX, SPY/QQQ session stats, and macro calendar. Returns one of: `trending_up`, `trending_down`, `choppy`, `risk_off`, `neutral`. Result cached in `logs/regime_YYYY-MM-DD.json`.
 
-**Gate:** `REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose`. When label is in `REGIME_SKIP_LABELS=choppy,risk_off`, all bb_kdj and bb_kdj_loose entries are blocked for the session.
+**Gate:** `REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose`. When label is in `REGIME_SKIP_LABELS=trending_up,trending_down` (flipped 2026-07-26 — validated on 618 days: trending_up PF=0.513, neutral PF=0.880), all bb_kdj entries are blocked for the session.
 
 **Fail-open:** API error or missing file → `neutral` → trades proceed normally. `REGIME_GATE_ENABLED=false` restores pre-gate behavior with zero code change.
 
-**Shadow history:** 3 days (2026-07-21 to 2026-07-23), all `neutral` at confidence 0.72. Gate hasn't fired yet — waiting for a genuine choppy/risk-off session.
+**Live:** Gate active since 2026-07-26, blocks ~23% of days.
 
 **Weekly synthesis:** `scripts/weekly_synthesis.py` (VPS cron Mon 9:00 ET) reads last week's position_close + signal_skip JSONL events, sends compact stats to Claude-haiku for structured analysis, writes `logs/synthesis_YYYY-WW.json`, posts to Discord.
 
-**ORB setup scorer:** Per-trade Claude confidence gate before each ORB entry. `score_orb_setup()` in `mm/morning_regime.py`. Scores and reasons logged to `logs/api_usage.jsonl`. Gate threshold: `ORB_ENTRY_MIN_CONFIDENCE=0.65`. Fail-open: API error → confidence=1.0.
+**ORB setup scorer:** Per-trade Claude confidence gate before each ORB entry. `score_orb_setup()` in `mm/morning_regime.py`. Scores and reasons logged to `logs/api_usage.jsonl`. Gate threshold: `ORB_ENTRY_MIN_CONFIDENCE=0.50` (shadow-mode — never blocks). Mechanical calibration on 2924 trades found edge drivers are OR range + entry timing, not LLM-discriminable features. Fail-open: API error → confidence=1.0.
 
 ---
 
@@ -469,7 +471,7 @@ moomoo-paper.service      # paper runner — Restart=always
 moomoo-dashboard.service  # web dashboard on :8080 — Restart=always
 ```
 
-### Active `.env` (VPS, as of 2026-07-23)
+### Active `.env` (VPS, as of 2026-07-29)
 ```env
 TRD_ENV=SIMULATE
 LIVE_TRADING_ENABLED=false
@@ -490,20 +492,23 @@ ORB_SHORT_SYMBOLS=US.SPY       # QQQ+IWM shorts disabled 2026-07-09 (0% win rate
 ORB_VIX_MAX=
 ORB_VIX_MAX_OVERRIDES=US.IWM:18
 ORB_SETUP_SCORER_ENABLED=true
-ORB_ENTRY_MIN_CONFIDENCE=0.65
+ORB_ENTRY_MIN_CONFIDENCE=0.50  # lowered 2026-07-29 — scorer stays shadow-mode
 GAP_VIX_MAX=
 GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20
+GAP_MAX_SHORT_PCT=0.01
+GAP_LARGE_SHORT_FILTER_ENABLED=true  # active 2026-07-29 — IS/OOS confirmed bad edge
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
 VWAP_PB_MAX_CROSSES=1
 TOTAL_CAPITAL=100
-FRACTIONAL_SHARES=true
+FRACTIONAL_SHARES=false
 MAX_TRADES_PER_DAY=0           # unlimited (bb_kdj_loose needs room; 5 was too restrictive)
 MAX_DAILY_LOSS=20
 ANTHROPIC_API_KEY=<in .env, never committed>
-ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_MODEL=claude-sonnet-5
 REGIME_GATE_ENABLED=true
 REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose
-REGIME_SKIP_LABELS=choppy,risk_off
+REGIME_SKIP_LABELS=trending_up,trending_down  # flipped 2026-07-26 (choppy PF=0.928 is fine)
+TOTP_SECRET=<in .env, never committed>       # DASHBOARD_PASSWORD removed — TOTP only
 ```
 
 ### Deployment Workflow
@@ -580,7 +585,9 @@ See `docs/expansions/FRAMEWORK.md` for the next phase — data mining and LLM si
 | Route 1 data mining (H1/H2/H3) | **COMPLETE** 2026-07-23 | H1 null; H2 deployed as VIX gates; H3 IWM signal documented |
 | Route 2 LLM regime gate | **COMPLETE** 2026-07-23 | classify_regime + gate + scorer + synthesis all live |
 | Gap fade premarket fill% filter | Shadow mode | `GAP_PREMARKET_FILTER_ENABLED=false`; validated empirically but needs forward data |
+| Gap fade large-gap-short filter | **ACTIVE** 2026-07-29 | `GAP_LARGE_SHORT_FILTER_ENABLED=true`; IS PF=0.939, OOS PF=0.519 — consistent bad edge |
 | Flip `GAP_PREMARKET_FILTER_ENABLED=true` | Waiting | Need live forward data on gap fade first |
+| Dashboard auth | **TOTP** 2026-07-29 | DASHBOARD_PASSWORD removed; TOTP_SECRET in .env; /config TOTP-protected, / and /api/* public |
 
 ---
 

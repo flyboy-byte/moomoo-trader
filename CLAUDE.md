@@ -45,7 +45,7 @@ Package layout:
   mm/backtest.py       — run_backtest(), walk_forward(), print_summary()
   mm/research.py       — compare_variants(), sweep_parameters(), analyze_stop_exits(), sweep_signal_filter()
   mm/premarket.py      — premarket_session(), premarket_fill_pct(), premarket_volume_ratio() (research, not live-wired)
-  mm/gap_fade.py        — Gap Fade backtest engine (research only — not in live STRATEGIES)
+  mm/gap_fade.py        — Gap Fade strategy engine (live 2026-07-12) + backtest engine
   mm/events.py         — PaperEventLog, PaperPosition, position/ORB file I/O (_load/_save/_clear_position, _load/_save_orb_traded)
   mm/execution.py      — order placement (_place_buy/sell/short/cover), fill confirmation, _reconcile_positions, trade_context
   mm/evals.py          — per-strategy eval functions (_eval_bb_kdj, _eval_bb_kdj_loose, _eval_vwap, _eval_vwap_pb, _eval_orb), _entry_attempted
@@ -137,12 +137,10 @@ strategy, a doc cleanup). Don't treat this list as a gate against doing other us
   Next phase is in docs/expansions/ — start at docs/expansions/FRAMEWORK.md.
   Two primary routes: Route 1 (data mining, scripts/mine_*.py) and
   Route 2 (LLM regime gate, mm/morning_regime.py + mm/evals.py).
-- Gap Fade (mm/gap_fade.py) is research-only, not in live STRATEGIES. Premarket fill% filter
-  validated empirically (9-month sample, see strategy_graveyard.md) and wired into
-  run_gap_fade() as of 2026-06-18 — but shadow-mode only (filter_active=GAP_PREMARKET_FILTER_ENABLED,
-  defaults False, logs would_filter_skip without ever blocking a trade). Knobs are
-  self-contained module constants in mm/gap_fade.py, not cfg.* (that file deliberately
-  doesn't import cfg).
+- Gap Fade (mm/gap_fade.py) is LIVE as of 2026-07-12. Fires once per day at 9:35 ET.
+  GAP_LARGE_SHORT_FILTER_ENABLED=true on VPS (blocks gap-up shorts >1.0% — IS/OOS confirmed bad edge).
+  GAP_PREMARKET_FILTER_ENABLED=false (shadow mode only, logs would_filter_skip).
+  Knobs are self-contained module constants in mm/gap_fade.py (file deliberately doesn't import cfg).
 - docs/codex-ai-size.md / codex-ai-size-remedies.md — repo doc-hierarchy analysis, explicitly
   parked for a future dedicated session, not in progress.
 

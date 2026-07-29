@@ -58,7 +58,7 @@ logs/*.jsonl  ──  structured events: bar_eval, signal_skip, risk_block,
     └──► scripts/compare_paper_vs_backtest.py  ──  BB+KDJ signal engine agreement check
 ```
 
-## Active Strategies (VPS, as of 2026-07-12)
+## Active Strategies (VPS, as of 2026-07-29)
 
 | Strategy      | Entry condition                          | Exit                         | Symbols        |
 |---------------|------------------------------------------|------------------------------|----------------|
@@ -87,10 +87,12 @@ ORB_SHORTS_ENABLED=true
 ORB_SHORT_SYMBOLS=US.SPY        # QQQ+IWM disabled 2026-07-09 (0% win rate on 36 trades)
 ORB_VIX_MAX=                    # global ORB VIX cap; empty = no filter
 ORB_VIX_MAX_OVERRIDES=US.IWM:18  # IWM PF 1.045→1.113 OOS at vix_max=18
-ORB_SETUP_SCORER_ENABLED=true   # Claude per-trade ORB confidence gate (fail-open)
-ORB_ENTRY_MIN_CONFIDENCE=0.65
+ORB_SETUP_SCORER_ENABLED=true   # Claude per-trade ORB confidence gate (fail-open, shadow at 0.50)
+ORB_ENTRY_MIN_CONFIDENCE=0.50
 GAP_VIX_MAX=                    # global gap_fade VIX cap; empty = no filter
 GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20  # VIX>=20 negative OOS for SPY+QQQ
+GAP_MAX_SHORT_PCT=0.01          # gap-up short filter threshold (1%)
+GAP_LARGE_SHORT_FILTER_ENABLED=true  # blocks gap-up shorts >1% — IS/OOS confirmed bad edge
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
 TOTAL_CAPITAL=100               # total bankroll; divided across symbol×strategy slots
 FRACTIONAL_SHARES=true
@@ -98,10 +100,10 @@ MAX_POSITION_DOLLARS=900        # fallback if TOTAL_CAPITAL not set
 TRD_ENV=SIMULATE                # NEVER change to REAL
 LIVE_TRADING_ENABLED=false      # NEVER change to true
 ANTHROPIC_API_KEY=              # in .env only, never committed
-ANTHROPIC_MODEL=claude-haiku-4-5-20251001
-REGIME_GATE_ENABLED=true        # blocks bb_kdj/loose on choppy/risk_off regime; fail-open
+ANTHROPIC_MODEL=claude-sonnet-5
+REGIME_GATE_ENABLED=true        # blocks bb_kdj/loose on trending days; fail-open
 REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose
-REGIME_SKIP_LABELS=choppy,risk_off
+REGIME_SKIP_LABELS=trending_up,trending_down  # flipped 2026-07-26 (choppy PF=0.928 is fine)
 ```
 
 ## Kill Switches (runtime, no restart needed)
