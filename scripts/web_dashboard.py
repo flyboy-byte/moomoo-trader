@@ -637,13 +637,27 @@ def market_conditions_frag() -> str:
                            bar_time_label=bar_time_label)
 
 
+_CFG_BOOL_KEYS = {
+    "REGIME_GATE_ENABLED", "ORB_SETUP_SCORER_ENABLED",
+    "FRACTIONAL_SHARES", "ORB_SHORTS_ENABLED", "EXIT_ON_KDJ_DEATH",
+    "GAP_LARGE_SHORT_FILTER_ENABLED", "GAP_PREMARKET_FILTER_ENABLED",
+}
+_CFG_MULTISELECT_KEYS = {
+    "STRATEGIES", "SYMBOLS", "VWAP_PB_SYMBOLS", "ORB_SHORT_SYMBOLS",
+    "REGIME_GATE_STRATEGIES", "REGIME_SKIP_LABELS",
+}
+_CFG_NUMERIC_KEYS = {
+    "MAX_DAILY_LOSS", "MAX_POSITION_DOLLARS", "MAX_TRADES_PER_DAY",
+    "MAX_TRADES_PER_STRATEGY", "MIN_SIGNAL_SCORE", "ATR_STOP_MULT",
+    "KDJ_WINDOW_BARS", "ORB_MINUTES", "ORB_VOL_MULT", "ORB_TARGET_MULT",
+    "ORB_ENTRY_MIN_CONFIDENCE", "GAP_MAX_SHORT_PCT",
+    "VWAP_PB_MAX_CROSSES", "VWAP_PB_STOP_MULT", "TOTAL_CAPITAL",
+}
+
+
 @app.route("/config", methods=["GET", "POST"])
 @_require_login
 def config_editor() -> Response | str:
-    if not cfg.dashboard_password:
-        return render_template("config.html",
-            msg="", msg_type="ok", kills={}, ai_flags={},
-            fields_numeric=Markup(""), fields_list=Markup(""), fields_bool=Markup(""))
     msg = ""
     msg_type = "ok"
 
@@ -669,20 +683,6 @@ def config_editor() -> Response | str:
                 p.write_text("stop\n")
                 msg = "STOP_SHORTS.txt created — ORB shorts disabled."
 
-        elif action == "toggle_regime_gate":
-            current_val = _read_env().get("REGIME_GATE_ENABLED", "false").lower()
-            new_val = "false" if current_val == "true" else "true"
-            _write_env_key("REGIME_GATE_ENABLED", new_val)
-            state = "enabled" if new_val == "true" else "disabled"
-            msg = f"Regime gate {state} in .env. Restart runner to apply."
-
-        elif action == "toggle_orb_scorer":
-            current_val = _read_env().get("ORB_SETUP_SCORER_ENABLED", "false").lower()
-            new_val = "false" if current_val == "true" else "true"
-            _write_env_key("ORB_SETUP_SCORER_ENABLED", new_val)
-            state = "enabled" if new_val == "true" else "disabled"
-            msg = f"ORB scorer {state} in .env. Restart runner to apply."
-
         elif action == "restart_runner":
             try:
                 result = subprocess.run(
@@ -701,7 +701,19 @@ def config_editor() -> Response | str:
         elif action == "save_config":
             changed = []
             rejected = []
-            for key in _EDITABLE_KEYS:
+            for key in _CFG_BOOL_KEYS:
+                val = "true" if request.form.get(key) else "false"
+                if _write_env_key(key, val):
+                    changed.append(key)
+                else:
+                    rejected.append(key)
+            for key in _CFG_MULTISELECT_KEYS:
+                val = ",".join(request.form.getlist(key))
+                if _write_env_key(key, val):
+                    changed.append(key)
+                else:
+                    rejected.append(key)
+            for key in _CFG_NUMERIC_KEYS:
                 if key in request.form:
                     val = request.form[key].strip()
                     if _write_env_key(key, val):
@@ -719,47 +731,15 @@ def config_editor() -> Response | str:
     current = _read_env()
     kills = _kill_switch_state()
 
-    def _field(key: str) -> str:
-        val = escape(current.get(key, ""))
-        return (f'<div class="kv-grid">'
-                f'<span class="kv-key">{key}</span>'
-                f'<input type="text" name="{key}" value="{val}" form="cfg-form">'
-                f'</div>')
+    def _is_true(key: str) -> bool:
+        return current.get(key, "false").lower() in ("true", "1", "yes")
 
-    numeric_keys = [
-        "MAX_DAILY_LOSS", "MAX_POSITION_DOLLARS", "MAX_TRADES_PER_DAY",
-        "MAX_TRADES_PER_STRATEGY", "MIN_SIGNAL_SCORE", "ATR_STOP_MULT",
-        "KDJ_WINDOW_BARS", "ORB_MINUTES", "ORB_VOL_MULT", "ORB_TARGET_MULT",
-        "ORB_ENTRY_MIN_CONFIDENCE", "GAP_MAX_SHORT_PCT",
-        "VWAP_PB_MAX_CROSSES", "VWAP_PB_STOP_MULT", "TOTAL_CAPITAL",
-    ]
-    list_keys = [
-        "STRATEGIES", "SYMBOLS", "VWAP_PB_SYMBOLS",
-        "KDJ_WINDOW_OVERRIDES", "ORB_MINUTES_OVERRIDES",
-        "ORB_VOL_MULT_OVERRIDES", "ORB_TARGET_MULT_OVERRIDES",
-        "ORB_SHORT_SYMBOLS", "ORB_VIX_MAX_OVERRIDES",
-        "GAP_VIX_MAX_OVERRIDES", "REGIME_GATE_STRATEGIES", "REGIME_SKIP_LABELS",
-        "SYMBOL_SIZE_OVERRIDES",
-    ]
-    bool_keys = [
-        "FRACTIONAL_SHARES", "ORB_SHORTS_ENABLED", "EXIT_ON_KDJ_DEATH",
-        "GAP_LARGE_SHORT_FILTER_ENABLED", "GAP_PREMARKET_FILTER_ENABLED",
-    ]
-
-    fields_numeric = "\n".join(_field(k) for k in numeric_keys)
-    fields_list = "\n".join(_field(k) for k in list_keys)
-    fields_bool = "\n".join(_field(k) for k in bool_keys)
-
-    ai_flags = {
-        "REGIME_GATE_ENABLED": current.get("REGIME_GATE_ENABLED", "false").lower() == "true",
-        "ORB_SETUP_SCORER_ENABLED": current.get("ORB_SETUP_SCORER_ENABLED", "false").lower() == "true",
-    }
+    def _csv_set(key: str) -> set[str]:
+        return {v.strip() for v in current.get(key, "").split(",") if v.strip()}
 
     return render_template("config.html",
-        msg=msg, msg_type=msg_type, kills=kills, ai_flags=ai_flags,
-        fields_numeric=Markup(fields_numeric),
-        fields_list=Markup(fields_list),
-        fields_bool=Markup(fields_bool),
+        msg=msg, msg_type=msg_type, kills=kills,
+        current=current, is_true=_is_true, csv_set=_csv_set,
     )
 
 

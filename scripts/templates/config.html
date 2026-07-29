@@ -2,6 +2,75 @@
 {% block title %}Config — moomoo-trader{% endblock %}
 
 {% block body %}
+<style>
+/* ── toggle switch ─────────────────────────────────────────────────────── */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 0; border-bottom: 1px solid var(--border);
+}
+.toggle-row:last-child { border-bottom: none; }
+.toggle-meta { display: flex; flex-direction: column; gap: 2px; }
+.toggle-key { font-size: 12px; font-family: monospace; color: var(--fg); }
+.toggle-desc { font-size: 11px; color: var(--muted); }
+
+.tog { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.tog input { opacity: 0; width: 0; height: 0; }
+.tog-slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: var(--border); border-radius: 22px;
+  transition: background 0.18s;
+}
+.tog-slider:before {
+  content: ""; position: absolute; height: 16px; width: 16px;
+  left: 3px; bottom: 3px; background: #fff; border-radius: 50%;
+  transition: transform 0.18s;
+}
+.tog input:checked + .tog-slider { background: var(--green); }
+.tog input:checked + .tog-slider:before { transform: translateX(18px); }
+
+/* ── pill checkboxes ───────────────────────────────────────────────────── */
+.pill-group { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.pill { position: relative; }
+.pill input[type=checkbox] { position: absolute; opacity: 0; width: 0; height: 0; }
+.pill-label {
+  display: block; padding: 5px 12px;
+  border: 1px solid var(--border); border-radius: 20px;
+  font-size: 12px; font-family: monospace; color: var(--muted);
+  cursor: pointer; user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.pill input[type=checkbox]:checked + .pill-label {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--bg); font-weight: 600;
+}
+.pill-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.pill-section:last-child { border-bottom: none; }
+.pill-section-label { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-bottom: 0; }
+
+/* ── number fields ─────────────────────────────────────────────────────── */
+.num-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px; margin-top: 4px;
+}
+.num-field { display: flex; flex-direction: column; gap: 5px; }
+.num-label { font-size: 11px; font-family: monospace; color: var(--muted); letter-spacing: .5px; }
+.num-field input[type=number] {
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--fg); font-family: monospace; font-size: 14px;
+  padding: 7px 10px; width: 100%; box-sizing: border-box;
+  -moz-appearance: textfield;
+}
+.num-field input[type=number]::-webkit-outer-spin-button,
+.num-field input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+.num-field input[type=number]:focus { outline: none; border-color: var(--accent); }
+
+/* ── save bar ──────────────────────────────────────────────────────────── */
+.save-bar {
+  display: flex; align-items: center; gap: 14px;
+  margin: 8px 0 24px;
+}
+</style>
+
 <!-- ── Header ──────────────────────────────────────────────────────── -->
 <header class="site-header">
   <div class="site-logo">◈ moomoo-trader</div>
@@ -15,21 +84,11 @@
 
 <div class="page-body">
 
-{% if not cfg.dashboard_password %}
-<div class="card accent-red">
-  <div class="card-title" style="color:var(--red)">CONFIG EDITOR DISABLED</div>
-  <p style="color:var(--muted);font-size:13px">
-    Set <code style="font-family:monospace">DASHBOARD_PASSWORD=yourpassword</code> in
-    <code style="font-family:monospace">.env</code> and restart the dashboard to enable the editor.
-  </p>
-</div>
-{% else %}
-
 {% if msg %}
 <div class="alert {{ msg_type }}">{{ msg }}</div>
 {% endif %}
 
-<!-- Kill switches -->
+<!-- ── Kill switches ──────────────────────────────────────────────── -->
 <div class="card">
   <div class="card-title">KILL SWITCHES</div>
 
@@ -60,40 +119,272 @@
   </div>
 </div>
 
-<!-- AI features -->
-<div class="card">
-  <div class="card-title">AI FEATURES <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">— writes .env, restart to apply</span></div>
+<!-- ── Main settings form ─────────────────────────────────────────── -->
+<form id="cfg-form" method="POST">
+<input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="save_config">
 
-  <div class="kill-row">
-    <form method="POST">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="action" value="toggle_regime_gate">
-      <button type="submit" class="btn {{ 'danger' if ai_flags.REGIME_GATE_ENABLED else 'ok' }}">
-        {{ 'Disable Regime Gate' if ai_flags.REGIME_GATE_ENABLED else 'Enable Regime Gate' }}
-      </button>
-    </form>
-    <span class="kill-state" style="color:{{ 'var(--green)' if ai_flags.REGIME_GATE_ENABLED else 'var(--muted)' }}">
-      REGIME_GATE_ENABLED: {{ 'true' if ai_flags.REGIME_GATE_ENABLED else 'false' }}
-      {% if ai_flags.REGIME_GATE_ENABLED %}<span class="muted" style="font-size:10px"> · Sonnet call each morning</span>{% endif %}
-    </span>
+<!-- Active strategies & symbols -->
+<div class="card">
+  <div class="card-title">ACTIVE STRATEGIES &amp; SYMBOLS</div>
+
+  <div class="pill-section">
+    <div class="pill-section-label">STRATEGIES</div>
+    <div class="pill-group">
+      {% for s in ['bb_kdj','bb_kdj_loose','orb','vwap_pb','gap_fade'] %}
+      <label class="pill">
+        <input type="checkbox" name="STRATEGIES" value="{{ s }}"
+               {% if s in csv_set('STRATEGIES') %}checked{% endif %}>
+        <span class="pill-label">{{ s }}</span>
+      </label>
+      {% endfor %}
+    </div>
   </div>
 
-  <div class="kill-row">
-    <form method="POST">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="action" value="toggle_orb_scorer">
-      <button type="submit" class="btn {{ 'danger' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'ok' }}">
-        {{ 'Disable ORB Scorer' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'Enable ORB Scorer' }}
-      </button>
-    </form>
-    <span class="kill-state" style="color:{{ 'var(--green)' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'var(--muted)' }}">
-      ORB_SETUP_SCORER_ENABLED: {{ 'true' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'false' }}
-      {% if ai_flags.ORB_SETUP_SCORER_ENABLED %}<span class="muted" style="font-size:10px"> · Sonnet call per ORB setup</span>{% endif %}
-    </span>
+  <div class="pill-section">
+    <div class="pill-section-label">SYMBOLS</div>
+    <div class="pill-group">
+      {% for sym in ['US.SPY','US.QQQ','US.IWM'] %}
+      <label class="pill">
+        <input type="checkbox" name="SYMBOLS" value="{{ sym }}"
+               {% if sym in csv_set('SYMBOLS') %}checked{% endif %}>
+        <span class="pill-label">{{ sym }}</span>
+      </label>
+      {% endfor %}
+    </div>
   </div>
 </div>
 
-<!-- Runner control -->
+<!-- Flags (booleans) -->
+<div class="card">
+  <div class="card-title">FLAGS</div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">REGIME_GATE_ENABLED</span>
+      <span class="toggle-desc">Morning Sonnet call classifies market regime — gates bb_kdj on choppy/risk_off days</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="REGIME_GATE_ENABLED" value="true"
+      {% if is_true('REGIME_GATE_ENABLED') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">ORB_SETUP_SCORER_ENABLED</span>
+      <span class="toggle-desc">Sonnet scores each ORB setup — shadow mode only (gate at 0.50)</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="ORB_SETUP_SCORER_ENABLED" value="true"
+      {% if is_true('ORB_SETUP_SCORER_ENABLED') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">ORB_SHORTS_ENABLED</span>
+      <span class="toggle-desc">Enable ORB short entries (SPY only per ORB_SHORT_SYMBOLS)</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="ORB_SHORTS_ENABLED" value="true"
+      {% if is_true('ORB_SHORTS_ENABLED') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">GAP_PREMARKET_FILTER_ENABLED</span>
+      <span class="toggle-desc">Gap fade: skip setups below premarket fill% threshold</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="GAP_PREMARKET_FILTER_ENABLED" value="true"
+      {% if is_true('GAP_PREMARKET_FILTER_ENABLED') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">GAP_LARGE_SHORT_FILTER_ENABLED</span>
+      <span class="toggle-desc">Gap fade: skip large-gap-up short entries (&gt;1% gap) — validated bad edge</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="GAP_LARGE_SHORT_FILTER_ENABLED" value="true"
+      {% if is_true('GAP_LARGE_SHORT_FILTER_ENABLED') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">FRACTIONAL_SHARES</span>
+      <span class="toggle-desc">Allow fractional share sizing (code ready, parked for late-stage testing)</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="FRACTIONAL_SHARES" value="true"
+      {% if is_true('FRACTIONAL_SHARES') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-meta">
+      <span class="toggle-key">EXIT_ON_KDJ_DEATH</span>
+      <span class="toggle-desc">Exit bb_kdj positions on KDJ death cross (disabled — underperforms ATR stop)</span>
+    </div>
+    <label class="tog"><input type="checkbox" name="EXIT_ON_KDJ_DEATH" value="true"
+      {% if is_true('EXIT_ON_KDJ_DEATH') %}checked{% endif %}><span class="tog-slider"></span></label>
+  </div>
+</div>
+
+<!-- Regime gate settings -->
+<div class="card">
+  <div class="card-title">REGIME GATE</div>
+
+  <div class="pill-section">
+    <div class="pill-section-label">REGIME_SKIP_LABELS — skip trading on these days</div>
+    <div class="pill-group">
+      {% for lbl in ['neutral','choppy','risk_off','trending_up','trending_down'] %}
+      <label class="pill">
+        <input type="checkbox" name="REGIME_SKIP_LABELS" value="{{ lbl }}"
+               {% if lbl in csv_set('REGIME_SKIP_LABELS') %}checked{% endif %}>
+        <span class="pill-label">{{ lbl }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="pill-section">
+    <div class="pill-section-label">REGIME_GATE_STRATEGIES — which strategies the gate applies to</div>
+    <div class="pill-group">
+      {% for s in ['bb_kdj','bb_kdj_loose','orb','vwap_pb','gap_fade'] %}
+      <label class="pill">
+        <input type="checkbox" name="REGIME_GATE_STRATEGIES" value="{{ s }}"
+               {% if s in csv_set('REGIME_GATE_STRATEGIES') %}checked{% endif %}>
+        <span class="pill-label">{{ s }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- ORB settings -->
+<div class="card">
+  <div class="card-title">ORB SETTINGS</div>
+
+  <div class="pill-section">
+    <div class="pill-section-label">ORB_SHORT_SYMBOLS</div>
+    <div class="pill-group">
+      {% for sym in ['US.SPY','US.QQQ','US.IWM'] %}
+      <label class="pill">
+        <input type="checkbox" name="ORB_SHORT_SYMBOLS" value="{{ sym }}"
+               {% if sym in csv_set('ORB_SHORT_SYMBOLS') %}checked{% endif %}>
+        <span class="pill-label">{{ sym }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="num-grid" style="margin-top:14px">
+    <div class="num-field">
+      <span class="num-label">ORB_MINUTES</span>
+      <input type="number" name="ORB_MINUTES" value="{{ current.get('ORB_MINUTES','5') }}" min="1" max="60" step="1">
+    </div>
+    <div class="num-field">
+      <span class="num-label">ORB_VOL_MULT</span>
+      <input type="number" name="ORB_VOL_MULT" value="{{ current.get('ORB_VOL_MULT','1.5') }}" min="0.5" max="5" step="0.1">
+    </div>
+    <div class="num-field">
+      <span class="num-label">ORB_TARGET_MULT</span>
+      <input type="number" name="ORB_TARGET_MULT" value="{{ current.get('ORB_TARGET_MULT','1.5') }}" min="0.5" max="5" step="0.1">
+    </div>
+    <div class="num-field">
+      <span class="num-label">ORB_ENTRY_MIN_CONFIDENCE</span>
+      <input type="number" name="ORB_ENTRY_MIN_CONFIDENCE" value="{{ current.get('ORB_ENTRY_MIN_CONFIDENCE','0.50') }}" min="0" max="1" step="0.05">
+    </div>
+  </div>
+</div>
+
+<!-- VWAP PB settings -->
+<div class="card">
+  <div class="card-title">VWAP PB SETTINGS</div>
+
+  <div class="pill-section">
+    <div class="pill-section-label">VWAP_PB_SYMBOLS</div>
+    <div class="pill-group">
+      {% for sym in ['US.SPY','US.QQQ','US.IWM'] %}
+      <label class="pill">
+        <input type="checkbox" name="VWAP_PB_SYMBOLS" value="{{ sym }}"
+               {% if sym in csv_set('VWAP_PB_SYMBOLS') %}checked{% endif %}>
+        <span class="pill-label">{{ sym }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="num-grid" style="margin-top:14px">
+    <div class="num-field">
+      <span class="num-label">VWAP_PB_MAX_CROSSES</span>
+      <input type="number" name="VWAP_PB_MAX_CROSSES" value="{{ current.get('VWAP_PB_MAX_CROSSES','3') }}" min="1" max="20" step="1">
+    </div>
+    <div class="num-field">
+      <span class="num-label">VWAP_PB_STOP_MULT</span>
+      <input type="number" name="VWAP_PB_STOP_MULT" value="{{ current.get('VWAP_PB_STOP_MULT','1.5') }}" min="0.5" max="5" step="0.1">
+    </div>
+  </div>
+</div>
+
+<!-- Gap fade settings -->
+<div class="card">
+  <div class="card-title">GAP FADE SETTINGS</div>
+  <div class="num-grid" style="margin-top:4px">
+    <div class="num-field">
+      <span class="num-label">GAP_MAX_SHORT_PCT — large-gap filter threshold</span>
+      <input type="number" name="GAP_MAX_SHORT_PCT" value="{{ current.get('GAP_MAX_SHORT_PCT','0.01') }}" min="0.001" max="0.1" step="0.001">
+    </div>
+  </div>
+</div>
+
+<!-- BB+KDJ settings -->
+<div class="card">
+  <div class="card-title">BB+KDJ SETTINGS</div>
+  <div class="num-grid" style="margin-top:4px">
+    <div class="num-field">
+      <span class="num-label">MIN_SIGNAL_SCORE</span>
+      <input type="number" name="MIN_SIGNAL_SCORE" value="{{ current.get('MIN_SIGNAL_SCORE','2.0') }}" min="0" max="10" step="0.5">
+    </div>
+    <div class="num-field">
+      <span class="num-label">KDJ_WINDOW_BARS</span>
+      <input type="number" name="KDJ_WINDOW_BARS" value="{{ current.get('KDJ_WINDOW_BARS','3') }}" min="1" max="20" step="1">
+    </div>
+    <div class="num-field">
+      <span class="num-label">ATR_STOP_MULT</span>
+      <input type="number" name="ATR_STOP_MULT" value="{{ current.get('ATR_STOP_MULT','1.5') }}" min="0.5" max="5" step="0.1">
+    </div>
+  </div>
+</div>
+
+<!-- Risk / sizing -->
+<div class="card">
+  <div class="card-title">RISK / SIZING</div>
+  <div class="num-grid">
+    <div class="num-field">
+      <span class="num-label">TOTAL_CAPITAL ($)</span>
+      <input type="number" name="TOTAL_CAPITAL" value="{{ current.get('TOTAL_CAPITAL','10000') }}" min="1000" max="1000000" step="100">
+    </div>
+    <div class="num-field">
+      <span class="num-label">MAX_DAILY_LOSS ($)</span>
+      <input type="number" name="MAX_DAILY_LOSS" value="{{ current.get('MAX_DAILY_LOSS','200') }}" min="0" max="10000" step="10">
+    </div>
+    <div class="num-field">
+      <span class="num-label">MAX_POSITION_DOLLARS ($)</span>
+      <input type="number" name="MAX_POSITION_DOLLARS" value="{{ current.get('MAX_POSITION_DOLLARS','2000') }}" min="0" max="100000" step="100">
+    </div>
+    <div class="num-field">
+      <span class="num-label">MAX_TRADES_PER_DAY</span>
+      <input type="number" name="MAX_TRADES_PER_DAY" value="{{ current.get('MAX_TRADES_PER_DAY','10') }}" min="0" max="100" step="1">
+    </div>
+    <div class="num-field">
+      <span class="num-label">MAX_TRADES_PER_STRATEGY</span>
+      <input type="number" name="MAX_TRADES_PER_STRATEGY" value="{{ current.get('MAX_TRADES_PER_STRATEGY','3') }}" min="0" max="20" step="1">
+    </div>
+  </div>
+</div>
+
+<div class="save-bar">
+  <button type="submit" class="btn primary" style="padding:10px 28px">Save to .env</button>
+  <span class="muted" style="font-size:11px">Changes write to .env only — restart runner to apply.</span>
+</div>
+
+</form>
+
+<!-- ── Runner control ─────────────────────────────────────────────── -->
 <div class="card">
   <div class="card-title">RUNNER CONTROL</div>
   <form method="POST" style="display:flex;align-items:center;gap:14px">
@@ -104,47 +395,19 @@
   </form>
 </div>
 
-<!-- .env editor -->
-<form id="cfg-form" method="POST">
-  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-  <input type="hidden" name="action" value="save_config">
-
-  <div class="card">
-    <div class="card-title">RISK / SIZING</div>
-    {{ fields_numeric|safe }}
-  </div>
-
-  <div class="card">
-    <div class="card-title">STRATEGY / SYMBOL LISTS</div>
-    {{ fields_list|safe }}
-  </div>
-
-  <div class="card">
-    <div class="card-title">FLAGS (true/false)</div>
-    {{ fields_bool|safe }}
-  </div>
-
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px">
-    <button type="submit" class="btn primary" style="padding:10px 24px">Save to .env</button>
-    <span class="muted" style="font-size:11px">Writes to .env only — restart runner to apply.</span>
-  </div>
-</form>
-
-<!-- System stats -->
+<!-- ── System stats ───────────────────────────────────────────────── -->
 <div class="card">
   <div class="card-title-row">
     <span class="card-title" style="margin-bottom:0">SYSTEM STATS</span>
     <button id="stats-toggle" class="btn ok" onclick="toggleStats()">▶ Start Live Feed</button>
   </div>
   <div id="stats-body" style="display:none;margin-top:14px">
-    <!-- CPU cores -->
     <div style="margin-bottom:14px">
       <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:6px">
         CPU &nbsp;<span id="sys-load"></span>
       </div>
       <div id="sys-cores" style="display:flex;flex-wrap:wrap;gap:4px"></div>
     </div>
-    <!-- Mem / Disk / Net -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:14px">
       <div>
         <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:4px">MEMORY</div>
@@ -161,15 +424,11 @@
         <div id="sys-net" class="muted" style="font-size:12px;margin-top:4px;font-family:monospace">—</div>
       </div>
     </div>
-    <!-- Processes -->
     <div>
       <div class="muted" style="font-size:10px;letter-spacing:1px;margin-bottom:6px">TOP PROCESSES</div>
       <table class="data-table" style="font-size:12px">
         <thead>
-          <tr>
-            <th>PID</th><th>Name</th>
-            <th class="right">CPU%</th><th class="right">MEM%</th><th class="right">S</th>
-          </tr>
+          <tr><th>PID</th><th>Name</th><th class="right">CPU%</th><th class="right">MEM%</th><th class="right">S</th></tr>
         </thead>
         <tbody id="sys-procs-body"></tbody>
       </table>
@@ -177,6 +436,5 @@
   </div>
 </div>
 
-{% endif %}
 </div><!-- /page-body -->
 {% endblock %}
