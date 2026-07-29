@@ -65,6 +65,7 @@ class Config:
 
     discord_webhook_url: str = _get("DISCORD_WEBHOOK_URL", "")
     dashboard_password: str = _get("DASHBOARD_PASSWORD", "")
+    totp_secret: str = _get("TOTP_SECRET", "")
 
     # Research finding: KDJ death cross exit cuts winning mean-reversion trades early.
     # Set to false (default) to use target+stop only. Set to true to restore original behavior.

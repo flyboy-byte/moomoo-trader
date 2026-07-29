@@ -12,9 +12,17 @@
 
     <form method="POST">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      {% if use_totp %}
+      <input type="text" name="code" placeholder="6-digit code" autofocus
+             inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+             style="margin-bottom:12px;letter-spacing:4px;font-size:20px;text-align:center">
+      {% else %}
       <input type="password" name="password" placeholder="Password" autofocus
              style="margin-bottom:12px">
-      <button type="submit" class="btn primary" style="width:100%">Sign in</button>
+      {% endif %}
+      <button type="submit" class="btn primary" style="width:100%">
+        {{ 'Verify' if use_totp else 'Sign in' }}
+      </button>
     </form>
   </div>
 </div>

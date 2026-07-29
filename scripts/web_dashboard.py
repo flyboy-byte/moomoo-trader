@@ -7,7 +7,9 @@ Usage:
     python scripts/web_dashboard.py --date 2026-06-01   # review past session
 """
 import argparse
+import base64
 import hmac
+import io
 import json
 import re
 import secrets
@@ -22,6 +24,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 import psutil
+import pyotp
+import qrcode
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup, escape
 from mm import clock
@@ -122,14 +126,18 @@ _EDITABLE_KEYS = {
 }
 
 
+def _auth_configured() -> bool:
+    return bool(cfg.totp_secret or cfg.dashboard_password)
+
+
 def _require_login(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not cfg.dashboard_password:
+        if not _auth_configured():
             return f(*args, **kwargs)
         if not session.get("logged_in"):
             return redirect(url_for("login", next=request.path))
-        session.permanent = True  # extend lifetime on each authenticated request
+        session.permanent = True
         return f(*args, **kwargs)
     return decorated
 
@@ -186,8 +194,9 @@ def _kill_switch_state() -> dict[str, bool]:
 
 @app.route("/login", methods=["GET", "POST"])
 def login() -> Response | str:
-    if not cfg.dashboard_password:
+    if not _auth_configured():
         return redirect(url_for("index"))
+    use_totp = bool(cfg.totp_secret)
     error = ""
     if request.method == "POST":
         _check_csrf()
@@ -197,20 +206,42 @@ def login() -> Response | str:
             mins = (retry_after + 59) // 60
             error = f"Too many attempts. Try again in {mins} minute{'s' if mins != 1 else ''}."
             _auth_log.warning("login blocked ip=%s retry_after=%ds", ip, retry_after)
-        elif hmac.compare_digest(request.form.get("password", ""), cfg.dashboard_password):
-            session["logged_in"] = True
-            session.permanent = True
-            _login_fails.pop(ip, None)
-            _auth_log.info("login success ip=%s", ip)
-            nxt = request.args.get("next", "")
-            if not nxt.startswith("/") or nxt.startswith("//"):
-                nxt = url_for("index")
-            return redirect(nxt)
         else:
-            _login_fails.setdefault(ip, []).append(time.time())
-            _auth_log.warning("login failed ip=%s total_fails=%d", ip, len(_login_fails[ip]))
-            error = "Wrong password."
-    return render_template("login.html", error=error)
+            ok = False
+            if use_totp:
+                code = request.form.get("code", "").strip().replace(" ", "")
+                ok = pyotp.TOTP(cfg.totp_secret).verify(code, valid_window=1)
+            else:
+                ok = hmac.compare_digest(request.form.get("password", ""), cfg.dashboard_password)
+            if ok:
+                session["logged_in"] = True
+                session.permanent = True
+                _login_fails.pop(ip, None)
+                _auth_log.info("login success ip=%s", ip)
+                nxt = request.args.get("next", "")
+                if not nxt.startswith("/") or nxt.startswith("//"):
+                    nxt = url_for("index")
+                return redirect(nxt)
+            else:
+                _login_fails.setdefault(ip, []).append(time.time())
+                _auth_log.warning("login failed ip=%s total_fails=%d", ip, len(_login_fails[ip]))
+                error = "Invalid code." if use_totp else "Wrong password."
+    return render_template("login.html", error=error, use_totp=use_totp)
+
+
+@app.route("/totp-setup")
+@_require_login
+def totp_setup() -> Response | str:
+    """Shows QR code to scan into Authenticator. Only useful on first setup."""
+    if not cfg.totp_secret:
+        return "TOTP_SECRET not set in .env", 404
+    totp = pyotp.TOTP(cfg.totp_secret)
+    uri = totp.provisioning_uri(name="moomoo-trader", issuer_name="trading.flyboybyte.com")
+    img = qrcode.make(uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_b64 = base64.b64encode(buf.getvalue()).decode()
+    return render_template("totp_setup.html", qr_b64=qr_b64, secret=cfg.totp_secret)
 
 
 @app.route("/logout")
