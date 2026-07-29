@@ -597,7 +597,7 @@ def market_conditions_frag() -> str:
 def config_editor() -> Response | str:
     if not cfg.dashboard_password:
         return render_template("config.html",
-            msg="", msg_type="ok", kills={},
+            msg="", msg_type="ok", kills={}, ai_flags={},
             fields_numeric=Markup(""), fields_list=Markup(""), fields_bool=Markup(""))
     msg = ""
     msg_type = "ok"
@@ -623,6 +623,20 @@ def config_editor() -> Response | str:
             else:
                 p.write_text("stop\n")
                 msg = "STOP_SHORTS.txt created — ORB shorts disabled."
+
+        elif action == "toggle_regime_gate":
+            current_val = _read_env().get("REGIME_GATE_ENABLED", "false").lower()
+            new_val = "false" if current_val == "true" else "true"
+            _write_env_key("REGIME_GATE_ENABLED", new_val)
+            state = "enabled" if new_val == "true" else "disabled"
+            msg = f"Regime gate {state} in .env. Restart runner to apply."
+
+        elif action == "toggle_orb_scorer":
+            current_val = _read_env().get("ORB_SETUP_SCORER_ENABLED", "false").lower()
+            new_val = "false" if current_val == "true" else "true"
+            _write_env_key("ORB_SETUP_SCORER_ENABLED", new_val)
+            state = "enabled" if new_val == "true" else "disabled"
+            msg = f"ORB scorer {state} in .env. Restart runner to apply."
 
         elif action == "restart_runner":
             try:
@@ -685,8 +699,13 @@ def config_editor() -> Response | str:
     fields_list = "\n".join(_field(k) for k in list_keys)
     fields_bool = "\n".join(_field(k) for k in bool_keys)
 
+    ai_flags = {
+        "REGIME_GATE_ENABLED": current.get("REGIME_GATE_ENABLED", "false").lower() == "true",
+        "ORB_SETUP_SCORER_ENABLED": current.get("ORB_SETUP_SCORER_ENABLED", "false").lower() == "true",
+    }
+
     return render_template("config.html",
-        msg=msg, msg_type=msg_type, kills=kills,
+        msg=msg, msg_type=msg_type, kills=kills, ai_flags=ai_flags,
         fields_numeric=Markup(fields_numeric),
         fields_list=Markup(fields_list),
         fields_bool=Markup(fields_bool),

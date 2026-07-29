@@ -60,6 +60,39 @@
   </div>
 </div>
 
+<!-- AI features -->
+<div class="card">
+  <div class="card-title">AI FEATURES <span class="muted" style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">— writes .env, restart to apply</span></div>
+
+  <div class="kill-row">
+    <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="toggle_regime_gate">
+      <button type="submit" class="btn {{ 'danger' if ai_flags.REGIME_GATE_ENABLED else 'ok' }}">
+        {{ 'Disable Regime Gate' if ai_flags.REGIME_GATE_ENABLED else 'Enable Regime Gate' }}
+      </button>
+    </form>
+    <span class="kill-state" style="color:{{ 'var(--green)' if ai_flags.REGIME_GATE_ENABLED else 'var(--muted)' }}">
+      REGIME_GATE_ENABLED: {{ 'true' if ai_flags.REGIME_GATE_ENABLED else 'false' }}
+      {% if ai_flags.REGIME_GATE_ENABLED %}<span class="muted" style="font-size:10px"> · Sonnet call each morning</span>{% endif %}
+    </span>
+  </div>
+
+  <div class="kill-row">
+    <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="toggle_orb_scorer">
+      <button type="submit" class="btn {{ 'danger' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'ok' }}">
+        {{ 'Disable ORB Scorer' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'Enable ORB Scorer' }}
+      </button>
+    </form>
+    <span class="kill-state" style="color:{{ 'var(--green)' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'var(--muted)' }}">
+      ORB_SETUP_SCORER_ENABLED: {{ 'true' if ai_flags.ORB_SETUP_SCORER_ENABLED else 'false' }}
+      {% if ai_flags.ORB_SETUP_SCORER_ENABLED %}<span class="muted" style="font-size:10px"> · Sonnet call per ORB setup</span>{% endif %}
+    </span>
+  </div>
+</div>
+
 <!-- Runner control -->
 <div class="card">
   <div class="card-title">RUNNER CONTROL</div>
