@@ -103,15 +103,6 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 
 **Gate to Phase 2:** done.
 
-### Phase 2 — Validation
-
-- [ ] Anthropic API key obtained and tested (one manual call to claude-haiku-4-5)
-- [ ] `scripts/classify_regime.py` returns a valid JSON label for today's date
-- [ ] Prompt produces stable, sensible labels across a range of synthetic inputs
-      (e.g. high-VIX / low-VIX / futures-gap-up — do the labels make economic sense?)
-
-**Gate to Phase 3:** at least one successful API call with a sensible structured output.
-
 ### Phase 2 — Validation ✓
 
 - [x] Anthropic API key obtained and tested
@@ -127,7 +118,7 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 - [x] `mm/evals.py` — `_regime_gate()` helper wired into `_eval_bb_kdj` and `_eval_bb_kdj_loose`
 - [x] `scripts/classify_regime.py` — standalone runner (`--dry-run`, `--date`)
 - [x] Shadow mode running: classifies daily, never blocks entries, logs `regime_gate_shadow`
-- [x] VPS `.env` updated with `ANTHROPIC_API_KEY` + `REGIME_GATE_ENABLED=false`
+- [x] VPS `.env` updated with `ANTHROPIC_API_KEY` + `REGIME_GATE_ENABLED=true` (flipped 2026-07-26)
 - [x] VPS cron: `20 13 * * 1-5` (9:20 ET Mon–Fri)
 
 **Phase 3 additions (expanded plan — see route-2-llm-signals.md):**
@@ -136,13 +127,13 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 
 **Gate to Phase 4:** shadow mode cleanly running ≥ 5 sessions (✓) + at least one of the Phase 3 additions built.
 
-### Phase 4 — Verify
+### Phase 4 — Verify (in progress 2026-07-29)
 
-- [ ] 2-week shadow log reviewed: do regime labels correlate with actual session outcomes?
-- [ ] `REGIME_GATE_ENABLED=true` flipped after shadow period, PF trend monitored
-- [ ] `tests/test_replay.py` covers: regime=choppy → entry skipped; regime=neutral → entry fires (TODO)
-- [ ] ORB setup scorer shadow log reviewed: does confidence score correlate with trade outcome?
-- [ ] Fail-open confirmed: delete regime file, confirm no trades are blocked
+- [x] Shadow log reviewed: `validate_regime.py --from-cache` on 618 days — trending_up PF=0.513 (worst), neutral PF=0.880. Gate confirmed.
+- [x] `REGIME_GATE_ENABLED=true` flipped 2026-07-26; skip labels corrected to `trending_up,trending_down`
+- [ ] `tests/test_replay.py` covers: regime=trending_up → entry skipped; regime=neutral → entry fires (TODO)
+- [x] ORB setup scorer: mechanical calibration (N=2924 trades) — scorer features not edge drivers (OR range + timing are). Stays shadow at 0.50 threshold.
+- [ ] Gate confirmed live ≥ 10 sessions (only ~3 since 2026-07-26 flip — accumulating)
 
 **Gate to Phase 5:** gate has been live for ≥ 10 trading sessions with no blocking incidents.
 
@@ -157,7 +148,8 @@ Capture   ──►   Scoping  ──►   Validation ──►  Build   ──�
 
 ## Current status (update this line as phases advance)
 
-**Route 2 is in Phase 3 — shadow mode live on VPS since 2026-07-22. Labels have been
-`neutral` for all 3 sessions so far (VIX 16–18, no macro events). Next build: ORB setup
-scorer (per-trade Claude confidence gate) + weekly synthesis script. Route 1 not yet started —
-next action is `scripts/mine_first_bar.py`.**
+**Route 1 is in Phase 4 — mining complete (H1 null, H2 deployed VIX filter, H3 autocorr
+signal found on IWM 9:30-10:00). Phase 4 OOS walk-forward validation pending.
+Route 2 is in Phase 4 — regime gate live with corrected skip labels since 2026-07-26
+(trending_up/trending_down block ~23% of days). Accumulating live sessions toward the 10-session
+gate. ORB scorer stays shadow-mode. Next: replay test coverage + live data accumulation.**

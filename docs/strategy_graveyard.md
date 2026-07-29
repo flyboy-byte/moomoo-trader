@@ -83,6 +83,17 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 **IWM/SPY other buckets: NULL.**
 **Code:** `scripts/mine_autocorrelation.py`
 
+**Follow-up backtest — 2026-07-29 (`scripts/mine_autocorr_backtest.py`):**
+Translated the r=-0.185 signal into a direct trade: fade each bar's direction in the 9:30-10:00
+window, hold 1 bar. IS(2022-2023) PF=1.018 (near random), OOS(2024+) PF=2.550 avg_bps=+11.1.
+
+**Verdict: NOT DEPLOYABLE — signal discovered in the OOS period itself.**
+The IS r=+0.049 showed POSITIVE autocorrelation (opposite sign). The regime flipped in 2024+.
+Since we found r=-0.185 in the 2024+ data and the backtest confirms PF=2.550 in the same data,
+there is no truly held-out period to validate against. The PF=2.550 is real but it's an
+in-sample confirmation of an in-sample discovery. Monitor: if the signal persists into 2027+
+data it becomes deployable. For now, graveyard.
+
 ---
 
 ## Dead Strategies (tested, no deployable edge)
