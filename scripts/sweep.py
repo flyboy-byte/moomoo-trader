@@ -12,7 +12,9 @@ Usage:
     python scripts/sweep.py logs/US_SPY_K_5M_2026-05-30.csv
 """
 import argparse
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -40,6 +42,8 @@ def main() -> None:
                         choices=["strict", "relaxed", "bb_only", "kdj_only"])
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-trade log noise (file logs unaffected)")
+    parser.add_argument("--interpret", action="store_true",
+                        help="Pass sweep output to Haiku for a brief interpretation")
     parser.add_argument("--window", type=int, default=90,
                         help="Walk-forward window in days (default: 90)")
     args = parser.parse_args()
@@ -56,18 +60,27 @@ def main() -> None:
     df["time_key"] = pd.to_datetime(df["time_key"])
     df = df.sort_values("time_key").reset_index(drop=True)
 
-    # 1. Full-period grid search
-    sweep_parameters(df, entry_key=args.entry)
+    buf = io.StringIO() if args.interpret else None
+    out = buf if buf else sys.stdout
 
-    print()
+    with redirect_stdout(out):
+        # 1. Full-period grid search
+        sweep_parameters(df, entry_key=args.entry)
+        print()
+        # 2. Stop recovery: how many stops would have recovered?
+        analyze_stop_exits(df, lookahead_bars=48)
+        print()
+        # 3. Walk-forward ATR sweep for consistency
+        sweep_walk_forward(df, entry_key=args.entry, window_days=args.window)
 
-    # 2. Stop recovery: how many stops would have recovered?
-    analyze_stop_exits(df, lookahead_bars=48)
-
-    print()
-
-    # 3. Walk-forward ATR sweep for consistency
-    sweep_walk_forward(df, entry_key=args.entry, window_days=args.window)
+    if buf:
+        captured = buf.getvalue()
+        print(captured, end="")
+        from mm.analyst import haiku_interpret
+        print("\n--- Haiku interpretation ---")
+        print(haiku_interpret(captured,
+            "What parameter combination shows the most consistent OOS edge? "
+            "What's the key takeaway about stop sizing? Be brief."))
 
 
 if __name__ == "__main__":

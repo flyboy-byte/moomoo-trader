@@ -16,10 +16,12 @@ Sections:
     8. Daily trend     — PnL per session date with cumulative
 """
 import argparse
+import io
 import json
 import re
 import sys
 from collections import Counter, defaultdict
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -574,6 +576,8 @@ def main() -> None:
     parser.add_argument("--strategy", help="Filter to one strategy, e.g. vwap_pb")
     parser.add_argument("--dir", dest="logs_dir", metavar="PATH",
                         help="Log directory (default: logs/). Use replay_out/ for replay data.")
+    parser.add_argument("--interpret", action="store_true",
+                        help="Pass P&L breakdown to Haiku for a brief interpretation")
     args = parser.parse_args()
 
     # Default to --all when no date specified
@@ -616,17 +620,28 @@ def main() -> None:
     if args.strategy:
         trades = [t for t in trades if t["strategy"] == args.strategy]
 
-    _overview(trades)
-    _per_strategy(trades)
-    _time_of_day(trades)
-    _exit_reasons(trades)
-    _vwap_pb_deep_dive(trades, records)
-    _orb_filters(records)
-    _bb_kdj_signals(records)
-    _bb_kdj_cross_age(trades)
-    _daily_trend(trades)
-    _concurrency(trades)
-    print()
+    buf = io.StringIO() if args.interpret else None
+    with redirect_stdout(buf if buf else sys.stdout):
+        _overview(trades)
+        _per_strategy(trades)
+        _time_of_day(trades)
+        _exit_reasons(trades)
+        _vwap_pb_deep_dive(trades, records)
+        _orb_filters(records)
+        _bb_kdj_signals(records)
+        _bb_kdj_cross_age(trades)
+        _daily_trend(trades)
+        _concurrency(trades)
+        print()
+
+    if buf:
+        captured = buf.getvalue()
+        print(captured, end="")
+        from mm.analyst import haiku_interpret
+        print("\n--- Haiku interpretation ---")
+        print(haiku_interpret(captured,
+            "What patterns stand out in the losing trades by strategy, hour, or exit reason? "
+            "Which strategy or time bucket looks most problematic? Be brief."))
 
 
 if __name__ == "__main__":

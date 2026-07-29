@@ -8,7 +8,9 @@ Usage:
     python scripts/multi_backtest.py --ktype K_5M             # filter by ktype
 """
 import argparse
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -182,6 +184,8 @@ def main() -> None:
                         help="Save trade log to logs/trades_<ktype>_<date>.csv")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress per-trade log noise (file logs unaffected)")
+    parser.add_argument("--interpret", action="store_true",
+                        help="Pass backtest output to Haiku for a brief interpretation")
     args = parser.parse_args()
 
     if args.quiet:
@@ -226,31 +230,43 @@ def main() -> None:
         print("No data loaded.")
         sys.exit(1)
 
-    print(f"\n=== Multi-symbol backtest ({len(paths)} symbols) ===\n")
-    _print_table(rows)
+    buf = io.StringIO() if args.interpret else None
+    out = buf if buf else sys.stdout
 
-    if len(rows) > 1 and all_trades:
-        combined = _combined_row(all_trades)
-        print()
-        _print_table([combined])
+    with redirect_stdout(out):
+        print(f"\n=== Multi-symbol backtest ({len(paths)} symbols) ===\n")
+        _print_table(rows)
 
-    # exit breakdown per symbol
-    if all_trades:
-        print()
-        reasons: dict[str, int] = {}
-        for t in all_trades:
-            reasons[t.exit_reason] = reasons.get(t.exit_reason, 0) + 1
-        total = len(all_trades)
-        print("Exit breakdown (all symbols combined):")
-        for reason, count in sorted(reasons.items(), key=lambda x: -x[1]):
-            print(f"  {reason:<24} {count:>3}  ({count/total*100:.0f}%)")
+        if len(rows) > 1 and all_trades:
+            combined = _combined_row(all_trades)
+            print()
+            _print_table([combined])
 
-    if args.save_trades and all_trades:
-        out = _save_trades(all_trades, paths)
-        print(f"\nTrade log saved: {out}  ({len(all_trades)} trades)")
+        if all_trades:
+            print()
+            reasons: dict[str, int] = {}
+            for t in all_trades:
+                reasons[t.exit_reason] = reasons.get(t.exit_reason, 0) + 1
+            total = len(all_trades)
+            print("Exit breakdown (all symbols combined):")
+            for reason, count in sorted(reasons.items(), key=lambda x: -x[1]):
+                print(f"  {reason:<24} {count:>3}  ({count/total*100:.0f}%)")
 
-    if args.sweep and combined_df_parts:
-        _sweep_multi(combined_df_parts, paths, window_days=args.window)
+        if args.save_trades and all_trades:
+            out_path = _save_trades(all_trades, paths)
+            print(f"\nTrade log saved: {out_path}  ({len(all_trades)} trades)")
+
+        if args.sweep and combined_df_parts:
+            _sweep_multi(combined_df_parts, paths, window_days=args.window)
+
+    if buf:
+        captured = buf.getvalue()
+        print(captured, end="")
+        from mm.analyst import haiku_interpret
+        print("\n--- Haiku interpretation ---")
+        print(haiku_interpret(captured,
+            "Which symbol shows the strongest edge and why? "
+            "Flag any inconsistencies across symbols. Be brief."))
 
 
 if __name__ == "__main__":
