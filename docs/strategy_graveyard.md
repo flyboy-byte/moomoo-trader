@@ -746,3 +746,52 @@ analyze_orb_hours.py logs/) — if live matches the 2026 replay pattern rather t
 | ORB window IWM | 30-min | 15/30-min | 15-min PF=1.017 → 30-min PF=1.217 |
 | ORB_SHORT_SYMBOLS | US.SPY | all vs per-symbol | Live data 2026-06-17→2026-07-09: QQQ shorts 0% win/24 trades (−$80), IWM shorts 0% win/12 trades (−$40), SPY shorts 100% win/20 trades (+$36). QQQ+IWM disabled. |
 | mm/vwap_strategy.py + mm/vwap_signals.py | Candidate for removal | Still imported by mm/paper.py and mm/evals.py for the deprecated 'vwap' strategy path. No live STRATEGIES entry uses them. Safe to delete once the import sites are cleaned up. |
+
+## Filter Tightness Review — 2026-07-31
+
+Flags raised after a 2-day audit (Jul 30–31) showed only 3 trades fired and several
+active filters visibly blocking. This section documents which filters might be over-tight
+and what evidence would justify loosening each. Nothing changed without data.
+
+### GAP_VIX_MAX for SPY/QQQ — possibly too tight at 20
+
+**Current:** `GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20`. Jul 30 VIX=20.66 blocked both symbols.
+**Concern:** The H2 backtest showed VIX 20-25 hurts gap fades on SPY/QQQ, but the threshold
+boundary at exactly 20 is arbitrary. VIX=20.5 and VIX=24 are very different environments.
+**IWM has no cap** (confirmed positive at all VIX bands in research) — so the asymmetry is intentional.
+**Gate to loosen:** Re-run `scripts/backtest_gap_fade.py --all` with SPY/QQQ split at VIX 20/21/22
+and check OOS PF at each boundary. If VIX 20-21 band shows OOS PF ≥ 0.9, bump to 21. Current
+data too thin to justify moving without a backtest check first (2 live gap-fade longs only).
+
+### ORB scorer (orb_claude_score) at 0.50 — blocking real trades without validation
+
+**Current:** `ORB_ENTRY_MIN_CONFIDENCE=0.50`. Supposed to be "shadow mode never blocks", but
+Sonnet returns scores below 0.50 on some setups — 228 blocks since Jun 10, 89 blocks in just
+Jul 30–31. No outcome data on what those blocked setups would have done.
+**Concern:** The Haiku calibration that set 0.50 is useless (Haiku flat 0.72 on everything).
+The Sonnet re-calibration was parked at ~$3–5 cost. We're blocking real setups against a
+threshold we haven't validated with the live model.
+**Gate to loosen:** Either run the Sonnet re-calibration (`calibrate_orb_scorer.py --model sonnet
+--quiet`, ~$3) and set the threshold from real data, or temporarily set `ORB_ENTRY_MIN_CONFIDENCE=0.0`
+to stop blocking until calibration is done. The scorer can stay live in shadow/log-only mode.
+
+### bb_kdj trade frequency — 3 trades in 7+ weeks
+
+**Current:** bb_kdj strict (ADX<25 + bonus≥2 + MIN_SIGNAL_SCORE=2 + KDJ window + regime gate).
+**Observation:** bb_kdj_loose (same signal, no bonus/score gate) fired 5 trades in the same window
+at PF=1.50. The strict variant at PF=0.97 and 3 trades suggests the bonus/score gate is filtering
+out more edge than it's protecting. This isn't a new filter to relax — it's a flag that bb_kdj_loose
+may be the better strategy at current sample sizes.
+**Gate:** At 20+ bb_kdj_loose trades, compare PF and win% vs bb_kdj strict. If loose consistently
+outperforms, consider retiring the strict gating or merging the strategies.
+
+### ORB vol filter (ORB_VOL_MULT) — 88% block rate but ORB is still PF=0.78
+
+**Current:** SPY vol_mult=2.0, others=1.5. 15,722 skips since Jun 10.
+**Observation:** The filter was backtest-optimized (OOS: SPY 2.0× PF 1.156→1.300). But ORB is
+live PF=0.78 at 41 trades, dragging the whole portfolio. Heavy filtering hasn't fixed the problem.
+The late-entry structural issue (afternoon entries PF=0.49) is the real drag, not volume.
+**Note:** Loosening vol_mult is NOT the right call — it would add more low-quality setups on top
+of an already-losing strategy. The note is here to flag that 88% block rate + PF=0.78 is not a
+contradiction: the strategy has structural problems that vol filtering can't fix. The right lever
+is `ORB_LATEST_ENTRY` (parked, needs 50+ trades per timing bucket).
