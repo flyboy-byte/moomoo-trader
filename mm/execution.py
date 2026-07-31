@@ -241,9 +241,10 @@ def _place_short(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
         log.error("Order refused (market closed): SELL_SHORT %s", symbol)
         return ""
     price = round(price, 2)
+    # SIMULATE account requires TrdSide.SELL to open a short (SELL_SHORT rejected).
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
-        trd_side=TrdSide.SELL_SHORT, order_type=OrderType.NORMAL,
+        trd_side=TrdSide.SELL, order_type=OrderType.NORMAL,
         trd_env=TrdEnv.SIMULATE, acc_id=acc_id,
     )
     if ret == RET_OK:
@@ -259,9 +260,10 @@ def _place_cover(ctx, acc_id: int, symbol: str, price: float, qty: int) -> str:
         log.error("Order refused (market closed): BUY_BACK %s", symbol)
         return ""
     price = round(price, 2)
+    # SIMULATE account requires TrdSide.BUY to cover a short (BUY_BACK rejected).
     ret, data = ctx.place_order(
         price=price, qty=qty, code=symbol,
-        trd_side=TrdSide.BUY_BACK, order_type=OrderType.NORMAL,
+        trd_side=TrdSide.BUY, order_type=OrderType.NORMAL,
         trd_env=TrdEnv.SIMULATE, acc_id=acc_id,
     )
     if ret == RET_OK:
