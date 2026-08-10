@@ -7,6 +7,7 @@ absent (e.g. fresh clone without logs/).
 """
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -133,3 +134,64 @@ class TestFakeBroker:
 def test_symbol_from_csv():
     assert symbol_from_csv(Path("logs/US_SPY_K_5M_combined.csv")) == "US.SPY"
     assert symbol_from_csv(Path("US_IWM_K_15M_2026-05-31.csv")) == "US.IWM"
+
+
+# ---------------------------------------------------------------------------
+# Regime gate end-to-end: verify wiring through the full replay pipeline
+# IWM 2024-01-02→10 is a known bb_kdj trade window (1 trade fires naturally)
+# ---------------------------------------------------------------------------
+
+CSV_IWM = Path("logs/US_IWM_K_5M_combined.csv")
+BB_STRATS = ["bb_kdj", "bb_kdj_loose"]
+REGIME_START, REGIME_END = "2024-01-02", "2024-01-10"
+
+
+def _regime_replay(tmp_path, regime_label, monkeypatch):
+    import mm.config as _config
+    from mm.morning_regime import clear_regime_cache
+    clear_regime_cache()
+    monkeypatch.setattr(_config.cfg, "regime_gate_enabled", True)
+    monkeypatch.setattr(_config.cfg, "regime_gate_strategies", BB_STRATS)
+    monkeypatch.setattr(_config.cfg, "regime_skip_labels", ["trending_up", "trending_down"])
+    with patch("mm.evals.load_regime_today", return_value=regime_label):
+        stats = replay(
+            [CSV_IWM], BB_STRATS,
+            start=REGIME_START, end=REGIME_END,
+            fill_mode="touch", out_dir=tmp_path / "out", quiet=True,
+        )
+    events = [
+        json.loads(line)
+        for f in (tmp_path / "out").glob("paper_*.jsonl")
+        for line in f.read_text().splitlines()
+    ]
+    clear_regime_cache()
+    return stats, events
+
+
+@pytest.mark.skipif(not CSV_IWM.exists(), reason="IWM candle CSV not on disk")
+def test_trending_up_blocks_bb_kdj_entries(tmp_path, monkeypatch):
+    """regime=trending_up (live skip label) must suppress all bb_kdj entries end-to-end."""
+    stats, events = _regime_replay(tmp_path, "trending_up", monkeypatch)
+
+    assert stats["opens"] == 0, "no entries should open when regime is a skip label"
+
+    regime_skips = [
+        e for e in events
+        if e.get("event") == "signal_skip" and e.get("reason") == "regime_gate"
+    ]
+    assert len(regime_skips) > 0, "regime_gate signal_skip events must be logged"
+
+
+@pytest.mark.skipif(not CSV_IWM.exists(), reason="IWM candle CSV not on disk")
+def test_neutral_regime_does_not_block_bb_kdj(tmp_path, monkeypatch):
+    """regime=neutral must not emit any regime_gate skips — gate should be transparent."""
+    stats, events = _regime_replay(tmp_path, "neutral", monkeypatch)
+
+    regime_skips = [
+        e for e in events
+        if e.get("event") == "signal_skip" and e.get("reason") == "regime_gate"
+    ]
+    assert len(regime_skips) == 0, "neutral regime must never produce regime_gate skips"
+
+    # The window is known to produce at least one bb_kdj trade when unblocked
+    assert stats["opens"] >= 1, "neutral regime should allow entries in this known-trade window"
