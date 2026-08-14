@@ -765,7 +765,11 @@ data too thin to justify moving without a backtest check first (2 live gap-fade 
 
 ### ORB scorer (orb_claude_score) at 0.50 — blocking real trades without validation
 
-**Current:** `ORB_ENTRY_MIN_CONFIDENCE=0.50`. Supposed to be "shadow mode never blocks", but
+**RESOLVED 2026-08-14:** `ORB_ENTRY_MIN_CONFIDENCE=0.0` — scorer gate disabled. Features (VIX,
+regime, direction) don't discriminate outcomes; mechanical analysis confirmed OR range + entry timing
+are the real edge drivers. Scorer still logs confidence for research but never blocks.
+
+**Prior state:** `ORB_ENTRY_MIN_CONFIDENCE=0.50`. Was supposed to be "shadow mode never blocks", but
 Sonnet returns scores below 0.50 on some setups — 228 blocks since Jun 10, 89 blocks in just
 Jul 30–31. No outcome data on what those blocked setups would have done.
 **Concern:** The Haiku calibration that set 0.50 is useless (Haiku flat 0.72 on everything).
@@ -794,4 +798,5 @@ The late-entry structural issue (afternoon entries PF=0.49) is the real drag, no
 **Note:** Loosening vol_mult is NOT the right call — it would add more low-quality setups on top
 of an already-losing strategy. The note is here to flag that 88% block rate + PF=0.78 is not a
 contradiction: the strategy has structural problems that vol filtering can't fix. The right lever
-is `ORB_LATEST_ENTRY` (parked, needs 50+ trades per timing bucket).
+is `ORB_LATEST_ENTRY=12:30` — **activated 2026-08-14** (executive decision: live data consistently
+shows afternoon entries are drag; backtest IS/OOS inconsistency noted but overruled).
