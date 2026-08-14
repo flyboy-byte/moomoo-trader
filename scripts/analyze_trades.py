@@ -6,14 +6,19 @@ Usage:
 Default: all available log dates.
 
 Sections:
-    1. Overview        — total trades, win rate, PnL across all strategies
-    2. Per-strategy    — trades/wins/losses/PF/avg hold per strategy
-    3. Time-of-day     — entry hour (ET) → trades, win rate, avg PnL
-    4. Exit reasons    — breakdown by strategy and reason
-    5. VWAP PB         — cross_count and entry hour on wins vs losses
-    6. ORB filters     — vol_fail / before_cutoff / other skip rates
-    7. BB+KDJ signals  — bonus≥2 bar composition, why no entry
-    8. Daily trend     — PnL per session date with cumulative
+    1.  Overview          — total trades, win rate, PnL across all strategies
+    2.  Per-strategy      — trades/wins/losses/PF/avg hold per strategy
+    3.  Time-of-day       — entry hour (ET) → trades, win rate, avg PnL
+    4.  Exit reasons      — breakdown by strategy and reason
+    5.  VWAP PB           — cross_count and entry hour on wins vs losses
+    5b. Gap Fade          — direction/symbol/exit breakdown + skip attribution
+    6.  ORB filters       — vol_fail / too_late / before_cutoff / scorer skip rates
+    7.  BB+KDJ signals    — bonus≥2 bar composition, why no entry
+    7b. BB+KDJ cross-age  — w=0 purity vs window dilution
+    8.  Regime gate       — days gated, label distribution, bars blocked per strategy
+    9.  Gate attribution  — all signal_skip + risk_block counts per strategy
+    10. Daily trend       — PnL per session date with cumulative
+    11. Concurrent exposure
 """
 import argparse
 import io
@@ -334,6 +339,181 @@ def _vwap_pb_deep_dive(trades: list[dict], records: list[dict]) -> None:
         print(f"  cross_count on losses: {sorted(loss_crosses)}")
 
 
+def _gap_fade_deep_dive(trades: list[dict], records: list[dict]) -> None:
+    section("5b. GAP FADE DEEP-DIVE")
+    gf_trades = [t for t in trades if t["strategy"] == "gap_fade" and t["closed"]]
+    gf_skips = [r for r in records if r.get("event") == "signal_skip" and r.get("strategy") == "gap_fade"]
+
+    if not gf_trades and not gf_skips:
+        print("  No gap_fade activity.")
+        return
+
+    longs = [t for t in gf_trades if t["direction"] == "long"]
+    shorts = [t for t in gf_trades if t["direction"] == "short"]
+    wins = [t for t in gf_trades if t["win"]]
+    print(f"  Total: {len(gf_trades)} trades  {len(wins)}W / {len(gf_trades)-len(wins)}L")
+    print()
+
+    # Direction breakdown
+    print("  Direction:")
+    for label, ts in [("long  (gap-down fade)", longs), ("short (gap-up fade) ", shorts)]:
+        if not ts:
+            print(f"    {label}  0 trades")
+            continue
+        w = sum(1 for t in ts if t["win"])
+        pnl = sum(t["pnl"] for t in ts if t["pnl"] is not None)
+        gw = sum(t["pnl"] for t in ts if t["pnl"] and t["pnl"] > 0)
+        gl = abs(sum(t["pnl"] for t in ts if t["pnl"] and t["pnl"] < 0))
+        pf_str = f"{gw/gl:.2f}" if gl > 0 else "∞" if gw > 0 else "—"
+        print(f"    {label}  {len(ts):>2} trades  {w}/{len(ts)} wins  PF={pf_str}  PnL={pnl:+.2f}")
+
+    # Symbol breakdown
+    print()
+    print("  Symbol:")
+    by_sym: dict[str, list] = defaultdict(list)
+    for t in gf_trades:
+        by_sym[t["symbol"]].append(t)
+    for sym in sorted(by_sym):
+        ts = by_sym[sym]
+        w = sum(1 for t in ts if t["win"])
+        pnl = sum(t["pnl"] for t in ts if t["pnl"] is not None)
+        dirs = Counter(t["direction"] for t in ts)
+        dir_str = " ".join(f"{d[0].upper()}{n}" for d, n in sorted(dirs.items()))
+        print(f"    {sym:<8}  {len(ts):>2} trades  {w}/{len(ts)} wins  PnL={pnl:+.2f}  [{dir_str}]")
+
+    # Exit reason per direction
+    print()
+    print("  Exit reasons:")
+    for dir_label, ts in [("long", longs), ("short", shorts)]:
+        if not ts:
+            continue
+        by_reason: Counter = Counter(t["reason"] for t in ts if t["reason"])
+        for reason, count in sorted(by_reason.items(), key=lambda x: -x[1]):
+            sub = [t for t in ts if t["reason"] == reason]
+            pnl = sum(t["pnl"] for t in sub if t["pnl"] is not None)
+            print(f"    [{dir_label}] {reason:<12} ×{count}  pnl={pnl:+.2f}")
+
+    # Enrich trades with gap_pct from position_open events
+    open_events = {
+        (r.get("symbol"), r.get("ts")): r
+        for r in records
+        if r.get("event") == "position_open" and r.get("strategy") == "gap_fade"
+    }
+    for t in gf_trades:
+        ev = open_events.get((t["symbol"], t["open_ts"]), {})
+        t["gap_pct"] = ev.get("gap_pct")
+        t["vix_at_entry"] = ev.get("vix_at_entry")
+
+    # Gap size bucket breakdown (if gap_pct logged)
+    tagged_gap = [t for t in gf_trades if t.get("gap_pct") is not None]
+    if tagged_gap:
+        print()
+        print("  Gap size buckets:")
+        buckets = [("0.3–0.6%", 0.3, 0.6), ("0.6–1.0%", 0.6, 1.0), (">1.0%", 1.0, 99)]
+        for label, lo, hi in buckets:
+            sub = [t for t in tagged_gap if lo <= abs(t["gap_pct"]) < hi]
+            if not sub:
+                continue
+            w = sum(1 for t in sub if t["win"])
+            pnl = sum(t["pnl"] for t in sub if t["pnl"] is not None)
+            gw = sum(t["pnl"] for t in sub if t["pnl"] and t["pnl"] > 0)
+            gl = abs(sum(t["pnl"] for t in sub if t["pnl"] and t["pnl"] < 0))
+            pf_str = f"{gw/gl:.2f}" if gl > 0 else "∞" if gw > 0 else "—"
+            print(f"    {label:<12}  {len(sub):>2} trades  {w}/{len(sub)} wins  PF={pf_str}  PnL={pnl:+.2f}")
+
+    # Individual trades
+    print()
+    print("  Trade log:")
+    for t in sorted(gf_trades, key=lambda x: x["open_ts"]):
+        gap_str = f"  gap={t['gap_pct']:+.2f}%" if t.get("gap_pct") is not None else ""
+        vix_str = f"  VIX={t['vix_at_entry']:.1f}" if t.get("vix_at_entry") else ""
+        print(f"    {'WIN ' if t['win'] else 'LOSS'}  {t['symbol']:<8}  {t['direction']:<5}  "
+              f"{t['open_et'].strftime('%Y-%m-%d %H:%M')}  "
+              f"entry={t['entry']:.2f}  pnl={t['pnl']:+.2f}  {t['reason']}{gap_str}{vix_str}")
+
+    # Skip reason breakdown
+    if gf_skips:
+        print()
+        skip_by_reason: Counter = Counter(r.get("reason", "?") for r in gf_skips)
+        total_skips = sum(skip_by_reason.values())
+        print(f"  Skip reasons ({total_skips} total across {len({r['ts'][:10] for r in gf_skips})} sessions):")
+        for reason, count in sorted(skip_by_reason.items(), key=lambda x: -x[1]):
+            print(f"    {reason:<30} ×{count:>5}  ({100*count/total_skips:.1f}%)")
+
+
+def _regime_gate_summary(records: list[dict], logs_dir: Path) -> None:
+    section("8. REGIME GATE SUMMARY  (signal_skip reason=regime_gate)")
+    dates = sorted({r.get("ts", "")[:10] for r in records if r.get("ts") and r.get("ts")[:10] >= "2020"})
+    if not dates:
+        print("  No dated records.")
+        return
+
+    # Load regime label for each session date
+    regime_by_date: dict[str, str] = {}
+    for date in dates:
+        f = logs_dir / f"regime_{date}.json"
+        if f.exists():
+            try:
+                regime_by_date[date] = json.loads(f.read_text()).get("regime", "unknown")
+            except Exception:
+                regime_by_date[date] = "parse_error"
+        else:
+            regime_by_date[date] = "no_file"
+
+    gate_skips = [r for r in records if r.get("event") == "signal_skip" and r.get("reason") == "regime_gate"]
+    shadow_skips = [r for r in records if r.get("event") == "signal_skip"
+                    and "shadow" in (r.get("reason") or "")]
+
+    days_blocked = len({r.get("ts", "")[:10] for r in gate_skips})
+    label_counts: Counter = Counter(regime_by_date.values())
+    blocked_labels = {r.get("regime") for r in gate_skips if r.get("regime")}
+
+    print(f"  Sessions loaded: {len(dates)}")
+    print()
+    print("  Label distribution:")
+    for label, count in sorted(label_counts.items(), key=lambda x: -x[1]):
+        flag = "← blocked" if label in blocked_labels else ""
+        pct = 100 * count / len(dates)
+        print(f"    {label:<16} {count:>3} days  ({pct:.0f}%)  {flag}")
+
+    print()
+    print(f"  Gate fired:    {days_blocked}/{len(dates)} days")
+    print(f"  Bars blocked:  {len(gate_skips)}")
+    if shadow_skips:
+        print(f"  Shadow events: {len(shadow_skips)}  (gate_enabled=false days)")
+
+    by_strat: Counter = Counter(r.get("strategy", "?") for r in gate_skips)
+    if by_strat:
+        print()
+        print("  Blocked bars by strategy:")
+        for strat, count in sorted(by_strat.items(), key=lambda x: -x[1]):
+            print(f"    {strat:<16} {count:>5} bars")
+
+
+def _gate_attribution(records: list[dict]) -> None:
+    section("9. GATE ATTRIBUTION  (all signal_skip + risk_block per strategy)")
+    all_skips = [r for r in records if r.get("event") in ("signal_skip", "risk_block")]
+    if not all_skips:
+        print("  No skip or block events found.")
+        return
+
+    by_strat: dict[str, Counter] = defaultdict(Counter)
+    for r in all_skips:
+        strat = r.get("strategy") or "unknown"
+        reason = r.get("reason") or r.get("event", "?")
+        by_strat[strat][reason] += 1
+
+    for strat in sorted(by_strat):
+        counts = by_strat[strat]
+        total = sum(counts.values())
+        print(f"  [{strat}]  {total:,} total")
+        for reason, count in sorted(counts.items(), key=lambda x: -x[1]):
+            pct = 100 * count / total
+            bar = "█" * int(pct / 5)
+            print(f"    {reason:<35} ×{count:>6}  {pct:>5.1f}%  {bar}")
+        print()
+
+
 def _orb_filters(records: list[dict]) -> None:
     section("6. ORB FILTER STATS  (signal_skip events)")
     orb_skips = [r for r in records if r.get("event") == "signal_skip" and r.get("strategy") == "orb"]
@@ -355,10 +535,11 @@ def _orb_filters(records: list[dict]) -> None:
 
     if len(by_date) > 1:
         print()
-        print(f"  {'Date':<12} {'vol_fail':>9} {'cutoff':>8} {'shorts_ks':>10}")
+        print(f"  {'Date':<12} {'vol_fail':>9} {'too_late':>9} {'cutoff':>8} {'scorer':>7} {'shorts_ks':>10}")
         for d in sorted(by_date):
             c = by_date[d]
-            print(f"  {d:<12} {c.get('orb_vol_fail',0):>9} {c.get('orb_before_cutoff',0):>8} "
+            print(f"  {d:<12} {c.get('orb_vol_fail',0):>9} {c.get('orb_too_late',0):>9} "
+                  f"{c.get('orb_before_cutoff',0):>8} {c.get('orb_claude_score',0):>7} "
                   f"{c.get('orb_shorts_kill_switch',0):>10}")
 
 
@@ -505,7 +686,7 @@ def _bb_kdj_cross_age(trades: list[dict]) -> None:
 
 
 def _concurrency(trades: list[dict]) -> None:
-    section("9. CONCURRENT EXPOSURE  (live sessions)")
+    section("11. CONCURRENT EXPOSURE  (live sessions)")
     closed = [t for t in trades if t["closed"]]
     if not closed:
         print("  No closed trades.")
@@ -540,7 +721,7 @@ def _concurrency(trades: list[dict]) -> None:
 
 
 def _daily_trend(trades: list[dict]) -> None:
-    section("8. DAILY PnL TREND")
+    section("10. DAILY PnL TREND")
     closed = [t for t in trades if t["closed"] and t["pnl"] is not None]
     if not closed:
         print("  No closed trades.")
@@ -627,9 +808,12 @@ def main() -> None:
         _time_of_day(trades)
         _exit_reasons(trades)
         _vwap_pb_deep_dive(trades, records)
+        _gap_fade_deep_dive(trades, records)
         _orb_filters(records)
         _bb_kdj_signals(records)
         _bb_kdj_cross_age(trades)
+        _regime_gate_summary(records, logs_dir)
+        _gate_attribution(records)
         _daily_trend(trades)
         _concurrency(trades)
         print()

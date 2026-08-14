@@ -977,7 +977,8 @@ def _eval_gap_fade(
             )
             _save_position(position)
             elog.position_open(fill_price, stop, fill_qty, strategy="gap_fade",
-                               direction=direction, intended_price=close)
+                               direction=direction, intended_price=close,
+                               gap_pct=round(gap_pct * 100, 3))
             notify_entry(symbol, fill_price, stop)
             log.info("%-8s [gap_fade] OPEN  [%s]  entry=%.4f stop=%.4f target=%.4f qty=%s  gap=%+.3f%%",
                      symbol, direction, fill_price, stop, target, fill_qty, gap_pct * 100)
