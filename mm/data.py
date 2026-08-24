@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from moomoo import RET_OK, KLType, AuType, KL_FIELD
 
-from .config import cfg
+from . import config as _config
 from .connection import quote_context
 from .logger import get_logger
 
@@ -30,6 +30,7 @@ def fetch_candles(
     max_count: int = 1000,
     extended_time: bool = False,
 ) -> pd.DataFrame:
+    cfg = _config.cfg
     symbol = symbol or cfg.symbol
     ktype_str = ktype or cfg.candle_ktype
     ktype_val = _KTYPE_MAP.get(ktype_str, KLType.K_5M)
@@ -80,6 +81,7 @@ def fetch_candles(
 
 
 def save_candles(df: pd.DataFrame, symbol: str, ktype: str, extended_time: bool = False) -> Path:
+    cfg = _config.cfg
     cfg.logs_dir.mkdir(exist_ok=True)
     safe_symbol = symbol.replace(".", "_")
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -99,6 +101,7 @@ def update_combined_csv(
     """Merge df_new into a running, non-date-stamped combined archive CSV,
     deduping on time_key (keep="last" — Moomoo may revise a bar after a
     provisional fetch). Creates the file if it doesn't exist yet."""
+    cfg = _config.cfg
     cfg.logs_dir.mkdir(exist_ok=True)
     safe_symbol = symbol.replace(".", "_")
     suffix = "_EXT" if extended_time else ""
@@ -142,6 +145,7 @@ def fetch_and_save(
     end: str | None = None,
     extended_time: bool = False,
 ) -> Path | None:
+    cfg = _config.cfg
     symbol = symbol or cfg.symbol
     ktype = ktype or cfg.candle_ktype
     df = fetch_candles(symbol=symbol, ktype=ktype, start=start, end=end, extended_time=extended_time)

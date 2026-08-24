@@ -58,7 +58,7 @@ logs/*.jsonl  ──  structured events: bar_eval, signal_skip, risk_block,
     └──► scripts/compare_paper_vs_backtest.py  ──  BB+KDJ signal engine agreement check
 ```
 
-## Active Strategies (VPS, as of 2026-07-29)
+## Active Strategies (VPS, config verified against live `.env` 2026-08-24)
 
 | Strategy      | Entry condition                          | Exit                         | Symbols        |
 |---------------|------------------------------------------|------------------------------|----------------|
@@ -95,9 +95,12 @@ GAP_VIX_MAX_OVERRIDES=US.SPY:20,US.QQQ:20  # VIX>=20 negative OOS for SPY+QQQ
 GAP_MAX_SHORT_PCT=0.01          # gap-up short filter threshold (1%)
 GAP_LARGE_SHORT_FILTER_ENABLED=true  # blocks gap-up shorts >1% — IS/OOS confirmed bad edge
 VWAP_PB_SYMBOLS=US.SPY,US.QQQ,US.IWM
-TOTAL_CAPITAL=100               # total bankroll; divided across symbol×strategy slots
-FRACTIONAL_SHARES=true
-MAX_POSITION_DOLLARS=900        # fallback if TOTAL_CAPITAL not set
+VWAP_PB_MAX_CROSSES=1           # no-chop filter; critical to the PB edge
+VWAP_PB_STOP_MULT=1.0
+VWAP_PB_MIN_ENTRY_TIME=10:00    # not set in VPS .env — code default in mm/config.py is 10:00
+TOTAL_CAPITAL=0                 # 0 = disabled; sizing falls through to MAX_POSITION_DOLLARS
+FRACTIONAL_SHARES=false         # → min 1 whole share, so 1 SPY ≈ $766 notional regardless of TOTAL_CAPITAL
+MAX_POSITION_DOLLARS=900        # the ACTIVE sizing path, since TOTAL_CAPITAL=0
 TRD_ENV=SIMULATE                # NEVER change to REAL
 LIVE_TRADING_ENABLED=false      # NEVER change to true
 ANTHROPIC_API_KEY=              # in .env only, never committed
@@ -117,7 +120,9 @@ REGIME_SKIP_LABELS=trending_up,trending_down  # flipped 2026-07-26 (choppy PF=0.
 ## Test & Verify Commands
 
 ```bash
-python -m pytest tests/ -q                           # 234 unit tests (3 pre-existing test_data.py failures)
+python -m pytest tests/ -q                           # 255 unit tests, all passing
+                                                     # (the 3 long-standing test_data.py failures were a real
+                                                     #  bug, fixed 2026-08-24 — see graveyard "Stale cfg in mm/data.py")
 python scripts/diagnose_logs.py --date YYYY-MM-DD    # session health check
 python scripts/compare_paper_vs_backtest.py logs/paper_US_SPY_YYYY-MM-DD.jsonl
 ./scripts/verify.sh                                  # all-in-one session verify

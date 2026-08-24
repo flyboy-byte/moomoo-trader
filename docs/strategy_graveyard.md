@@ -135,8 +135,8 @@ data it becomes deployable. For now, graveyard.
 | BB+KDJ mean reversion | `mm/strategy.py`, `mm/evals.py` | MIN_SCORE=2. PF=1.843 is the w=0 baseline (60 trades); live deployed config (SPY w=0, QQQ/IWM w=3) is PF=1.195 combined, 434 trades — see "KDJ Day-Boundary Signal Leak" below for the corrected w=3 numbers. |
 | BB+KDJ Loose | `mm/evals.py` (`_eval_bb_kdj_loose`) | Research lane. No bonus gate, no ADX filter. Live 2026-07-04. Tests: `tests/test_bb_kdj_loose.py`. |
 | ORB long + short (SPY only) | `mm/orb_strategy.py`, `mm/evals.py` | 30-min IWM, 15-min SPY/QQQ. Shorts SPY-only as of 2026-07-09 (see ORB Short config entry below). |
-| VWAP Pullback | `mm/vwap_pullback.py`, `mm/evals.py` | SPY/QQQ only. PF=1.655 SPY, 1.072 QQQ OOS. |
-| Fractional sizing | `mm/risk.py` (_qty, _slot_dollars) | TOTAL_CAPITAL / (symbols × strategies) per slot |
+| VWAP Pullback | `mm/vwap_pullback.py`, `mm/evals.py` | All three symbols (IWM added 2026-07-12). Backtest OOS PF=1.655 SPY, 1.072 QQQ, 1.332 IWM. Live SPY has diverged badly — see "VWAP PB on SPY has no right tail" under On Hold. |
+| Fractional sizing | `mm/risk.py` (_qty, _slot_dollars) | TOTAL_CAPITAL / (symbols × strategies) per slot. **Not currently active** — VPS runs TOTAL_CAPITAL=0 + FRACTIONAL_SHARES=false, so sizing falls through to MAX_POSITION_DOLLARS at 1 whole share minimum. |
 | JSONL event logging | `mm/events.py` (PaperEventLog) | bar_eval, signal_skip, position_open/close, slippage_bps |
 | Web dashboard | `scripts/web_dashboard.py` | Flask :8080 — Market Conditions card, slippage column |
 | TUI dashboard | `scripts/dashboard.py` | Textual, past session replay |
@@ -154,6 +154,43 @@ data it becomes deployable. For now, graveyard.
 ---
 
 ## Bugs Found & Fixed (correctness corrections to historical research)
+
+### Stale cfg in mm/data.py poisoned the live research archive — FOUND & FIXED 2026-08-24
+**What it was:** `mm/data.py` imported config as `from .config import cfg`, binding the singleton
+at import time — the exact anti-pattern CLAUDE.md documents and that was fixed in
+`mm/strategy.py` / `mm/backtest.py` / `mm/research.py` on 2026-06-18. `mm/data.py` was missed in
+that sweep. Once any test reloaded config (the replay tests do), `_config.cfg` became a *new*
+object while `data.py` kept writing through the *old* one. So `tests/test_data.py` setting
+`_config.cfg.logs_dir = tmp_path` had no effect on `update_combined_csv`, and the test fixtures
+were appended to the **real** `logs/US_IWM_K_5M_combined.csv` instead of a temp dir.
+
+**What it cost:** four fabricated bars in the never-pruned IWM research archive:
+
+| File | time_key | OHLC |
+|---|---|---|
+| `US_IWM_K_5M_combined.csv` | 2026-06-16 04:05 | 100.0 |
+| `US_IWM_K_5M_combined.csv` | 2026-06-16 09:35 | **999.0** |
+| `US_IWM_K_5M_combined.csv` | 2026-06-16 09:40 | 101.0 |
+| `US_IWM_K_5M_EXT_combined.csv` | 2026-06-16 04:05 | 100.0 |
+
+IWM trades ~$292. A 999.0 close inside the archive corrupts every rolling indicator whose window
+spans 2026-06-16 — ATR, Bollinger width, VWAP — so **any IWM backtest or sweep covering that date
+produced wrong numbers**, silently, every time anyone ran `pytest` and then a backtest. Every real
+row carries `code=US.IWM`; the injected rows have `code=NaN`, which is how they were identified.
+
+**Why it hid for ~2 months:** the symptom presented as "3 pre-existing test_data.py failures that
+pass in isolation" and was written off in ARCHITECTURE.md as a test-isolation quirk. The failure
+message (`assert 86725 == 1`) actually *named* the real archive's row count — the bug was
+announcing itself in the assertion and was read as noise.
+
+**Fix:** `mm/data.py` now uses `from . import config as _config` + `cfg = _config.cfg` re-fetched
+inside `fetch_candles`, `save_candles`, `update_combined_csv`, `fetch_and_save`. Archive rows
+removed. Full suite went 252 passed / 3 failed → **255 passed / 0 failed**, and a checksum on the
+archive confirms the suite no longer writes to it.
+
+**Lesson (added to Bug-Hunting Methodology below):** a test that "fails only in the full run" is a
+claim that some other test mutates shared state — that is a bug report, not a known-quirk. Do not
+document a persistent failure as acceptable without first identifying what state is being shared.
 
 ### ORB Scorer signal_skip TypeError — FOUND & FIXED 2026-07-25
 **What it was:** `mm/evals.py::_eval_orb` called `elog.signal_skip("orb_claude_score", ..., reason=scored["reason"])`. The first positional argument to `signal_skip` is already named `reason`, so `reason=` was passed both positionally and as a keyword — a Python TypeError on every scorer block. The exception was swallowed by the paper runner's main loop (`except Exception as e`), logged as an error event, and the entry was blocked by crash rather than by the intended gate. Result: ~90 error events on 7/24, zero `orb_claude_score` skip events in JSONL despite the scorer running and returning low confidence scores. Entries were silently prevented for the 2 days the scorer was live before discovery.
@@ -292,8 +329,22 @@ reimplemented-metric drift (same calc, subtly different definition, in 2+ places
 
 **Static/regression tests now guard the first three categories directly**
 (`tests/test_clock_seam.py`, `tests/test_config_staleness.py`,
-`tests/test_metric_consistency.py`, plus `tests/test_execution.py`/`tests/test_events.py`
-for the fourth) — run them with the rest of the suite, no special invocation needed.
+`tests/test_config_import_pattern.py`, `tests/test_metric_consistency.py`, plus
+`tests/test_execution.py`/`tests/test_events.py` for the fourth) — run them with the rest
+of the suite, no special invocation needed.
+
+**Prefer a static/grep guard over per-module behavioural tests for a whole bug category.**
+`test_config_staleness.py` was behavioural — one hand-written case per module — so
+`mm/data.py`, which nobody thought to add, was never checked and stayed broken for two
+months (see the 2026-08-24 entry above). `test_config_import_pattern.py` was added to grep
+the package instead, so the next module is covered the day it is written. A behavioural test
+proves the modules you remembered work; a static test proves the ones you forgot do too.
+
+**A test that fails only in the full suite is a bug report, not a known quirk.** It is a
+claim that some other test mutates shared state. The `mm/data.py` failure was written off in
+ARCHITECTURE.md as a "pre-existing test-isolation issue" for two months while its assertion
+message (`assert 86725 == 1`) was literally printing the real archive's row count. Never
+document a persistent failure as acceptable without first naming the shared state.
 
 **For new instances of these (or new categories), use a fork-based parallel adversarial
 audit** (multiple `Agent` calls with `subagent_type:"fork"`, each verifying findings
@@ -387,6 +438,47 @@ fully-unrelated sites beyond the specific fixes above.
 ---
 
 ## On Hold (parked with a gate condition)
+
+### Cross-strategy symbol effect: SPY negative everywhere, QQQ positive everywhere — observed 2026-08-24, gated at 50 trades/symbol
+**What it is:** Every per-strategy analysis this project runs aggregates across symbols, which
+structurally cannot see an effect that runs the other way. Slicing the 102 live trades
+(2026-06-10 → 2026-08-24) by symbol *within* strategy shows a consistent pattern:
+
+| Strategy | SPY | QQQ | IWM |
+|---|---|---|---|
+| bb_kdj | −1.07 (0/1) | +2.44 (3/3) | −0.45 (1/2) |
+| bb_kdj_loose | −0.48 (1/2) | +7.37 (5/6) | −2.91 (1/3) |
+| gap_fade | −1.05 (1/3) | +0.76 (1/1) | −4.23 (2/6) |
+| orb | −0.83 (8/21, PF 0.94) | +7.99 (10/17, PF 1.43) | −5.29 (4/9, PF 0.61) |
+| vwap_pb | −5.45 (2/13, PF 0.09) | +10.43 (7/10) | +2.34 (3/4) |
+| **combined** | **−8.88 / 40 tr** | **+28.99 / 37 tr** | **−10.54 / 24 tr** |
+
+SPY is net negative in 5 of 5 strategies. QQQ is net positive in 5 of 5. QQQ alone more than
+accounts for the portfolio's entire +$12.92 — SPY and IWM together are −$19.
+**Why parked, not acted on:** three competing explanations and the data cannot yet separate
+them. (1) Real symbol effect — SPY's tighter intraday range means ATR/VWAP-based exits sit
+inside the noise band. (2) Sizing artifact — `FRACTIONAL_SHARES=false` + `TOTAL_CAPITAL=0`
+means position size is 1 whole share, so SPY (~$766) and QQQ (~$712) carry different notional
+and therefore different PnL-per-move; PF is size-invariant but the raw PnL column is not.
+(3) Coincidence at n=24–40 per symbol.
+**Gate:** 50 trades on a symbol, per the new Symbol-level section in `evaluation_criteria.md`.
+Post-mortem must check spread/slippage and per-strategy stop distances *before* considering a
+change to `SYMBOLS`. Explicitly do **not** concentrate into QQQ if it keeps winning — that
+would shrink the sample this project depends on.
+
+### VWAP PB on SPY has no right tail — observed 2026-08-24, 2 trades short of gate
+**What it is:** vwap_pb on SPY is 2 wins / 13 trades, PF 0.09, −$5.45 — while the same strategy
+on QQQ is 7/10, PF 20.68, +$10.43. Cause is visible in the exit reasons: **all 13 SPY trades
+exited `VWAP_LOST`.** Zero stops, zero targets, zero time stops. Median hold is ~5 min on both
+symbols, but QQQ's *mean* hold is 47.7 min vs SPY's 12.5 — QQQ occasionally catches a runner
+that holds above VWAP for the better part of an hour, and those few trades pay for all the
+small chop losses. SPY never produces one; its largest win in 13 trades is +$0.32.
+The `VWAP_LOST` exit gives no room by design, which is fine only if the winners are fat.
+**Why parked:** SPY is at 13 trades against the pre-registered 15-trade per-symbol gate in
+`evaluation_criteria.md` (the VWAP PB section). Two trades short. The existing gate is also
+written for the *opposite* direction ("QQQ PF < 1.0 while SPY PF ≥ 1.2") — it anticipated SPY
+as the strong symbol and QQQ as marginal, which is backwards from what happened. Left as-is
+rather than rewritten mid-sample; note the inversion when it trips.
 
 ### Market Holiday Calendar for is_market_open() — parked 2026-06-19, low priority
 **What it is:** `mm/clock.py::is_market_open()` only checks weekday + 9:30-16:00 ET — no
