@@ -19,6 +19,24 @@ Exceptions:
 The biggest risk to this project is not a bad strategy — it's re-tuning parameters faster
 than live data can validate them.
 
+## Sizing a gate: check the ETA before picking N
+
+Added 2026-08-24, after the bb_kdj gate sat at 30 trades for 2+ months while the same document
+already stated the strategy's own backtest frequency (~20 trades/yr combined at w=0) — meaning
+the gate as written needed **~18 months** to ever trip. Nobody did that arithmetic when 30 was
+picked; it was a round number carried over from ORB's gate, which trades ~5x more often.
+
+**Before writing any sample-size gate, compute and write down: backtest (or live, if backtest
+unavailable) trades/week for the exact config being gated → weeks to reach N → an ETA.** If the
+ETA is beyond ~4-6 months, either the N is wrong for this strategy's frequency, or the strategy
+is understood in advance to need a long soak — in which case say so explicitly instead of
+implying a normal gate. A gate nobody expects to trip within the project's real time horizon is
+not a gate, it's decoration.
+
+This does not mean shrinking N until it trips fast — a low-frequency edge (w=0 BB+KDJ) is
+allowed to stay low-frequency; that's the point of it. It means the *threshold* has to be
+picked with the frequency in view, not copied from a different strategy's cadence.
+
 ## VWAP PB (SPY + QQQ, 10:00 ET filter)
 
 The 0/4 start (Jun 8–9) does NOT count against the strategy: all four entries were 9:50 ET
@@ -33,7 +51,7 @@ Backtest expectation: SPY OOS PF=1.655, QQQ OOS PF=1.072.
 | QQQ PF < 1.0 while SPY PF ≥ 1.2 | 15 trades/symbol | Drop QQQ from VWAP_PB_SYMBOLS (QQQ was marginal in backtest anyway) |
 | Any entry logged before 10:00 ET | 1 trade | Bug — fix immediately |
 
-## BB+KDJ (IWM/QQQ at w=3, SPY at w=0)
+## BB+KDJ (SPY/IWM at w=0, QQQ at w=3 — corrected 2026-08-24, header had it backwards)
 
 Backtest expectation at w=3 (corrected 2026-06-18, see amendment log): combined 44.5% win,
 PF=1.195, 434 trades on the full dataset — better than the previous "thin edge" framing,
@@ -44,7 +62,7 @@ unaffected by the bug (w=0 has no rolling window to leak).
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| PF < 1.0 | 30 trades | Switch all symbols to w=0 (accept low frequency) — do not suspend, the w=0 edge is the best-validated finding in the project |
+| PF < 1.0 | 15 trades | Switch all symbols to w=0 (accept low frequency) — do not suspend, the w=0 edge is the best-validated finding in the project |
 | Cross-age subset analysis: w=0-subset trades (kdj_cross_age=0) materially outperform w>0 trades | 3 months of data | Switch to w=0 |
 | Zero entries fired | 4 weeks | Investigate signal pipeline (compare vs simulate_paper.py on same dates) — silence is a bug symptom, not patience |
 
@@ -70,9 +88,9 @@ gate is worth, so it is judged *relative to* bb_kdj, not on absolute PF.
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| loose PF < bb_kdj PF by ≥ 0.3 | 30 loose trades | The bonus gate is earning its complexity — document and keep both; no knob change |
-| loose PF > bb_kdj PF by ≥ 0.3 | 30 loose trades | The bonus gate is costing money — post-mortem, consider lowering MIN_SIGNAL_SCORE on production bb_kdj |
-| \|difference\| < 0.3 | 30 loose trades | Gate is neutral. Retire bb_kdj_loose (it is measurement scaffolding, not a strategy) |
+| loose PF < bb_kdj PF by ≥ 0.3 | 20 loose trades | The bonus gate is earning its complexity — document and keep both; no knob change |
+| loose PF > bb_kdj PF by ≥ 0.3 | 20 loose trades | The bonus gate is costing money — post-mortem, consider lowering MIN_SIGNAL_SCORE on production bb_kdj |
+| \|difference\| < 0.3 | 20 loose trades | Gate is neutral. Retire bb_kdj_loose (it is measurement scaffolding, not a strategy) |
 
 ## Gap Fade (live 2026-07-12)
 
@@ -122,6 +140,20 @@ confusion (amended 2026-06-18, see log).
 
 ## Amendment log
 
+- 2026-08-24 (gate ETAs): Computed actual weeks-to-trip for every open gate using live accrual
+  rate. Two were broken: **bb_kdj's PF<1.0 gate at 30 trades needs ~13 months** at the live rate
+  (0.53 trades/wk) — lowered to **15 trades** (~6.5 months, still slow but the strategy's known
+  frequency, not a bug). **bb_kdj_loose's gate at 30 needs ~4.6 months** — lowered to **20**
+  (~3.1 months). Neither strategy's entry/exit logic changed; only the sample size that decides
+  when to look. Added a "Sizing a gate: check the ETA before picking N" section above the knob
+  freeze so future gates are written against the strategy's own accrual rate instead of a round
+  number — the 30-trade figure for bb_kdj was traceable to ORB's gate, a strategy that trades
+  ~5x more often, and nobody re-derived it for BB+KDJ's actual frequency.
+  Also corrected the BB+KDJ section header, which had SPY/IWM's window assignment backwards
+  (said "IWM/QQQ at w=3, SPY at w=0"; live config is SPY+IWM at w=0, QQQ at w=3).
+  Current ETAs at live pace: vwap_pb SPY symbol-gate ~1.6wk, SPY cross-strategy gate ~2.7wk,
+  gap_fade IWM ~4.1wk, gap_fade combined ~6.1wk, bb_kdj_loose ~12.6wk (new gate), IWM
+  cross-strategy ~11.6wk, bb_kdj ~26wk (new gate). No strategy has an indefinite ETA now.
 - 2026-08-24: **Added three missing gate sections: BB+KDJ LOOSE, Gap Fade, Symbol-level.**
   bb_kdj_loose went live 2026-07-04 and gap_fade 2026-07-12 — both had accumulated live trades
   for 6-7 weeks with *no* pre-registered gate in this file. That is the exact failure mode this
@@ -142,9 +174,9 @@ confusion (amended 2026-06-18, see log).
   |---|---|---|---|---|
   | vwap_pb | 28 | 2.46 | PF<1.0 @20 | passed, not tripped |
   | orb | 47 | 1.04 | PF<1.0 @30 | recovered from 0.76 (Jul 25) after ORB_LATEST_ENTRY; not tripped |
-  | bb_kdj_loose | 11 | 1.73 | vs bb_kdj @30 | 11/30, not reached |
-  | gap_fade | 10 | 0.29 | PF<1.0 @20 | 10/20, **on track to trip** |
-  | bb_kdj | 6 | 1.32 | PF<1.0 @30 | 6/30, not reached |
+  | bb_kdj_loose | 11 | 1.73 | vs bb_kdj @20 (resized 08-24, was 30) | 11/20, ~9wk to ETA |
+  | gap_fade | 10 | 0.29 | PF<1.0 @20 | 10/20, **on track to trip, ~6wk ETA** |
+  | bb_kdj | 6 | 1.32 | PF<1.0 @15 (resized 08-24, was 30) | 6/15, ~17wk to ETA |
 
   Two findings recorded but **not acted on**, both below their gate:
   (1) vwap_pb on SPY is 2/13 wins, PF 0.09, and every one of the 13 exited `VWAP_LOST` — no
