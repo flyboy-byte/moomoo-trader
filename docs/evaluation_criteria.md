@@ -62,6 +62,42 @@ strategy, but most execution-sensitive (breakout fills are competitive).
 | Avg fill worse than intended by > 5 bps | 15 trades | Execution problem — reduce polling latency or accept edge erosion; not a strategy knob issue |
 | Win% < 40% with clean execution | 30 trades | Suspend and post-mortem |
 
+## BB+KDJ LOOSE (research lane, live 2026-07-04)
+
+Added retroactively 2026-08-24 — see amendment log. This is the no-gate variant of BB+KDJ
+(MIN_SIGNAL_SCORE ignored, no ADX/ranging filter). Its purpose is to measure what the bonus
+gate is worth, so it is judged *relative to* bb_kdj, not on absolute PF.
+
+| Gate | Sample | Action |
+|------|--------|--------|
+| loose PF < bb_kdj PF by ≥ 0.3 | 30 loose trades | The bonus gate is earning its complexity — document and keep both; no knob change |
+| loose PF > bb_kdj PF by ≥ 0.3 | 30 loose trades | The bonus gate is costing money — post-mortem, consider lowering MIN_SIGNAL_SCORE on production bb_kdj |
+| \|difference\| < 0.3 | 30 loose trades | Gate is neutral. Retire bb_kdj_loose (it is measurement scaffolding, not a strategy) |
+
+## Gap Fade (live 2026-07-12)
+
+Added retroactively 2026-08-24 — see amendment log. Fires at most once per symbol per day at
+9:35 ET, so sample accrues slowly (~1 trade per 6 sessions across all three symbols).
+
+| Gate | Sample | Action |
+|------|--------|--------|
+| PF < 1.0 | 20 trades | Suspend (remove from STRATEGIES), post-mortem before any re-tune |
+| Per-symbol PF < 0.5 while combined PF ≥ 1.0 | 10 trades/symbol | Drop that symbol from gap_fade (mirrors the ORB-shorts precedent) |
+| Zero entries fired | 6 weeks | Investigate the 9:35 trigger path — silence is a bug symptom |
+
+## Symbol-level (cross-strategy)
+
+Added 2026-08-24. All prior gates are per-strategy, which cannot see an effect that runs the
+other way — a symbol that is bad *across* strategies. Live data through 2026-08-24 shows SPY
+net negative in 5 of 5 strategies while QQQ is net positive in 4 of 5. That observation is what
+prompted this section, so it is **not** a clean pre-registration; the gate below is set so the
+decision still requires more data than the observation was made on.
+
+| Gate | Sample | Action |
+|------|--------|--------|
+| A symbol is net negative in ≥ 4 of 5 strategies AND combined symbol PF < 0.8 | 50 trades on that symbol | Post-mortem before any action: check spread/slippage and per-strategy stop distances first. Only then consider dropping the symbol from SYMBOLS |
+| A symbol is net positive in ≥ 4 of 5 strategies AND combined symbol PF > 1.5 | 50 trades on that symbol | Do **not** concentrate into it — record the finding and leave allocation alone (single-symbol concentration is how this project would blow up its own sample size) |
+
 ## Portfolio-level
 
 | Gate | Trigger | Action |
@@ -86,6 +122,36 @@ confusion (amended 2026-06-18, see log).
 
 ## Amendment log
 
+- 2026-08-24: **Added three missing gate sections: BB+KDJ LOOSE, Gap Fade, Symbol-level.**
+  bb_kdj_loose went live 2026-07-04 and gap_fade 2026-07-12 — both had accumulated live trades
+  for 6-7 weeks with *no* pre-registered gate in this file. That is the exact failure mode this
+  document exists to prevent, and it happened silently because the file was only ever updated
+  when a gate tripped, never when a strategy was added.
+  **Honesty caveat:** these gates were written *after* seeing 11 bb_kdj_loose and 10 gap_fade
+  trades, so they are retroactive, not pre-registered. They are deliberately set above the
+  current sample (20 for gap_fade vs 10 today; 10/symbol vs 6 for IWM today; 50/symbol vs 40
+  for SPY today) so that acting on them still requires data we do not yet have. Treat any
+  conclusion drawn from them as weaker than one from a genuinely pre-registered gate.
+  **New process rule:** adding a strategy to `STRATEGIES` requires adding its gate section here
+  in the same change. No exceptions.
+  No existing gate thresholds or live knobs were changed by this amendment.
+
+  Gate standing at time of writing (102 live trades, 2026-06-10 → 2026-08-24, +$12.92, PF 1.189):
+
+  | Strategy | Trades | PF | Gate | Status |
+  |---|---|---|---|---|
+  | vwap_pb | 28 | 2.46 | PF<1.0 @20 | passed, not tripped |
+  | orb | 47 | 1.04 | PF<1.0 @30 | recovered from 0.76 (Jul 25) after ORB_LATEST_ENTRY; not tripped |
+  | bb_kdj_loose | 11 | 1.73 | vs bb_kdj @30 | 11/30, not reached |
+  | gap_fade | 10 | 0.29 | PF<1.0 @20 | 10/20, **on track to trip** |
+  | bb_kdj | 6 | 1.32 | PF<1.0 @30 | 6/30, not reached |
+
+  Two findings recorded but **not acted on**, both below their gate:
+  (1) vwap_pb on SPY is 2/13 wins, PF 0.09, and every one of the 13 exited `VWAP_LOST` — no
+  stop, no target, no time stop. QQQ shares the same exit rule but has a right tail (one 47-min
+  runner) that SPY never produces. Sample is 13 vs the 15-trade symbol gate — two trades short.
+  (2) gap_fade on IWM is 2/6, PF 0.09, −$4.23 of the strategy's −$4.52 total. Sample is 6 vs
+  the new 10-trade symbol gate.
 - 2026-06-18: Reworded "Review cadence" — "weekly, do nothing in between" was read as
   forbidding daily bug/health checks, which was never the intent (the events.py UTC-vs-ET
   timestamp bug found this same day was caught by exactly that kind of daily check). The

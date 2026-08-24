@@ -1,7 +1,13 @@
 # moomoo-trader: Full Project Map
 
 **AI Context Document** — paste this into any AI session to get full project context without re-deriving.
-Last updated: 2026-07-29.
+Last updated: 2026-08-24.
+
+**Live scoreboard (102 trades, 2026-06-10 → 2026-08-24): +$12.92, PF 1.189, 49% win.**
+vwap_pb PF 2.46 and orb PF 1.04 (recovered from 0.76 after `ORB_LATEST_ENTRY=12:30`) carry it;
+gap_fade PF 0.29 is the only net drag. Per-*symbol* the picture is starker than per-strategy —
+QQQ +$28.99, SPY −$8.88, IWM −$10.54 — see the cross-strategy symbol effect entry in
+`strategy_graveyard.md`. Gates and their current standing live in `evaluation_criteria.md`.
 
 ---
 
