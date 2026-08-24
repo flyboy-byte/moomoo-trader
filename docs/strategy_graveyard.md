@@ -155,6 +155,57 @@ data it becomes deployable. For now, graveyard.
 
 ## Bugs Found & Fixed (correctness corrections to historical research)
 
+### External audit round (ChatGPT + Deep Research, 2026-08-25) — 2 bugs confirmed and fixed same-day
+**Context:** handed `docs/deep/moomoo-audit-bundle-2026-08-24.md` to ChatGPT for review, then to a
+Deep Research pass with an adversarial-methodology brief. Both flagged real code-level bugs
+(verified by reading the actual source before acting, per this project's own "input to verify,
+not fact" rule for cross-model audits) plus a substantial epistemic critique of the evaluation
+methodology (data-snooping on the reused 2024+ "OOS" period, DIA/correlated-symbol independence,
+gate N as operational-minimum vs statistical-sufficiency, LLM regime label reproducibility). The
+epistemic critique is tracked separately (see "Evaluation methodology critique" below) — it's a
+process/framing decision, not a bug. Five code-level claims were checked against source; two were
+fixed immediately as clear, surgical, no-knob-change bugs (below); three more (execution
+reconciliation state model, archive corruption-recovery policy, regime cache versioning) are real
+and tracked as pending, not yet fixed — see the entries following.
+
+### validate_regime.py averaged daily PF ratios instead of pooling trades — FOUND & FIXED 2026-08-25
+**What it was:** `scripts/validate_regime.py` computed `profit_factor(day_trades)` independently
+for each trading day, dropped days with infinite PF (zero gross losses), and averaged the
+remaining daily PF values — then printed that average as "Avg PF" per regime label and used it to
+declare "GATE CONFIRMED" for the live `REGIME_SKIP_LABELS=trending_up,trending_down` config.
+**Why it's wrong:** averaging ratios is not the same statistic as profit factor. Two days — one
+gross_win=10/gross_loss=1 (PF=10), one gross_win=1/gross_loss=10 (PF=0.1) — average to
+`(10+0.1)/2=5.05`, while the actual pooled PF across both days is `(10+1)/(1+10)=1.00`, i.e.
+exactly breakeven. A regime label could look "extraordinarily beneficial" on the old statistic
+while its underlying trades are flat on the correct one. Dropping infinite-PF days before
+averaging compounds the distortion rather than fixing it.
+**Fix:** pool every trade belonging to a label (across all its days) and call the project's
+canonical `profit_factor()` once on the pooled list — the same calc every other PF number in the
+project already uses (see the 2026-06-18 "reimplemented-metric drift" fix in `mm/backtest.py`).
+Applied to both the per-label summary table and the skip-vs-keep overall verdict.
+**Consequence:** the historical evidence previously cited for the `trending_up`/`trending_down`
+regime-gate flip (`evaluation_criteria.md` amendment log, 2026-07-26) was computed with the buggy
+statistic. **Re-run `python scripts/validate_regime.py --from-cache` before treating that flip as
+confirmed** — this does not mean the flip is wrong, it means the number that "confirmed" it needs
+to be recomputed. Not yet re-run as of this entry.
+**Tests:** `tests/test_validate_regime_pf.py` — pins the PF=10/PF=0.1→pooled=1.00 example directly
+(asserts the naive average would give 5.05, the wrong answer) plus a zero-loss-day pooling case.
+
+### _kdj_cross_age() leaked yesterday's KDJ cross into the first bars of a new session — FOUND & FIXED 2026-08-25
+**What it was:** `mm/evals.py::_kdj_cross_age()` scanned `df_signals["kdj_golden_cross"].tail(50)`
+with no day-boundary check — a cousin of the exact bug `mm/strategy.py`'s entry gate was fixed for
+on 2026-06-17 (KDJ Day-Boundary Signal Leak, see below). The entry *gate* was fixed; this
+*telemetry* function, which logs cross age on every bb_kdj bar_eval/position_open, was missed.
+**Why it matters:** `kdj_cross_age` exists specifically to let `evaluation_criteria.md`'s BB+KDJ
+gate compare same-bar (w=0, `kdj_cross_age=0`) trades against diluted window (w>0) trades without
+a parallel runner. A cross late on day 1 mislabeled as "age 2" on day 2's first bar corrupts
+exactly the subset comparison that gate depends on — the execution logic (entries) was correct
+the whole time; only the evidence used to evaluate a *future* strategy change was wrong.
+**Fix:** bound the lookback to the current calendar day before scanning for the most recent
+cross, mirroring `mm/strategy.py`'s existing `groupby(day_key)` pattern exactly.
+**Tests:** `tests/test_kdj_cross_age.py` — a cross late on day 1 followed by day-2 bars must
+return `None`, not a leaked age; same-day crosses still resolve correctly.
+
 ### Stale cfg in mm/data.py poisoned the live research archive — FOUND & FIXED 2026-08-24
 **What it was:** `mm/data.py` imported config as `from .config import cfg`, binding the singleton
 at import time — the exact anti-pattern CLAUDE.md documents and that was fixed in
@@ -438,6 +489,88 @@ fully-unrelated sites beyond the specific fixes above.
 ---
 
 ## On Hold (parked with a gate condition)
+
+### External audit round 2026-08-25 — confirmed bugs, not yet fixed
+Three more findings from the same audit round were verified against source but not fixed this
+session — recorded here so they aren't lost. None require a knob change; all are pure correctness
+fixes whenever picked up.
+
+**`_reconcile_positions()`'s "offsetting positions" check doesn't check quantity or direction**
+(`mm/execution.py`, `_reconcile_positions`). When the broker shows zero net for a symbol but local
+state has a position, the code checks whether *any other strategy* on that symbol has a FILLED
+order (`other_filled`) and, if so, assumes the positions are legitimately offsetting (e.g. BB+KDJ
+long SPY + ORB short SPY netting to zero) and keeps both. It never actually sums signed local
+quantities and compares to broker net. Two stale same-direction longs on the same symbol both
+being FILLED satisfies `other_filled=True` even though they cannot possibly explain a broker net
+of zero. In SIMULATE this can't lose real money, but it can preserve fictional positions and
+corrupt the exact execution-quality evidence `evaluation_criteria.md`'s ORB gate depends on
+("check slippage/fill quality FIRST"). Fix direction: sum signed local quantities per symbol,
+compare to broker net quantity/side directly, and only fall through to the order-status grace
+logic for genuine fill-race timing, not as a stand-in for a real net-quantity check.
+
+**`update_combined_csv()`'s corruption-recovery policy destroys history instead of failing
+closed** (`mm/data.py`). If `pd.read_csv()` on the existing archive raises *any* exception, the
+code logs "rebuilding from this fetch" and sets `combined = df_new` — replacing the entire
+multi-year archive with whatever the current small fetch contains, then atomically committing
+that truncated version over the real file. The 2026-06-18 atomic-write fix (temp file +
+`os.replace()`) prevents a *partial* write from corrupting the file on a mid-write crash, but does
+nothing to prevent this — a full-history wipe on any read exception, committed atomically and
+irreversibly. This is the same never-pruned archive the 2026-08-24 stale-cfg bug (above) already
+proved is fragile. Fix direction: on a read exception, log loudly, quarantine the unreadable file
+(rename with a `.corrupt-TIMESTAMP` suffix) and fail the call rather than silently overwriting —
+force a human to look at it once instead of erasing the evidence automatically.
+
+**`load_regime_today()` doesn't validate model/prompt version against the current experiment**
+(`mm/morning_regime.py`). The loader reads `logs/regime_YYYY-MM-DD.json` by date filename only,
+checks the label is a valid enum, and returns it — it never compares the file's stored `model` or
+`prompt_version` fields (both already logged, per `classify_regime()`) against the currently
+configured model/prompt. Consequence: after the documented Haiku→Sonnet model switch, re-running
+`validate_regime.py --from-cache` on a date that already has a Haiku-era regime file silently
+reuses that label instead of flagging a model mismatch — mixing two different classifiers' outputs
+into what's treated as one evaluation cohort. Fix direction: cache key / loader check should
+include model + prompt_version, and `validate_regime.py` should either regenerate or explicitly
+flag mismatched-model dates rather than silently accepting whatever's on disk.
+
+### Evaluation methodology critique — external audit round 2026-08-25, under consideration
+Full writeup: `docs/deep/deepresearch-output-2026-08-25.md` (Deep Research, adversarial-methodology brief) and
+the ChatGPT review that preceded it. This is a framing/process critique, not a bug — recorded here
+so the reasoning isn't lost, not yet acted on except where noted.
+
+**Core claim:** the project's fixed trade-count gates (10/15/20/30/50) are *operational minimums*
+("don't even review this lane yet"), not evidence that uncertainty has become small enough to
+call a strategy "validated." At N=20 with an observed win rate near 50%, the audit computes a
+Wilson-interval half-width of roughly ±20 points — i.e. a nominal 50% result at 20 trades is
+compatible with a true win probability anywhere from ~30% to ~70%. The 2026-08-24 gate-ETA fix
+(above, "gate ETAs" amendment) was directionally right — it caught an N that would take 13+
+months to reach — but the audit argues the *causal direction* should reverse: decide what
+uncertainty is tolerable first, derive N from that, then accept whatever ETA falls out, rather
+than picking N to fit a comfortable calendar window.
+
+**Second claim — the regime-PF bug (fixed above) understates a bigger problem:** the project's
+2024+ backtest window has been repeatedly re-examined across many strategy/parameter decisions
+(ATR stop selection, signal-score selection, KDJ window, ORB cutoff, symbol exclusions, regime
+filter). Per Halbert White's data-snooping framework, reusing one dataset across many rounds of
+model selection means each individual "OOS" claim can look valid in isolation while the aggregate
+selection process still overfits. The audit's suggested reframe: treat everything examined through
+2026-08-24 as **development data**, not confirmation data, and start a frozen forward-only paper
+cohort on a fixed date for any strategy whose current config is meant to be evaluated cleanly.
+
+**Third claim — DIA (or any added symbol) is not "faster independent evidence."** Directly
+contradicts the "more symbols legitimately speeds up gates" framing floated earlier in this
+project's own reasoning (2026-08-24 session). Broad-market ETFs share common factor exposure, so
+same-day trades across SPY/QQQ/IWM/DIA are correlated observations, not independent ones — a
+same-day cluster of 4 trades carries meaningfully less than 4 trades' worth of information. The
+audit's suggested design-effect approximation (`DE ≈ 1+(m-1)ρ`) at ρ=0.5, m=4 gives DE=2.5, i.e.
+4 same-day observations ≈ 1.6 independent-equivalents. Recommendation: if a new symbol is added,
+freeze the strategy and pre-register the symbol as a *replication* test before looking at its
+results, and cluster-bootstrap by trading date (not by raw trade count) when reporting combined
+uncertainty — this directly changes how the "50 trades/symbol" cross-strategy gate (added
+2026-08-24) should eventually be interpreted, though the gate itself wasn't rewritten this session.
+
+**Not acted on this session** — these are project-philosophy decisions (what "validated" means,
+whether/when to declare a frozen confirmation cohort, whether to add strategy/policy versioning to
+every trade event) that deserve a deliberate call rather than a unilateral doc rewrite mid-audit.
+Tracked here so the reasoning survives to whenever that call gets made.
 
 ### Cross-strategy symbol effect: SPY negative everywhere, QQQ positive everywhere — observed 2026-08-24, gated at 50 trades/symbol
 **What it is:** Every per-strategy analysis this project runs aggregates across symbols, which

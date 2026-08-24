@@ -281,37 +281,52 @@ def main() -> None:
         print(f"  Saved {len(rows)} rows to {RESULTS_FILE.name}")
 
     # Step 5 — summary table
+    #
+    # Bug fix 2026-08-25 (found by external audit, verified against this code):
+    # this used to average each day's independently-computed PF ratio, then drop
+    # infinite-PF (zero-loss) days before averaging. Averaging ratios is not the
+    # same statistic as profit factor and can be wildly misleading — e.g. day A
+    # gross_win=10/gross_loss=1 (PF=10) and day B gross_win=1/gross_loss=10
+    # (PF=0.1) average to 5.05, while the actual pooled PF across both days is
+    # (10+1)/(1+10)=1.00, i.e. breakeven. Fixed by pooling every trade belonging
+    # to a label and calling profit_factor() ONCE on the pooled list — the same
+    # canonical calc every other PF number in this project uses.
     print("\n" + "=" * 65)
     print(f"  Regime Gate Validation  ({args.start} → {trading_days[-1] if trading_days else '?'})")
-    print(f"  {'Label':<16}  {'Days':>5}  {'Avg PF':>7}  {'Avg trades/day':>15}  "
+    print(f"  {'Label':<16}  {'Days':>5}  {'Trades':>7}  {'Pooled PF':>9}  {'Avg trades/day':>15}  "
           f"{'Gate fires?':>12}  {'Would-block days':>17}")
-    print("  " + "-" * 61)
+    print("  " + "-" * 65)
 
+    label_pooled_trades: dict[str, list] = {}
     for label in VALID_LABELS:
         subset = [r for r in rows if r["regime"] == label]
         if not subset:
             continue
-        # Filter rows with actual numeric PF
-        pf_rows = [r for r in subset if r["pf"] not in ("", "inf")]
-        avg_pf = sum(float(r["pf"]) for r in pf_rows) / len(pf_rows) if pf_rows else None
+        pooled = [t for r in subset for t in trades_by_date.get(r["date"], [])]
+        label_pooled_trades[label] = pooled
+        pf = profit_factor(pooled) if pooled else None
+        n_trades = len(pooled)
         avg_trades = sum(r["trades"] for r in subset) / len(subset)
         blocked = sum(1 for r in subset if r["would_block"])
         gate_str = "YES" if label in _get_skip_labels() else "no"
-        avg_pf_str = f"{avg_pf:.3f}" if avg_pf is not None else "n/a"
-        print(f"  {label:<16}  {len(subset):>5}  {avg_pf_str:>7}  {avg_trades:>15.1f}  "
+        pf_str = f"{pf:.3f}" if pf is not None and pf != float("inf") else ("inf" if pf == float("inf") else "n/a")
+        print(f"  {label:<16}  {len(subset):>5}  {n_trades:>7}  {pf_str:>9}  {avg_trades:>15.1f}  "
               f"{gate_str:>12}  {blocked:>17}")
 
-    # Overall gate assessment
+    # Overall gate assessment — pool trades across all skip-labeled days vs all
+    # kept-labeled days, then compute PF once on each pool (not an average of
+    # per-day or per-label PFs).
     _skip = _get_skip_labels()
-    skip_rows = [r for r in rows if r["regime"] in _skip and r["pf"] not in ("", "inf")]
-    keep_rows = [r for r in rows if r["regime"] not in _skip and r["pf"] not in ("", "inf")]
-    if skip_rows and keep_rows:
-        skip_pf = sum(float(r["pf"]) for r in skip_rows) / len(skip_rows)
-        keep_pf = sum(float(r["pf"]) for r in keep_rows) / len(keep_rows)
+    skip_trades = [t for label in _skip for t in label_pooled_trades.get(label, [])]
+    keep_trades = [t for label in VALID_LABELS if label not in _skip
+                   for t in label_pooled_trades.get(label, [])]
+    if skip_trades and keep_trades:
+        skip_pf = profit_factor(skip_trades)
+        keep_pf = profit_factor(keep_trades)
         delta = keep_pf - skip_pf
-        print(f"\n  Skip-label avg PF:   {skip_pf:.3f}  (N={len(skip_rows)} days)")
-        print(f"  Keep-label avg PF:   {keep_pf:.3f}  (N={len(keep_rows)} days)")
-        print(f"  Delta:               {delta:+.3f}")
+        print(f"\n  Skip-label pooled PF:   {skip_pf:.3f}  (N={len(skip_trades)} trades)")
+        print(f"  Keep-label pooled PF:   {keep_pf:.3f}  (N={len(keep_trades)} trades)")
+        print(f"  Delta:                  {delta:+.3f}")
         if delta >= 0.2:
             verdict = "GATE CONFIRMED — skip labels have meaningfully worse PF"
         elif delta >= 0.05:

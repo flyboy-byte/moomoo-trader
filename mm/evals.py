@@ -105,11 +105,25 @@ def _kdj_cross_age(df_signals: pd.DataFrame, max_lookback: int = 50) -> int | No
 
     Logged on every bb_kdj bar_eval/position_open so live w>0 trades can be
     post-hoc split into the same-bar (w=0) subset vs diluted window entries.
-    Returns None if no cross within max_lookback bars.
+    Returns None if no cross within max_lookback bars OR within the current
+    trading day, whichever is shorter.
+
+    Bug fix 2026-08-25 (found by external audit): this used to scan the last
+    50 rows with no day-boundary check, so the first bars of a new session
+    could report yesterday's KDJ cross as age 1/2/3 — the exact bug class
+    mm/strategy.py's entry gate was fixed for on 2026-06-17, missed here
+    because this is telemetry, not the entry gate itself. That mislabeling
+    directly corrupts the w=0-vs-w>0 subset comparison this field exists to
+    support (see evaluation_criteria.md, BB+KDJ section). Now bounded to the
+    same calendar day as the current bar, same as mm/strategy.py's
+    kdj_in_window groupby.
     """
-    if "kdj_golden_cross" not in df_signals.columns:
+    if "kdj_golden_cross" not in df_signals.columns or df_signals.empty:
         return None
-    tail = df_signals["kdj_golden_cross"].tail(max_lookback).tolist()
+    today = pd.Timestamp(df_signals["time_key"].iloc[-1]).date()
+    day_mask = pd.to_datetime(df_signals["time_key"]).dt.date == today
+    same_day = df_signals.loc[day_mask, "kdj_golden_cross"]
+    tail = same_day.tail(max_lookback).tolist()
     for age, fired in enumerate(reversed(tail)):
         if bool(fired):
             return age
