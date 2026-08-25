@@ -206,6 +206,27 @@ cross, mirroring `mm/strategy.py`'s existing `groupby(day_key)` pattern exactly.
 **Tests:** `tests/test_kdj_cross_age.py` — a cross late on day 1 followed by day-2 bars must
 return `None`, not a leaked age; same-day crosses still resolve correctly.
 
+### load_regime_today() didn't validate prompt_version against the current experiment — FOUND & FIXED 2026-08-25
+**What it was:** `mm/morning_regime.py::load_regime_today()` read `logs/regime_YYYY-MM-DD.json` by
+date filename only, checked the label was a valid enum, and returned it — it never compared the
+file's stored `model`/`prompt_version` fields (both already logged by `classify_regime()`) against
+the currently configured model/prompt. Consequence: after any model or prompt change (e.g. the
+Haiku→Sonnet split, or Phase 2 of the volatility-engine plan adding vol_state context to the
+prompt), a cached file from the old classifier would be silently reused as if the current one
+produced it — mixing two different classifiers' outputs into what's treated as one evaluation
+cohort in `validate_regime.py --from-cache`.
+**Fix:** `load_regime_today()` now compares the cached file's `prompt_version` against the module's
+`PROMPT_VERSION` constant; a mismatch (including a missing field, for pre-versioning files) falls
+back to `"neutral"`, same fail-open behavior as a missing/malformed file, rather than trusting
+stale-version output.
+**Why this is a hard prerequisite for the volatility-engine plan's Phase 2** (feeding `vol_state`
+into the regime prompt): without this check, Phase 2's new prompt would silently blend with old
+labels in any future validation run. `PROMPT_VERSION` must be bumped (`"v1"` → `"v2"`) when Phase 2
+ships.
+**Tests:** `tests/test_regime_gate.py::TestLoadRegimeToday` —
+`test_stale_prompt_version_falls_back_to_neutral`,
+`test_missing_prompt_version_field_falls_back_to_neutral`.
+
 ### Stale cfg in mm/data.py poisoned the live research archive — FOUND & FIXED 2026-08-24
 **What it was:** `mm/data.py` imported config as `from .config import cfg`, binding the singleton
 at import time — the exact anti-pattern CLAUDE.md documents and that was fixed in
@@ -519,17 +540,6 @@ irreversibly. This is the same never-pruned archive the 2026-08-24 stale-cfg bug
 proved is fragile. Fix direction: on a read exception, log loudly, quarantine the unreadable file
 (rename with a `.corrupt-TIMESTAMP` suffix) and fail the call rather than silently overwriting —
 force a human to look at it once instead of erasing the evidence automatically.
-
-**`load_regime_today()` doesn't validate model/prompt version against the current experiment**
-(`mm/morning_regime.py`). The loader reads `logs/regime_YYYY-MM-DD.json` by date filename only,
-checks the label is a valid enum, and returns it — it never compares the file's stored `model` or
-`prompt_version` fields (both already logged, per `classify_regime()`) against the currently
-configured model/prompt. Consequence: after the documented Haiku→Sonnet model switch, re-running
-`validate_regime.py --from-cache` on a date that already has a Haiku-era regime file silently
-reuses that label instead of flagging a model mismatch — mixing two different classifiers' outputs
-into what's treated as one evaluation cohort. Fix direction: cache key / loader check should
-include model + prompt_version, and `validate_regime.py` should either regenerate or explicitly
-flag mismatched-model dates rather than silently accepting whatever's on disk.
 
 ### Evaluation methodology critique — external audit round 2026-08-25, under consideration
 Full writeup: `docs/deep/deepresearch-output-2026-08-25.md` (Deep Research, adversarial-methodology brief) and

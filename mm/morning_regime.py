@@ -320,6 +320,21 @@ def load_regime_today(date_str: str, logs_dir: Path | None = None) -> str:
 
     try:
         data = json.loads(path.read_text())
+        cached_version = data.get("prompt_version")
+        if cached_version != PROMPT_VERSION:
+            # Bug fix 2026-08-25 (found by external audit): a cached regime file
+            # written by an older prompt version must not be silently reused as
+            # if the current classifier produced it — the label's meaning can
+            # change across prompt revisions. Fail open to neutral, same as a
+            # missing file, rather than trusting stale-version output.
+            log.warning(
+                "Regime file %s has prompt_version=%r, current is %r — "
+                "treating as stale, using neutral",
+                path, cached_version, PROMPT_VERSION,
+            )
+            _regime_cache[date_str] = "neutral"
+            _regime_confidence_cache[date_str] = 0.5
+            return "neutral"
         label = data.get("regime", "neutral")
         if label not in VALID_LABELS:
             label = "neutral"

@@ -150,6 +150,24 @@ class TestLoadRegimeToday:
         l2 = load_regime_today("2026-01-05", logs_dir=tmp_path)
         assert l1 == l2 == "trending_up"
 
+    def test_stale_prompt_version_falls_back_to_neutral(self, tmp_path):
+        """Bug fix 2026-08-25: a cached file written by an older prompt version
+        must not be silently reused as if the current classifier produced it."""
+        rec = {"date": "2026-01-06", "regime": "trending_down", "confidence": 0.9,
+               "reason": "test", "model": "x", "prompt_version": "v0-old", "ts": ""}
+        (tmp_path / "regime_2026-01-06.json").write_text(json.dumps(rec))
+        label = load_regime_today("2026-01-06", logs_dir=tmp_path)
+        assert label == "neutral"
+
+    def test_missing_prompt_version_field_falls_back_to_neutral(self, tmp_path):
+        """Older regime files predating the prompt_version field entirely must
+        also be treated as stale, not trusted."""
+        rec = {"date": "2026-01-07", "regime": "choppy", "confidence": 0.6,
+               "reason": "test", "model": "x", "ts": ""}
+        (tmp_path / "regime_2026-01-07.json").write_text(json.dumps(rec))
+        label = load_regime_today("2026-01-07", logs_dir=tmp_path)
+        assert label == "neutral"
+
 
 # ---------------------------------------------------------------------------
 # Integration test — exits fire even on fully-gated day
