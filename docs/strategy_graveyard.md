@@ -206,6 +206,24 @@ cross, mirroring `mm/strategy.py`'s existing `groupby(day_key)` pattern exactly.
 **Tests:** `tests/test_kdj_cross_age.py` — a cross late on day 1 followed by day-2 bars must
 return `None`, not a leaked age; same-day crosses still resolve correctly.
 
+### _reconcile_positions()'s "offsetting positions" check didn't verify quantity or direction — FOUND & FIXED 2026-08-25
+**What it was:** when the broker showed zero net for a symbol but local state had a position, the
+code checked whether *any other strategy* on that symbol had a FILLED order (`other_filled`) and,
+if so, assumed the positions were legitimately offsetting (e.g. BB+KDJ long SPY + ORB short SPY
+netting to zero) and kept both — without ever summing signed local quantities and comparing to the
+broker's actual net. Two same-direction FILLED positions on the same symbol (e.g. bb_kdj long 10 +
+vwap_pb long 5) satisfied `other_filled=True` even though they cannot possibly explain a broker net
+of zero. In SIMULATE this can't lose real money, but it could preserve fictional positions
+indefinitely and corrupt the exact execution-quality evidence `evaluation_criteria.md`'s ORB gate
+depends on ("check slippage/fill quality FIRST").
+**Fix:** sum signed local quantities (`+qty` long, `-qty` short) across this position and any other
+FILLED positions on the same symbol; only take the offset shortcut if that sum actually nets to the
+broker's reported zero. Otherwise fall through to the existing per-order status/grace-period
+mismatch logic — unchanged for the genuine offsetting case (BB+KDJ long + ORB short still nets to 0
+and is kept), only closes the case where it doesn't.
+**Tests:** `tests/test_execution.py::test_reconcile_does_not_treat_same_direction_fills_as_valid_offset`
+— existing `test_reconcile_keeps_offsetting_positions_netting_to_zero` still passes unchanged.
+
 ### update_combined_csv()'s corruption-recovery policy destroyed history instead of failing closed — FOUND & FIXED 2026-08-25
 **What it was:** if `pd.read_csv()` on the existing archive raised *any* exception, `mm/data.py`
 logged "rebuilding from this fetch" and set `combined = df_new` — replacing the entire never-pruned
@@ -526,24 +544,6 @@ fully-unrelated sites beyond the specific fixes above.
 ---
 
 ## On Hold (parked with a gate condition)
-
-### External audit round 2026-08-25 — confirmed bugs, not yet fixed
-Three more findings from the same audit round were verified against source but not fixed this
-session — recorded here so they aren't lost. None require a knob change; all are pure correctness
-fixes whenever picked up.
-
-**`_reconcile_positions()`'s "offsetting positions" check doesn't check quantity or direction**
-(`mm/execution.py`, `_reconcile_positions`). When the broker shows zero net for a symbol but local
-state has a position, the code checks whether *any other strategy* on that symbol has a FILLED
-order (`other_filled`) and, if so, assumes the positions are legitimately offsetting (e.g. BB+KDJ
-long SPY + ORB short SPY netting to zero) and keeps both. It never actually sums signed local
-quantities and compares to broker net. Two stale same-direction longs on the same symbol both
-being FILLED satisfies `other_filled=True` even though they cannot possibly explain a broker net
-of zero. In SIMULATE this can't lose real money, but it can preserve fictional positions and
-corrupt the exact execution-quality evidence `evaluation_criteria.md`'s ORB gate depends on
-("check slippage/fill quality FIRST"). Fix direction: sum signed local quantities per symbol,
-compare to broker net quantity/side directly, and only fall through to the order-status grace
-logic for genuine fill-race timing, not as a stand-in for a real net-quantity check.
 
 ### Evaluation methodology critique — external audit round 2026-08-25, under consideration
 Full writeup: `docs/deep/deepresearch-output-2026-08-25.md` (Deep Research, adversarial-methodology brief) and

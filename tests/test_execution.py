@@ -200,6 +200,46 @@ def test_reconcile_cancels_and_clears_pending_order_past_grace(monkeypatch, tmp_
     elogs["US.IWM"].error.assert_called_once()
 
 
+def test_reconcile_does_not_treat_same_direction_fills_as_valid_offset(monkeypatch, tmp_path):
+    """Bug fix 2026-08-25: two same-direction positions on the same symbol
+    (bb_kdj long 10 + vwap_pb long 5, filled) cannot explain a broker net of
+    zero — the old 'any other FILLED order' check would wrongly treat this as
+    a valid offsetting pair and keep bb_kdj's ambiguous-status leg forever.
+    Signed qty must actually net to 0 to take the offset shortcut; here it
+    nets to +15, so bb_kdj's leg (own order status unknown) must fall through
+    to the normal ghost-clearing logic (past grace → clear). vwap_pb's own
+    order independently shows FILLED, so it's kept on its own evidence —
+    unrelated to the netting bug being tested here."""
+    now = datetime(2026, 6, 18, 11, 0, 0)
+    monkeypatch.setattr(execution.clock, "now_et", lambda: now)
+    monkeypatch.setattr(execution, "notify", lambda *a, **k: None)
+
+    broker_df = pd.DataFrame(columns=["code", "qty"])  # broker shows 0 net SPY (real ghost)
+    # bb_kdj's own order status deliberately absent (unknown), same as the
+    # existing offsetting-positions test — forces reliance on the net-qty check.
+    statuses = {"order_b": "FILLED_ALL"}
+    tctx = _FakeReconcileTctx(broker_df, statuses)
+
+    old_entry = datetime(2026, 6, 18, 10, 0, 0)  # 60 min old, past 30-min grace
+    pos_a = PaperPosition(symbol="US.SPY", strategy="bb_kdj", entry_time=old_entry,
+                          entry_price=100.0, stop_price=95.0, qty=10.0,
+                          order_id="order_a", direction="long")
+    pos_b = PaperPosition(symbol="US.SPY", strategy="vwap_pb", entry_time=old_entry,
+                          entry_price=100.0, stop_price=95.0, qty=5.0,
+                          order_id="order_b", direction="long")
+    positions = {("US.SPY", "bb_kdj"): pos_a, ("US.SPY", "vwap_pb"): pos_b}
+    elogs = {"US.SPY": MagicMock()}
+
+    execution._reconcile_positions(tctx, acc_id=1, positions=positions, elogs=elogs)
+
+    # Bug: old code would keep bb_kdj's leg since vwap_pb has a FILLED order on
+    # the symbol, regardless of whether quantities actually offset.
+    # Fixed: signed qty nets to +15 (not 0) — not a valid offset, so bb_kdj's
+    # ambiguous-status leg is a genuine ghost and clears.
+    assert positions[("US.SPY", "bb_kdj")] is None
+    elogs["US.SPY"].error.assert_called_once()
+
+
 def test_reconcile_keeps_position_broker_confirms(monkeypatch):
     """Sanity check the non-mismatch path: broker shows the symbol, nothing happens."""
     now = datetime(2026, 6, 18, 10, 0, 0)

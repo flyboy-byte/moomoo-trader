@@ -107,17 +107,37 @@ def _reconcile_positions(
             # that means offsetting long+short positions net to 0, which is valid
             # (e.g. BB+KDJ long SPY + ORB short SPY). Clearing either position in
             # that scenario would leave a stranded unmanaged trade.
-            other_filled = any(
-                p is not None and p.order_id and
+            #
+            # Bug fix 2026-08-25 (found by external audit): the original check only
+            # asked "does ANY other strategy on this symbol have a FILLED order?" —
+            # true for two same-direction FILLED positions (e.g. bb_kdj long 10 +
+            # vwap_pb long 5) that cannot possibly explain a broker net of zero.
+            # That misclassified a genuine ghost pair as a valid offset and left
+            # both stranded forever. Now: sum SIGNED local qty (this position plus
+            # any other FILLED ones on the same symbol, + for long / - for short)
+            # and only treat it as a valid offset if that sum actually nets to the
+            # broker's reported zero — otherwise fall through to the normal
+            # per-order mismatch/grace-period logic below.
+            other_filled_positions = [
+                (ostrat, p) for (osym, ostrat), p in positions.items()
+                if osym == sym and ostrat != strat and p is not None and p.order_id and
                 _order_status(tctx, acc_id, p.order_id) in _FILLED_STATUSES
-                for (osym, ostrat), p in positions.items()
-                if osym == sym and ostrat != strat
-            )
-            if other_filled:
-                log.info("RECONCILE SKIP [%s/%s]: broker net=0 but another strategy on %s "
-                         "has FILLED order — treating as offsetting positions, keeping",
-                         sym, strat, sym)
-                continue
+            ]
+            if other_filled_positions:
+                def _signed_qty(p: "PaperPosition") -> float:
+                    return p.qty if p.direction == "long" else -p.qty
+
+                local_net = _signed_qty(pos) + sum(_signed_qty(p) for _, p in other_filled_positions)
+                if abs(local_net) < 1e-6:
+                    log.info("RECONCILE SKIP [%s/%s]: broker net=0 and signed local qty on %s "
+                             "nets to 0 across FILLED strategies — valid offsetting positions, keeping",
+                             sym, strat, sym)
+                    continue
+                log.warning(
+                    "RECONCILE: %s has other FILLED order(s) but signed local qty nets to "
+                    "%.2f (not 0) — not a valid offset, falling through to per-order check",
+                    sym, local_net,
+                )
 
             status = _order_status(tctx, acc_id, pos.order_id)
             age_min = (now_et - pd.Timestamp(pos.entry_time).to_pydatetime()).total_seconds() / 60
