@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """
-Daily VIX shadow-logger — observational only, never touches live entry logic.
+Daily VIX fetcher — writes logs/vix_daily.jsonl, consumed live by three paths.
 
 Logs yesterday's settled VIX close (the value actually knowable before market
 open — same-day close, used by the original backtest in
 scripts/backtest_vix_filter.py, has lookahead bias) plus what 2-3 already
-graveyard-tested VIX block thresholds would have decided for today, purely
-for forward observation. Nothing reads this file; nothing in mm/ changes
-behavior based on it. See docs/strategy_graveyard.md — VIX daily regime
-filter already tested and failed OOS on 2022-2025 backtest data. This script
-exists to see whether forward live data agrees or disagrees, without
-re-opening the knob freeze.
+graveyard-tested VIX block thresholds would have decided for today.
+
+STALE COMMENT FIX 2026-08-25 (external audit caught this): this docstring
+used to claim "nothing reads this file; nothing in mm/ changes behavior
+based on it." That was true when this script was first written but has not
+been true since the ORB/gap_fade VIX gates and the LLM regime classifier
+were built — all three now read vix_daily.jsonl's vix_prev_close as their
+input:
+  - mm/evals.py::_load_vix_today() — direct ORB_VIX_MAX / GAP_VIX_MAX gates
+    (mm/evals.py lines ~675, ~711, ~918)
+  - mm/morning_regime.py::_load_vix() — one input to classify_regime(),
+    which gates bb_kdj/bb_kdj_loose entries
+This script is still the correct single source of truth for prior-day VIX —
+just don't trust this comment's old claim about who reads it.
 
 Source: yfinance ^VIX (free, no API key, already a project dependency).
 
