@@ -1,6 +1,13 @@
 # Route 2 — LLM Signal Layer (Claude API)
 
-**Status:** Phase 3 — shadow mode live (as of 2026-07-22)
+**Status (updated 2026-08-25, doc body below not yet refreshed — see FRAMEWORK.md for current
+phase tracking):** regime gate live and blocking (`REGIME_GATE_ENABLED=true` since 2026-07-26,
+labels `trending_up`/`trending_down`), Phase 4 in `FRAMEWORK.md`. ORB scorer + weekly synthesis
+both live, both moved to `claude-haiku-4-5` (was Sonnet) 2026-08-25 for cost — only
+`classify_regime()` (below) stays on Sonnet, the one call that actually blocks trades. An
+extension of this route — a deterministic volatility term-structure engine feeding richer context
+into `classify_regime()`'s prompt, plus a future ALLOW/TIGHTEN/BLOCK policy — is tracked
+separately in `route-2b-volatility-engine.md`, not folded into this doc's body.
 **Priority:** High (primary candidate)
 
 ---

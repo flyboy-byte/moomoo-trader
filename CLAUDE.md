@@ -134,9 +134,15 @@ strategy, a doc cleanup). Don't treat this list as a gate against doing other us
 - Accumulate live data — most "what does the data say" questions need more samples.
   See docs/evaluation_criteria.md for the actual pre-registered sample-size gates per strategy.
 - docs/expand_plan.md is the original 5-option roadmap — all 5 options are done or explored.
-  Next phase is in docs/expansions/ — start at docs/expansions/FRAMEWORK.md.
-  Two primary routes: Route 1 (data mining, scripts/mine_*.py) and
-  Route 2 (LLM regime gate, mm/morning_regime.py + mm/evals.py).
+  Next phase is in docs/expansions/ — start at docs/expansions/FRAMEWORK.md (it has an explicit
+  "Current status" section — read that first, it's the authoritative "where are we").
+  Two primary routes: Route 1 (data mining, scripts/mine_*.py, COMPLETE) and
+  Route 2 (LLM regime gate, mm/morning_regime.py + mm/evals.py, live and gating).
+  Route 2b (docs/expansions/route-2b-volatility-engine.md, started 2026-08-25) is a 6-phase
+  extension — deterministic volatility term-structure engine (mm/vol_engine.py, shadow-only,
+  Phase 1+3 done) feeding richer context into the regime gate, eventually a bounded
+  ALLOW/TIGHTEN/BLOCK policy. Phase 2 needs a few sessions of real logs/vol_state.jsonl data
+  before it can start — don't skip ahead to it on synthetic data.
 - Gap Fade (mm/gap_fade.py) is LIVE as of 2026-07-12. Fires once per day at 9:35 ET.
   GAP_LARGE_SHORT_FILTER_ENABLED=true on VPS (blocks gap-up shorts >1.0% — IS/OOS confirmed bad edge).
   GAP_PREMARKET_FILTER_ENABLED=false (shadow mode only, logs would_filter_skip).
