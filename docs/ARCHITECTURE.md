@@ -104,7 +104,8 @@ MAX_POSITION_DOLLARS=900        # the ACTIVE sizing path, since TOTAL_CAPITAL=0
 TRD_ENV=SIMULATE                # NEVER change to REAL
 LIVE_TRADING_ENABLED=false      # NEVER change to true
 ANTHROPIC_API_KEY=              # in .env only, never committed
-ANTHROPIC_MODEL=claude-sonnet-5
+ANTHROPIC_MODEL=claude-sonnet-5       # regime gate only — the one LLM call that blocks live trades
+ANTHROPIC_MODEL_CHEAP=claude-haiku-4-5-20251001  # ORB scorer (shadow) + weekly synthesis — split 2026-08-25
 REGIME_GATE_ENABLED=true        # blocks bb_kdj/loose on trending days; fail-open
 REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose
 REGIME_SKIP_LABELS=trending_up,trending_down  # flipped 2026-07-26 (choppy PF=0.928 is fine)

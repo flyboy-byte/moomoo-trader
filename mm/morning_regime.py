@@ -480,7 +480,7 @@ def synthesize_week(
     try:
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
         msg = client.messages.create(
-            model=cfg.anthropic_model,
+            model=cfg.anthropic_model_cheap,
             max_tokens=512,
             system=(
                 "You are a trading strategy analyst reviewing paper-trading results. "
@@ -510,7 +510,7 @@ def synthesize_week(
         "week": week_str,
         "stats": stats,
         "analysis": analysis,
-        "model": cfg.anthropic_model,
+        "model": cfg.anthropic_model_cheap,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -572,7 +572,7 @@ def score_orb_setup(
     try:
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
         msg = client.messages.create(
-            model=cfg.anthropic_model,
+            model=cfg.anthropic_model_cheap,
             max_tokens=128,
             system=_ORB_SCORE_SYSTEM,
             messages=[{"role": "user", "content": prompt}],

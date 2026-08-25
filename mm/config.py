@@ -156,7 +156,15 @@ class Config:
     # classify_regime() calls Claude API at 9:20 ET, writes logs/regime_YYYY-MM-DD.json.
     # _eval_* functions check the label before entry. Fail-open: missing file = "neutral".
     anthropic_api_key: str = _get("ANTHROPIC_API_KEY", "")
+    # Regime gate is the one LLM call that actually blocks live trades (validated
+    # 2026-07-26 batch run, ~23% of days gated) — keep it on whatever model was used
+    # to validate REGIME_SKIP_LABELS. Everything else (ORB scorer, weekly synthesis)
+    # is shadow-mode/summarization, not decision-load-bearing, so it defaults to the
+    # cheaper model independently — added 2026-08-25 after the ORB scorer was found
+    # to be spending Sonnet calls on every setup despite ORB_ENTRY_MIN_CONFIDENCE=0.0
+    # meaning its output was never blocking anything (see strategy_graveyard.md).
     anthropic_model: str = _get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    anthropic_model_cheap: str = _get("ANTHROPIC_MODEL_CHEAP", "claude-haiku-4-5-20251001")
     regime_gate_enabled: bool = _bool("REGIME_GATE_ENABLED", False)
     # Strategies the gate applies to. Empty = gate applies to all active strategies.
     regime_gate_strategies: list[str] = [
