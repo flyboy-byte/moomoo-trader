@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 
 from mm.data import update_combined_csv
@@ -54,3 +55,22 @@ def test_update_combined_csv_extended_time_separate_file(tmp_path):
     assert rth_path != ext_path
     assert "_EXT_" in ext_path.name
     assert "_EXT_" not in rth_path.name
+
+
+def test_update_combined_csv_quarantines_corrupt_archive_instead_of_wiping(tmp_path):
+    """Bug fix 2026-08-25: an unreadable existing archive must be quarantined
+    and the call must raise, never silently replaced with just the new fetch
+    (that used to erase years of never-pruned history)."""
+    _config.cfg.logs_dir = tmp_path
+    path = tmp_path / "US_IWM_K_5M_combined.csv"
+    path.write_text("not,a,valid,csv\x00\x01garbage")
+
+    df = _df([("2026-06-16 09:35:00", 100.0)])
+    with pytest.raises(Exception):
+        update_combined_csv(df, "US.IWM", "K_5M")
+
+    # Original path must not silently contain just the new fetch.
+    assert not path.exists() or path.read_text().startswith("not,a,valid,csv")
+    quarantined = list(tmp_path.glob("US_IWM_K_5M_combined.corrupt-*.csv"))
+    assert len(quarantined) == 1
+    assert "garbage" in quarantined[0].read_text()

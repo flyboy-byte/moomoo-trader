@@ -23,9 +23,9 @@ PATTERN = re.compile(r"\bdatetime\.now\(\)|\bdate\.today\(\)")
 ALLOWLIST = {
     # Fetch-window padding only — an off-by-one day shifts the buffer size,
     # never compared against ET-keyed state.
-    ("mm/data.py", 39),
-    ("mm/data.py", 41),
-    ("mm/data.py", 87),  # research-archive filename, "when fetched", not trading-day-keyed
+    ("mm/data.py", 40),
+    ("mm/data.py", 42),
+    ("mm/data.py", 88),  # research-archive filename, "when fetched", not trading-day-keyed
     ("scripts/fetch_daily_archive.py", 42),
     ("scripts/fetch_daily_archive.py", 43),
     ("scripts/fetch_vix_morning.py", 56),

@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 from moomoo import RET_OK, KLType, AuType, KL_FIELD
 
+from . import clock
 from . import config as _config
 from .connection import quote_context
 from .logger import get_logger
@@ -117,10 +118,24 @@ def update_combined_csv(
             combined = pd.concat([df_old, df_new], ignore_index=True)
         except Exception as e:
             # A crash mid-write (VPS restart, OOM) can leave this file truncated/corrupt.
-            # Don't propagate forever — log loudly and rebuild from this fetch onward
-            # rather than permanently breaking every future update + anything that reads it.
-            log.error("Existing archive %s unreadable (%s) — rebuilding from this fetch", path, e)
-            combined = df_new
+            # Bug fix 2026-08-25 (found by external audit): this used to log and silently
+            # rebuild `combined = df_new`, which replaces the ENTIRE multi-year never-pruned
+            # archive with whatever's in the current small fetch, then commits that
+            # truncated version atomically and irreversibly — the archive corruption bug
+            # documented in docs/strategy_graveyard.md. Quarantine the unreadable file
+            # instead and fail loudly so a human looks at it once, rather than erasing
+            # years of history automatically. Caller (scripts/fetch_daily_archive.py)
+            # already catches per-symbol so one corrupt archive doesn't block the rest.
+            quarantine = path.with_name(
+                f"{path.stem}.corrupt-{clock.now().strftime('%Y%m%dT%H%M%S')}{path.suffix}"
+            )
+            os.replace(path, quarantine)
+            log.error(
+                "Existing archive %s unreadable (%s) — quarantined to %s, NOT rebuilt "
+                "(refusing to silently wipe history); investigate and restore/discard manually",
+                path, e, quarantine,
+            )
+            raise
     else:
         combined = df_new
 

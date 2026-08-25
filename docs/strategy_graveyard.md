@@ -206,6 +206,22 @@ cross, mirroring `mm/strategy.py`'s existing `groupby(day_key)` pattern exactly.
 **Tests:** `tests/test_kdj_cross_age.py` — a cross late on day 1 followed by day-2 bars must
 return `None`, not a leaked age; same-day crosses still resolve correctly.
 
+### update_combined_csv()'s corruption-recovery policy destroyed history instead of failing closed — FOUND & FIXED 2026-08-25
+**What it was:** if `pd.read_csv()` on the existing archive raised *any* exception, `mm/data.py`
+logged "rebuilding from this fetch" and set `combined = df_new` — replacing the entire never-pruned
+multi-year archive with whatever the current small cron fetch contained, then atomically committing
+that truncated version over the real file. The 2026-06-18 atomic-write fix (temp file +
+`os.replace()`) prevents a *partial* write from corrupting the file on a mid-write crash, but did
+nothing to prevent this — a full-history wipe on any read exception, committed atomically and
+irreversibly. Same never-pruned archive the 2026-08-24 stale-cfg bug (above) already proved is
+fragile.
+**Fix:** on a read exception, quarantine the unreadable file (rename to
+`{name}.corrupt-{timestamp}{suffix}` via `os.replace()`) and re-raise instead of silently
+overwriting — a human has to look at it once instead of the evidence being erased automatically.
+`scripts/fetch_daily_archive.py` (the only caller) already catches per-symbol, so one corrupt
+archive raising doesn't block the rest of that cron run from updating other symbols.
+**Tests:** `tests/test_data.py::test_update_combined_csv_quarantines_corrupt_archive_instead_of_wiping`.
+
 ### load_regime_today() didn't validate prompt_version against the current experiment — FOUND & FIXED 2026-08-25
 **What it was:** `mm/morning_regime.py::load_regime_today()` read `logs/regime_YYYY-MM-DD.json` by
 date filename only, checked the label was a valid enum, and returned it — it never compared the
@@ -528,18 +544,6 @@ corrupt the exact execution-quality evidence `evaluation_criteria.md`'s ORB gate
 ("check slippage/fill quality FIRST"). Fix direction: sum signed local quantities per symbol,
 compare to broker net quantity/side directly, and only fall through to the order-status grace
 logic for genuine fill-race timing, not as a stand-in for a real net-quantity check.
-
-**`update_combined_csv()`'s corruption-recovery policy destroys history instead of failing
-closed** (`mm/data.py`). If `pd.read_csv()` on the existing archive raises *any* exception, the
-code logs "rebuilding from this fetch" and sets `combined = df_new` — replacing the entire
-multi-year archive with whatever the current small fetch contains, then atomically committing
-that truncated version over the real file. The 2026-06-18 atomic-write fix (temp file +
-`os.replace()`) prevents a *partial* write from corrupting the file on a mid-write crash, but does
-nothing to prevent this — a full-history wipe on any read exception, committed atomically and
-irreversibly. This is the same never-pruned archive the 2026-08-24 stale-cfg bug (above) already
-proved is fragile. Fix direction: on a read exception, log loudly, quarantine the unreadable file
-(rename with a `.corrupt-TIMESTAMP` suffix) and fail the call rather than silently overwriting —
-force a human to look at it once instead of erasing the evidence automatically.
 
 ### Evaluation methodology critique — external audit round 2026-08-25, under consideration
 Full writeup: `docs/deep/deepresearch-output-2026-08-25.md` (Deep Research, adversarial-methodology brief) and
