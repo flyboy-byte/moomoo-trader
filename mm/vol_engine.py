@@ -33,7 +33,18 @@ tried, and OpenD cannot supply it either without a paid Moomoo option-quote
 upgrade (tested live against the VPS's OpenD connection 2026-08-25 — see
 docs/strategy_graveyard.md). IWM shares the shared VIX-family signal for now.
 
-Source: yfinance (free, no API key, already a project dependency).
+IMPORTANT — data-quality caveat, not a nice-to-have: yfinance is an
+unofficial Yahoo Finance interface (no API key, no SLA), not a paid data
+feed. It can throttle, return stale/frozen values, or fail silently rather
+than raising — the "only 1 day of history" limitation above was discovered
+exactly this way, not via an exception. `fetch_vol_levels()` therefore
+returns per-ticker freshness/error metadata (`as_of` date, `stale` flag,
+`error` string) alongside the levels, not just the levels themselves — this
+must stay first-class so a silently-stale ticker doesn't get treated as a
+real reading once Phase 2 makes this load-bearing to the regime classifier.
+
+Source: yfinance (no API key, already a project dependency, but NOT a
+guaranteed-uptime data feed — see data-quality caveat above).
 """
 from __future__ import annotations
 
@@ -80,30 +91,70 @@ def _level_bucket(field: str, value: float | None) -> str | None:
     return "extreme"
 
 
-def fetch_vol_levels() -> dict[str, float | None]:
+# A fetched close older than this many calendar days is treated as stale — covers a
+# normal weekend/holiday gap (e.g. Friday close read on Saturday) without flagging it,
+# but catches a ticker that's silently returning cached/frozen data across multiple
+# trading days (a known yfinance failure mode, not hypothetical — see module docstring).
+_STALE_AFTER_DAYS = 4
+
+
+def fetch_vol_levels() -> tuple[dict[str, float | None], dict[str, dict]]:
     """Fetch current values for all 9 tickers via yfinance. Fail-open per
     ticker: one bad ticker returns None for that field, doesn't abort the
-    whole fetch."""
+    whole fetch.
+
+    yfinance is an unofficial Yahoo Finance interface, not a paid data feed with
+    an SLA — it can throttle, return stale/cached data, or fail intermittently
+    without raising (verified 2026-08-25: several of these tickers only ever
+    return a single day of history regardless of query params, a silent
+    limitation, not an exception). Freshness and error state must therefore be
+    first-class, not assumed — this is exactly why Phase 1 ships shadow-only:
+    the vol engine's own data quality gets observed before Phase 2 makes it
+    load-bearing to the regime classifier.
+
+    Returns (levels, meta) — meta[field] = {"as_of": "YYYY-MM-DD" | None,
+    "stale": bool, "error": str | None}. "stale" means the fetched close is
+    more than _STALE_AFTER_DAYS old, i.e. yfinance handed back an old cached
+    value instead of a genuine failure.
+    """
     import warnings
 
     import yfinance as yf
+    from . import clock
+
     warnings.filterwarnings("ignore")
 
+    today = clock.today()
     levels: dict[str, float | None] = {}
+    meta: dict[str, dict] = {}
     for field, ticker in TICKERS.items():
         try:
             df = yf.download(ticker, period="5d", progress=False, auto_adjust=False)
             if df.empty:
                 levels[field] = None
+                meta[field] = {"as_of": None, "stale": False, "error": "empty response"}
                 continue
             close = df["Close"]
             if hasattr(close, "iloc") and close.ndim > 1:
                 close = close.iloc[:, 0]
             close = close.dropna()
-            levels[field] = round(float(close.iloc[-1]), 2) if not close.empty else None
-        except Exception:
+            if close.empty:
+                levels[field] = None
+                meta[field] = {"as_of": None, "stale": False, "error": "no non-null close"}
+                continue
+            as_of = close.index[-1]
+            as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
+            age_days = (today - as_of_date).days
+            levels[field] = round(float(close.iloc[-1]), 2)
+            meta[field] = {
+                "as_of": str(as_of_date),
+                "stale": age_days > _STALE_AFTER_DAYS,
+                "error": None,
+            }
+        except Exception as e:
             levels[field] = None
-    return levels
+            meta[field] = {"as_of": None, "stale": False, "error": str(e)}
+    return levels, meta
 
 
 def compute_vol_state(levels: dict[str, float | None]) -> dict:

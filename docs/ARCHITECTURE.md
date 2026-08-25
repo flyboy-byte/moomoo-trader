@@ -122,7 +122,11 @@ ratios (vix1d/vix etc.) are logged raw but not bucketed — yfinance has zero hi
 for those 6 tickers, only VIX/VVIX/VXN have real 5-year history to threshold from. IWM has no
 free small-cap-specific vol index (`^RVX` doesn't resolve via yfinance; OpenD can't supply it
 either without a paid quote upgrade — both tested live 2026-08-25) — shares the VIX bucket.
-Full plan: `docs/expansions/route-2-llm-signals.md`.
+`fetch_vol_levels()` returns per-ticker freshness/error metadata (`as_of` date, `stale` flag,
+`error` string) alongside the levels — yfinance is an unofficial Yahoo interface, not a paid
+feed with an SLA, and can silently return frozen/cached data rather than raising (this is how
+the term-structure backfill gap above was actually discovered). Logged as `fetch_meta` in each
+`vol_state.jsonl` record. Full plan: `docs/expansions/route-2-llm-signals.md`.
 
 ## Kill Switches (runtime, no restart needed)
 

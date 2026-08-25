@@ -1,12 +1,22 @@
 """Tests for mm.vol_engine's deterministic classification (no AI, pure math).
 
-fetch_vol_levels() hits the network (yfinance) and isn't unit-tested here —
-it's exercised via scripts/fetch_vol_state.py --dry-run in practice. These
-tests cover compute_vol_state(), which is pure and deterministic, using the
-real percentile thresholds calibrated from 5-year yfinance history 2026-08-25
-(see mm/vol_engine.py's _LEVEL_THRESHOLDS).
+The network-fetching part of fetch_vol_levels() (the yf.download() call
+itself) isn't unit-tested here — it's exercised via
+scripts/fetch_vol_state.py --dry-run in practice. Most of these tests cover
+compute_vol_state(), which is pure and deterministic, using the real
+percentile thresholds calibrated from 5-year yfinance history 2026-08-25
+(see mm/vol_engine.py's _LEVEL_THRESHOLDS). The freshness/error metadata
+tests below mock yf.download() directly to verify fetch_vol_levels()'s
+data-quality tracking (added 2026-08-25 per external feedback: yfinance is
+an unofficial interface that can silently return stale data, not a feed
+with an SLA — this must be first-class, not assumed).
 """
-from mm.vol_engine import compute_vol_state
+from datetime import date
+from unittest.mock import patch
+
+import pandas as pd
+
+from mm.vol_engine import compute_vol_state, fetch_vol_levels
 
 
 def _levels(**overrides) -> dict:
@@ -71,3 +81,48 @@ def test_levels_passthrough_unchanged():
     raw = _levels(vix=17.4, vvix=95.0)
     state = compute_vol_state(raw)
     assert state["levels"] == raw
+
+
+# ---------------------------------------------------------------------------
+# fetch_vol_levels() freshness/error metadata (yf.download mocked)
+# ---------------------------------------------------------------------------
+
+def _fake_close_df(as_of: date, value: float) -> pd.DataFrame:
+    idx = pd.DatetimeIndex([pd.Timestamp(as_of)])
+    return pd.DataFrame({"Close": [value]}, index=idx)
+
+
+def test_fetch_fresh_close_not_flagged_stale():
+    with patch("yfinance.download", return_value=_fake_close_df(date(2026, 8, 24), 15.85)), \
+         patch("mm.clock.today", return_value=date(2026, 8, 25)):
+        levels, meta = fetch_vol_levels()
+    assert levels["vix"] == 15.85
+    assert meta["vix"] == {"as_of": "2026-08-24", "stale": False, "error": None}
+
+
+def test_fetch_old_close_flagged_stale():
+    """A close more than _STALE_AFTER_DAYS old means yfinance handed back a
+    frozen/cached value instead of a genuine failure — must be flagged, not
+    silently treated as a real current reading."""
+    with patch("yfinance.download", return_value=_fake_close_df(date(2026, 8, 1), 15.85)), \
+         patch("mm.clock.today", return_value=date(2026, 8, 25)):
+        levels, meta = fetch_vol_levels()
+    assert levels["vix"] == 15.85  # value still returned — fail-open, just flagged
+    assert meta["vix"]["stale"] is True
+
+
+def test_fetch_empty_response_records_error_not_silent_none():
+    with patch("yfinance.download", return_value=pd.DataFrame()), \
+         patch("mm.clock.today", return_value=date(2026, 8, 25)):
+        levels, meta = fetch_vol_levels()
+    assert levels["vix"] is None
+    assert meta["vix"]["error"] == "empty response"
+    assert meta["vix"]["stale"] is False
+
+
+def test_fetch_exception_records_error_string():
+    with patch("yfinance.download", side_effect=RuntimeError("rate limited")), \
+         patch("mm.clock.today", return_value=date(2026, 8, 25)):
+        levels, meta = fetch_vol_levels()
+    assert levels["vix"] is None
+    assert meta["vix"]["error"] == "rate limited"

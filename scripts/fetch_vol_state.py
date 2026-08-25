@@ -43,16 +43,24 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="print, don't write to logs/")
     args = ap.parse_args()
 
-    levels = fetch_vol_levels()
+    levels, fetch_meta = fetch_vol_levels()
     if all(v is None for v in levels.values()):
         print("ERROR: all volatility ticker fetches failed.")
         sys.exit(1)
+
+    stale_fields = [f for f, m in fetch_meta.items() if m["stale"]]
+    error_fields = {f: m["error"] for f, m in fetch_meta.items() if m["error"]}
+    if stale_fields:
+        print(f"WARNING: stale data (yfinance returned an old cached close) for: {stale_fields}")
+    if error_fields:
+        print(f"WARNING: fetch errors for: {error_fields}")
 
     state = compute_vol_state(levels)
     record = {
         "ts": clock.now_et().isoformat(timespec="seconds"),
         "date": str(clock.today()),
         **state,
+        "fetch_meta": fetch_meta,
     }
 
     print(json.dumps(record))
