@@ -18,6 +18,10 @@ VIX_LINE='10 13 * * 2-6 cd ~/moomoo && .venv/bin/python scripts/fetch_vix_mornin
 REGIME_LINE='20 13 * * 1-5 cd ~/moomoo && .venv/bin/python scripts/classify_regime.py >> logs/cron_regime.log 2>&1'
 # 9:00 ET Monday = 13:00 UTC (EDT). Synthesizes prior week's trade events.
 SYNTHESIS_LINE='0 13 * * 1 cd ~/moomoo && .venv/bin/python scripts/weekly_synthesis.py >> logs/cron_synthesis.log 2>&1'
+# Every 15 min during market hours (9:30-16:00 ET = 13:30-20:00 UTC EDT), Mon-Fri.
+# Shadow-only data accumulation for the volatility engine (Phase 1, 2026-08-25) —
+# nothing reads vol_state.jsonl yet. See mm/vol_engine.py's docstring.
+VOL_STATE_LINE='*/15 13-20 * * 1-5 cd ~/moomoo && .venv/bin/python scripts/fetch_vol_state.py >> logs/cron_vol_state.log 2>&1'
 
 # Bug fix 2026-06-17: the old idempotency check matched on script filename
 # substring only, not the full line. If a line's schedule/args were ever
@@ -56,6 +60,7 @@ update_line "weekly_report.py" "$WEEKLY_LINE"
 update_line "fetch_vix_morning.py" "$VIX_LINE"
 update_line "classify_regime.py" "$REGIME_LINE"
 update_line "weekly_synthesis.py" "$SYNTHESIS_LINE"
+update_line "fetch_vol_state.py" "$VOL_STATE_LINE"
 
 echo "\$NEW" | crontab -
 echo ""

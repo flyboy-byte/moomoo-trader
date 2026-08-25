@@ -111,6 +111,19 @@ REGIME_GATE_STRATEGIES=bb_kdj,bb_kdj_loose
 REGIME_SKIP_LABELS=trending_up,trending_down  # flipped 2026-07-26 (choppy PF=0.928 is fine)
 ```
 
+## Volatility Engine (Phase 1, shadow-only — added 2026-08-25)
+
+`mm/vol_engine.py` + `scripts/fetch_vol_state.py` — deterministic (no AI) volatility
+term-structure classification. Fetches `VIX/VIX1D/VIX9D/VIX3M/VIX6M/VVIX/VXN/COR1M/COR3M` via
+yfinance every 15min during market hours, writes `logs/vol_state.jsonl`. **Nothing reads this
+file yet** — pure data accumulation, same status `fetch_vix_morning.py` had before the ORB/
+gap_fade/regime gates were built on it. See `mm/vol_engine.py`'s docstring for why term-structure
+ratios (vix1d/vix etc.) are logged raw but not bucketed — yfinance has zero historical backfill
+for those 6 tickers, only VIX/VVIX/VXN have real 5-year history to threshold from. IWM has no
+free small-cap-specific vol index (`^RVX` doesn't resolve via yfinance; OpenD can't supply it
+either without a paid quote upgrade — both tested live 2026-08-25) — shares the VIX bucket.
+Full plan: `docs/expansions/route-2-llm-signals.md`.
+
 ## Kill Switches (runtime, no restart needed)
 
 | File                   | Effect                                    |

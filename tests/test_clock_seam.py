@@ -28,8 +28,8 @@ ALLOWLIST = {
     ("mm/data.py", 87),  # research-archive filename, "when fetched", not trading-day-keyed
     ("scripts/fetch_daily_archive.py", 42),
     ("scripts/fetch_daily_archive.py", 43),
-    ("scripts/fetch_vix_morning.py", 48),
-    ("scripts/fetch_vix_morning.py", 49),
+    ("scripts/fetch_vix_morning.py", 56),
+    ("scripts/fetch_vix_morning.py", 57),
     # Display-only — rendered once, never persisted/compared/sorted.
     ("scripts/dashboard.py", 228),
     ("scripts/web_dashboard.py", 1009),
