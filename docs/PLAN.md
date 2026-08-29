@@ -36,6 +36,14 @@ Two goals follow from that, and they are strictly ordered:
   ever seems to require that, stop: it is a knob-freeze decision and belongs in
   `docs/evaluation_criteria.md` with a dated amendment.
 
+**Evidence strength of the steps themselves.** Steps 0, 1, 2, 5, 8–12 restate work whose basis was
+measured or run. **Steps 3, 4, and 7 were found by re-reading code and the plan on 2026-08-29 — they
+are reasoning, not test results.** Step 7 especially: that a QFQ re-fetch splices two price bases
+into an existing archive follows from what `mm/data.py` and `update_combined_csv()` do, but it has
+never been observed, because none of SPY/QQQ/IWM has split. Each of those three steps is written to
+*check* its premise first and is cheap to abandon if the premise is wrong. Do not treat them as
+established the way the Goal A numbers are.
+
 **Verify current state in one command each:**
 ```bash
 git log --oneline -1
