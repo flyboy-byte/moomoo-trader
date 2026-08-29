@@ -17,6 +17,10 @@ Build a practical Python project for AI-assisted stock strategy research and Moo
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
 Where the real state lives (read these, not your memory of past sessions):
+- docs/research-reset.md    — **START HERE (as of 2026-08-29).** The current top-priority plan:
+  measurement rebuild (Goal A) then universe expansion (Goal B). Contains the live-verified API
+  scoping numbers (history_kl_quota=100 hard cap, engine throughput, history depth) — do not
+  re-derive them. Supersedes Route 2b Phases 2-6 as the priority.
 - docs/ARCHITECTURE.md      — data flow diagram, deployed strategy table, config reference, kill switches
 - docs/PROJECT_MAP.md       — full file map, strategy specs with backtest numbers, risk/sizing, event log format
 - docs/evaluation_criteria.md — pre-registered gates per strategy (the "knob freeze" — read before touching any strategy parameter)
@@ -128,6 +132,13 @@ Strategy (BB + KDJ mean reversion, 5-min candles) — the core spec, parameters 
 Current priorities — this is a snapshot, not a sequence. Use judgment about what's actually most
 useful right now; deviate freely when something better surfaces (e.g. a dashboard bug, an unblocked
 strategy, a doc cleanup). Don't treat this list as a gate against doing other useful work.
+- **TOP PRIORITY as of 2026-08-29: docs/research-reset.md.** The 2026-08-29 audit found the
+  portfolio's measured edge (+1.31 bps weighted across 106 live trades) sits *inside* the project's
+  own 1-3 bps cost band, on frictionless fills — i.e. no demonstrated edge, and the reporting layer
+  (per-share PnL, no benchmark, no CIs, no cost model) can't show it. Goal A rebuilds measurement;
+  Goal B expands the replay universe (97 free API quota slots) so strategies can reach significance
+  in days instead of the ~26 weeks the current 3-symbol/1.8-trades-a-day design implies.
+  Route 2b Phases 2-6 are PARKED behind this, not cancelled (Phase 1 keeps logging for free).
 - Six live strategies: bb_kdj, bb_kdj_loose (live 2026-07-04, research lane), orb (SPY shorts only
   as of 2026-07-09 — QQQ+IWM shorts disabled after 0% win rate on 36 trades), vwap_pb,
   gap_fade (live 2026-07-12).

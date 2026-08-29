@@ -184,6 +184,16 @@ Same session also closed all 3 outstanding bugs from the 2026-08-25 external aud
 
 ## Current status (update this line as phases advance)
 
+**⚠️ 2026-08-29 — BOTH ROUTES PARKED behind `docs/research-reset.md`.** An audit found the live
+portfolio's weighted edge is +1.31 bps across 106 trades, inside the project's own 1–3 bps cost
+band, on frictionless fills — no demonstrated edge, and the reporting layer can't reveal it (no
+cost model, no dollar accounting, no benchmark, no CIs). Adding more strategy/AI surface (Route 2b
+Phases 2–6) on that base was judged the wrong move. New priority: rebuild measurement (Goal A),
+then expand the replay universe (Goal B) using the 97 free `history_kl_quota` slots so strategies
+reach significance in days rather than the ~26 weeks the 3-symbol design implies. Route 2b Phase 1
+keeps collecting `vol_state.jsonl` for free in the meantime. The status below remains accurate for
+what was completed; it is just no longer what to work on next.
+
 **Route 1 is COMPLETE (Phase 5 ✓ 2026-08-09) — H1 null, H2 VIX filter deployed+OOS confirmed,
 H3 autocorr parked until 2027+ data. No further build work needed for Route 1.
 Route 2 is in Phase 4 — regime gate live with corrected skip labels since 2026-07-26
