@@ -422,6 +422,49 @@ plain pnl numbers (not just objects with `.pnl`) so dict/JSONL-derived callers d
 need their own wrapper. Added `tests/test_metric_consistency.py` pinning the canonical
 definition.
 
+### Reimplemented-Metric Drift — 4th instance, written and caught in-session 2026-08-29
+**What it was:** while building `mm/stats.py` (bootstrap CIs, Goal A4 of
+`docs/research-reset.md`), a fresh `profit_factor()` was written with a `pnl < 0` loss
+convention — against the canonical `mm.backtest.profit_factor()`'s `pnl <= 0` — plus a
+`nan` empty-sentinel instead of `inf`. This is the same drift class as the three above,
+recurring 2.5 months after the consolidation that was supposed to end it, which is worth
+recording precisely *because* the guard existed and the mistake still got made.
+
+**Why the existing guard didn't stop it:** `tests/test_metric_consistency.py` pins the
+behaviour of `mm.backtest.profit_factor`, but nothing prevents a *new* module from
+defining its own function of the same name and never calling the canonical one. A static
+guard on the canonical definition doesn't cover "someone wrote a second one."
+
+**Fix:** deleted the local implementation; `mm/stats.py` now re-exports
+`mm.backtest.profit_factor`. The bootstrap resampler was also corrected to use the same
+`<= 0` convention — a CI built on a different loss convention than the point estimate it
+brackets is not guaranteed to contain it. Two new tests:
+`test_stats_reexports_the_canonical_profit_factor_not_a_copy` (asserts function
+*identity*, so a future reimplementation fails immediately rather than drifting) and
+`test_bootstrap_ci_uses_the_same_loss_convention_as_the_point_estimate`.
+
+**Standing lesson:** the category is not fully guarded. A repo-wide grep test for
+`def profit_factor` outside `mm/backtest.py` would close it properly. Not built yet —
+recorded here so the next occurrence isn't diagnosed from scratch a fifth time.
+
+### np.percentile silently returned nan for bootstrap CIs on mostly-winning samples — FOUND & FIXED 2026-08-29
+**What it was:** `mm/stats.py::bootstrap_pf_ci()` resamples trades and computes a profit
+factor per resample. Resamples containing no losses correctly give `PF = inf`. But
+`np.percentile`'s default linear interpolation computes `(b - a)` between neighbouring
+order statistics, and `inf - inf` is `nan`. On a small, mostly-winning sample, enough
+resamples are `inf` that the upper percentile lands in that region — so the *entire
+interval* came back `(nan, nan)` with only a `RuntimeWarning` on stderr. A confidence
+interval that silently evaporates on exactly the samples most likely to look impressive
+is the worst possible failure direction for this module.
+
+**Found by:** a unit test asserting `pf_ci[0] <= pf <= pf_ci[1]`, written before the bug
+was suspected. It failed on the first run with `nan` as the upper bound.
+
+**Fix:** `method="nearest"` on both percentile calls, which selects an actual order
+statistic instead of interpolating and therefore returns `inf` — the truthful answer
+("unbounded above at this sample size"). Pinned by
+`test_pf_ci_upper_bound_is_inf_not_nan_when_resamples_have_no_losses`.
+
 ---
 
 ## Bug-Hunting Methodology

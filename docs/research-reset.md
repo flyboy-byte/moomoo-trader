@@ -166,12 +166,13 @@ samples — `method="nearest"` returns `inf`, the honest answer.
 **pre-registered decision made before looking at any returns**, exactly the discipline
 `evaluation_criteria.md` already enforces for knobs.
 
-Recommended allocation (decide before fetching):
-- **~50 liquid ETFs** — sector SPDRs, index, bond, commodity. Tight spreads, closest to the domain
-  these strategies were designed in. This is the honest test of whether the edge generalizes.
-- **~35 high-liquidity single names** — mega-cap only. Wider spreads, so A1's per-symbol cost model
-  is what makes them interpretable. Tests generalization to a harder cost regime.
-- **~12 held in reserve.** Do not spend the full quota on the first pass.
+Allocation **decided 2026-08-29** (see Decisions §2 for reasoning):
+- **60 liquid ETFs** — sector SPDRs, index, bond, commodity. Tight spreads, closest to the domain
+  these strategies were designed in. This is where an edge this small is measurable at all.
+- **25 mega-cap single names** — included as a **cost-model falsification test**, with the
+  pre-registered expectation that they underperform ETFs on a net basis. If they don't,
+  `mm/costs.py` is wrong.
+- **12 held in reserve.** Do not spend the full quota on the first pass.
 
 Selection criteria fixed in advance (liquidity, median spread, price range, sector coverage), and
 **survivorship bias documented explicitly** — picking "liquid names as of 2026" and testing back to
@@ -224,9 +225,44 @@ equities has no edge — it is the most-competed trade in existence, so that is 
 crowded. The current structure cannot produce even that. The failure being fixed here is not that
 the answer is bad; it is that no answer is reachable.
 
-## Open decisions (for the user, not assumed)
+## Decisions (delegated by the user 2026-08-29, made and recorded here)
 
-1. **Capital base for A2.** What dollar figure should returns be computed against?
-2. **ETF/single-name split in B0.** Recommendation above is 50/35/12 reserve; it is a judgment call
-   about how far outside the design domain to test.
-3. **gap_fade** — suspend now on 12 trades, or hold to the pre-registered 20?
+**1. Capital base — derived from the logs, not configured.**
+Return on capital uses peak simultaneous notional (currently $4,625), computed from the trade
+events themselves, with a `--capital` override. Rejected the alternative of setting `TOTAL_CAPITAL`
+in `.env`, for two reasons: it would be a live config change on a running system for a
+reporting-only need, and a hardcoded base goes stale silently while a derived one tracks whatever
+the portfolio actually did. The number to beat is what the strategies genuinely tied up, not an
+aspirational account size.
+
+**2. Universe split — 60 ETFs / 25 mega-caps / 12 reserve** (revised up from the 50/35 sketch).
+Goal A's cost model is what changed this. Liquid ETFs are where an edge of this size is
+*measurable at all*: sector SPDRs give genuinely different underlying drivers than SPY/QQQ/IWM
+while keeping the ~1–2 bps cost regime the strategies need to survive. Single names at 5–20 bps
+would mostly produce a null driven by costs rather than by the signal, which teaches little.
+
+The 25 mega-caps stay in, but with their purpose restated: they are a **cost-model falsification
+test**, not a second edge hunt. Pre-registered expectation — if `mm/costs.py` is right, single
+names show markedly worse net results than ETFs at the same gross. If they *don't*, the cost model
+is wrong and every conclusion resting on it needs revisiting. That is worth 25 slots.
+
+**3. gap_fade — HOLD to the pre-registered 20 trades. Do not suspend.**
+This reverses my earlier lean, on the strength of two arguments:
+- **There is no capital at risk.** Suspension is a capital-protection action, and this is paper.
+  The cost of continuing is zero dollars; the cost of overriding a pre-registered gate the first
+  time it is inconvenient is the credibility of every other gate in `evaluation_criteria.md`.
+  Pre-registration is worth most precisely when the answer already looks obvious.
+- **Goal B will settle it far better than 8 more live trades would.** The wide scan will produce
+  hundreds of gap_fade instances across 85 symbols. Eight more live trades over ~4 weeks is close
+  to worthless as evidence next to that, which makes suspending now a decision with real
+  precedent-cost and almost no informational benefit.
+
+Recorded for the record: gap_fade is negative at **every** cost level including 0.0 bps
+(gross −$4.52, PF 0.29), so this is not a cost-model artifact, and gap-up shorts are 1/7 with all
+losses in the 0.3–0.8% band — *below* the existing >1% `GAP_LARGE_SHORT_FILTER` threshold. That
+sub-finding is **not** being acted on either: changing a filter threshold on 7 trades is exactly
+the parameter fitting the knob freeze exists to prevent. Both observations go to Goal B as
+hypotheses to test at scale, not to `.env` as edits.
+
+**Net effect: no live config changes from any of the three.** The plan's "does not touch the
+running system" property holds.
