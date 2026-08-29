@@ -17,10 +17,13 @@ Build a practical Python project for AI-assisted stock strategy research and Moo
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
 Where the real state lives (read these, not your memory of past sessions):
-- docs/research-reset.md    — **START HERE (as of 2026-08-29).** The current top-priority plan:
-  measurement rebuild (Goal A) then universe expansion (Goal B). Contains the live-verified API
-  scoping numbers (history_kl_quota=100 hard cap, engine throughput, history depth) — do not
-  re-derive them. Supersedes Route 2b Phases 2-6 as the priority.
+- docs/research-reset.md    — **START HERE (as of 2026-08-29).** Has a "Session state — resume from
+  here" block at the top and an explicit "Loose ends" inventory: read both before starting work.
+  Goal A (measurement rebuild) is BUILT — re-measuring the 102 live trades net of costs turned
+  gross +$12.92/PF 1.189 into net −$0.57/PF 0.992, i.e. the reported profit was the transaction
+  costs. Goal B (universe expansion) is scoped, not started, and gated on step B2a. Contains the
+  live-verified API scoping numbers (history_kl_quota=100 hard cap, ~650x engine throughput gap,
+  history depth ≥2019) — do not re-derive them. Supersedes Route 2b Phases 2-6 as the priority.
 - docs/ARCHITECTURE.md      — data flow diagram, deployed strategy table, config reference, kill switches
 - docs/PROJECT_MAP.md       — full file map, strategy specs with backtest numbers, risk/sizing, event log format
 - docs/evaluation_criteria.md — pre-registered gates per strategy (the "knob freeze" — read before touching any strategy parameter)

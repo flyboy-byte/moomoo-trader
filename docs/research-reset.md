@@ -1,7 +1,35 @@
 # Research Reset — Measurement Rebuild + Universe Expansion
 
-> **Status:** Scoped 2026-08-29. **Goal A substantially built the same day** (A1/A3/A4 done,
-> A2 done, A5 run — see "Goal A results" below). Goal B not started. A gates B.
+> **Status (2026-08-29, end of session):** Goal A **BUILT AND RUN** — A1/A2/A4/A5 done, A3 partial.
+> Goal B **NOT STARTED**, fully scoped, decisions locked. A gates B.
+> **Blocking discovery: the cost model is wired into exactly ONE script.** Wiring it into the
+> engines is now a prerequisite for B3, not polish — see "Loose ends" below. Read that section
+> before starting anything.
+
+## Session state — resume from here (2026-08-29)
+
+**Repo:** clean, `e3bc988`, pushed to `origin/master`. VPS at the same commit, services `active`,
+no kill switches. 299 tests pass (`python -m pytest tests/ -q`, ~2m45s).
+
+**Verify state in one command each:**
+```bash
+git log --oneline -1                       # expect e3bc988 or later
+python -m pytest tests/ -q                 # expect 299 passed
+python scripts/analyze_trades.py --all     # sections 1, 1b, 1c now show net-of-cost
+```
+
+**The one number that matters:** re-measuring the same 102 live trades net of costs turns
+gross +$12.92 / PF 1.189 into **net −$0.57 / PF 0.992**, CI [0.545, 1.782], P(mean>0) = 0.48.
+The reported profit *was* the transaction costs. Full detail in "Goal A results" below.
+
+**Do not re-ask / already decided** (see "Decisions" section for reasoning):
+capital base = derived peak notional; universe = 60 ETFs / 25 mega-caps / 12 reserve;
+gap_fade = hold to 20 trades, do NOT suspend, do NOT retune the short filter.
+Also deprioritized by the user earlier and not to be raised again: `ANTHROPIC_API_KEY` rotation,
+starting local OpenD.
+
+**Not a bug, expected:** `logs/vol_state.jsonl` stops growing on weekends — its cron is Mon–Fri.
+128 records as of 2026-08-29 (a Saturday) is correct.
 > **Supersedes as top priority:** Route 2b Phases 2–6 (`docs/expansions/route-2b-volatility-engine.md`)
 > — parked, not cancelled. Phase 1 keeps collecting `vol_state.jsonl` for free.
 > **Does not touch:** the live paper runner. It keeps running unchanged throughout.
@@ -191,6 +219,14 @@ The fast engines and `mm/replay.py` are different code paths and are already kno
 window with A1 costs applied and quantify the disagreement. If it's large and unexplained, the wide
 scan is measuring the engine, not the market — fix before proceeding.
 
+### B2a — Wire costs into the engines (**added 2026-08-29, mandatory before B3**)
+Discovered after Goal A shipped: `mm/costs.py` reaches only `scripts/analyze_trades.py`, so the
+engines the wide scan actually runs through are still frictionless. Wire `mm/costs.py` into
+`mm/replay.py::summarize()` and the four backtest engines, then the user-facing reporters
+(`eod_summary.py`, both dashboards) so the project stops publishing two contradictory sets of
+numbers. See "Loose ends" §1. Without this, B3's output is not comparable to Goal A's findings and
+would recreate the exact blind spot this plan exists to remove.
+
 ### B3 — Wide scan
 Fast engines across the full universe, sharded by symbol (memory, and per-symbol independence is
 what edge measurement wants anyway). **Hard IS/OOS split chosen before results are viewed.**
@@ -224,6 +260,65 @@ equities has no edge — it is the most-competed trade in existence, so that is 
 **A hard null at that sample is a real finding** and frees the engine to be pointed somewhere less
 crowded. The current structure cannot produce even that. The failure being fixed here is not that
 the answer is bad; it is that no answer is reachable.
+
+## Loose ends (honest inventory, 2026-08-29)
+
+Ordered by severity. Nothing here is hidden in a commit message; this is the list.
+
+### 1. BLOCKING FOR GOAL B — the cost model is wired into one script only
+`mm/costs.py` is imported by `scripts/analyze_trades.py` and nothing else. **35 other files that
+report PnL or PF are still frictionless**, including every backtest engine
+(`mm/backtest.py`, `mm/orb_strategy.py`, `mm/vwap_pullback.py`, `mm/gap_fade.py`,
+`mm/ema_momentum.py`), `mm/replay.py::summarize()`, and every `scripts/backtest_*.py`.
+
+Two consequences:
+- **The project currently has two contradictory rulers.** `analyze_trades.py` says net −$0.57 /
+  PF 0.992; the dashboards, `eod_summary.py` (which posts to Discord), `weekly_report.py`, and all
+  backtest scripts still say +$12.92 / PF 1.19. Whichever a future session looks at first wins.
+- **B3 cannot produce cost-aware results until this is fixed**, because the wide scan runs through
+  exactly those un-wired engines. This was not visible when the plan was written.
+
+**Plan correction: a new step B2a — wire `mm/costs.py` into the engines and `replay.summarize()` —
+sits between B2 and B3 and is mandatory.** Highest-value targets in order: `mm/replay.py`,
+the four backtest engines, then `scripts/eod_summary.py` + the two dashboards (user-facing, and
+currently reporting numbers the audit showed to be wrong).
+
+### 2. `evaluation_criteria.md` gates are silent on gross vs net
+Every gate says "PF < 1.0 at N trades" without specifying which PF. Under the old frictionless
+ruler they meant gross; several strategies pass gross and fail net (orb: 1.04 gross, 0.92 net).
+**This must be resolved explicitly before any gate is next evaluated**, and the resolution written
+into the amendment log with a date — changing the meaning of a pre-registered gate silently is
+exactly what that document exists to prevent. Recommendation: gates become net-of-cost, since net
+is the only number that corresponds to money, but that is a knob-freeze-class decision and needs
+recording, not assuming.
+
+### 3. A3 benchmark is partial, not closed
+The SPY buy-and-hold benchmark covers only to 2026-06-25 because the local archive ends there
+while trades run to 08-24. The script detects this and prints a warning rather than quoting a wrong
+number. Closes naturally when B1's bulk fetch backfills SPY. Do not treat the current
+"+2.50 pts vs benchmark" as real.
+
+### 4. Metric-drift category is still not fully guarded
+The 4th instance of reimplemented `profit_factor` was written *and caught* this session, 2.5 months
+after the consolidation meant to end it. `tests/test_metric_consistency.py` pins the canonical
+function's behaviour but cannot stop a new module defining its own. A repo-wide grep test for
+`def profit_factor` outside `mm/backtest.py` would close the category. **Not built.** Full writeup
+in `strategy_graveyard.md`.
+
+### 5. Local vs VPS candle archives are divergent by design
+Local: 2022-01-03 → 2026-06-25 (~87k bars/symbol). VPS: ~58 days rolling. `sync_logs.sh` explicitly
+excludes combined CSVs so the VPS's small archive can never overwrite local's large one. Correct as
+designed, but it means **neither machine has a complete recent+deep archive**, which is why the
+benchmark is partial (#3). B1 should fix this properly rather than working around it.
+
+### 6. Repo housekeeping (user-flagged, not started)
+`replay_2026_ytd/`, `replay_2026ytd/`, `replay_out/` in the repo root are three variants of the same
+thing. User called the directory "utter chaos" and wants a reorganization pass. Deliberately not
+started — it would collide with everything above.
+
+### 7. Route 2b is parked, not dead
+`vol_state.jsonl` keeps accumulating for free (128 records). Phase 2 remains blocked on data and is
+now additionally behind this entire plan. `docs/expansions/route-2b-volatility-engine.md` is intact.
 
 ## Decisions (delegated by the user 2026-08-29, made and recorded here)
 
