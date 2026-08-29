@@ -11,8 +11,6 @@ import anthropic
 
 from . import config as _config
 
-_HAIKU = "claude-haiku-4-5-20251001"
-
 
 def haiku_interpret(table_text: str, question: str = "") -> str:
     """Send table_text to Haiku, return its interpretation."""
@@ -21,9 +19,14 @@ def haiku_interpret(table_text: str, question: str = "") -> str:
         "or anomaly in 3-5 sentences. Be specific about numbers."
     )
     prompt = f"{table_text}\n\n{q}"
-    client = anthropic.Anthropic(api_key=_config.cfg.anthropic_api_key)
+    cfg = _config.cfg
+    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     msg = client.messages.create(
-        model=_HAIKU,
+        # Was a hardcoded "claude-haiku-4-5-20251001", which silently opted this
+        # module out of the 2026-08-25 model split — ANTHROPIC_MODEL_CHEAP exists so
+        # the cheap-model choice lives in one place and can be changed without a
+        # code edit. Fixed 2026-08-29.
+        model=cfg.anthropic_model_cheap,
         max_tokens=512,
         messages=[{"role": "user", "content": prompt}],
     )

@@ -26,6 +26,10 @@ log = get_logger("regime")
 VALID_LABELS = {"trending_up", "trending_down", "choppy", "risk_off", "neutral"}
 PROMPT_VERSION = "v1"
 
+# Output ceiling for the weekly synthesis call. A backstop with headroom, not a knob —
+# see the comment at the call site in synthesize_week().
+SYNTHESIS_MAX_TOKENS = 2048
+
 _SYSTEM = (
     "You are a pre-market US equity session classifier. "
     "Respond ONLY with a valid JSON object and nothing else. "
@@ -492,34 +496,59 @@ def synthesize_week(
     prompt = _build_synthesis_prompt(week_str, stats)
     analysis: dict = {}
     input_tokens = output_tokens = 0
+    raw = ""
+    stop_reason = None
     try:
         client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
         msg = client.messages.create(
             model=cfg.anthropic_model_cheap,
-            max_tokens=512,
+            # 2026-08-29: was 512, which silently truncated the six-field JSON schema
+            # mid-string every single week (W30-W34 all failed with "Unterminated
+            # string") and posted "No summary available." to Discord. max_tokens is a
+            # backstop, not a tuning knob — the response wants ~600 tokens, so this
+            # leaves real headroom instead of sitting on the cliff edge.
+            max_tokens=SYNTHESIS_MAX_TOKENS,
             system=(
                 "You are a trading strategy analyst reviewing paper-trading results. "
                 "Respond ONLY with a valid JSON object. No markdown, no explanation."
             ),
             messages=[{"role": "user", "content": prompt}],
         )
+        stop_reason = msg.stop_reason
+        input_tokens = msg.usage.input_tokens
+        output_tokens = msg.usage.output_tokens
         raw = _extract_text(msg)
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        if stop_reason == "max_tokens":
+            # Don't try to parse a response the API told us was cut off — say so.
+            raise ValueError(
+                f"response truncated at max_tokens={SYNTHESIS_MAX_TOKENS} "
+                f"({output_tokens} output tokens)"
+            )
         analysis = json.loads(raw)
-        input_tokens = msg.usage.input_tokens
-        output_tokens = msg.usage.output_tokens
-        _append_api_usage(logs_dir, {
-            "call_type": "weekly_synthesis",
-            "week": week_str,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "user_prompt": prompt,
-            "raw_response": raw,
-        })
     except Exception as e:
-        log.warning("Weekly synthesis API call failed (%s) — writing raw stats only", e)
-        analysis = {"error": str(e)}
+        log.warning(
+            "Weekly synthesis API call failed (%s) — stop_reason=%s, raw=%r — "
+            "writing raw stats only", e, stop_reason, raw[:500],
+        )
+        analysis = {"error": str(e), "stop_reason": stop_reason, "raw_response": raw}
+    finally:
+        # Always log usage, including on a parse failure — a call that failed still
+        # cost money, and the previous version's except-path skipped this entirely,
+        # which is why five weeks of failures left no trace in api_usage.jsonl.
+        if input_tokens or output_tokens:
+            _append_api_usage(logs_dir, {
+                "call_type": "weekly_synthesis",
+                "week": week_str,
+                "model": cfg.anthropic_model_cheap,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "stop_reason": stop_reason,
+                "parsed_ok": "error" not in analysis,
+                "user_prompt": prompt,
+                "raw_response": raw,
+            })
 
     result = {
         "week": week_str,
@@ -604,6 +633,10 @@ def score_orb_setup(
             "call_type": "orb_setup_scorer",
             "symbol": symbol,
             "bar_ts": bar_ts,
+            # Added 2026-08-29: every orb_setup_scorer record before this date has no
+            # model field (163 of 185 records in api_usage.jsonl), so the 2026-08-25
+            # Sonnet->Haiku cost split could not be verified from the project's own logs.
+            "model": cfg.anthropic_model_cheap,
             "input_tokens": msg.usage.input_tokens,
             "output_tokens": msg.usage.output_tokens,
             "user_prompt": prompt,
