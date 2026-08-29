@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm import clock  # noqa: E402
+from mm import costs, stats  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,13 @@ def _pair_trades(records: list[dict]) -> list[dict]:
         r_mult = (pnl / (risk_share * qty)) if (pnl is not None and risk_share > 0) else None
         bps = (pnl / (entry * qty) * 10000) if (pnl is not None and entry > 0) else None
 
+        # Net of transaction costs (docs/research-reset.md Goal A1). Everything above
+        # this line is frictionless and was the only view the project had until
+        # 2026-08-29; both are kept so the difference stays visible rather than being
+        # silently swapped in.
+        pnl_net = costs.net_pnl(pnl, sym, entry, qty) if pnl is not None else None
+        bps_net = costs.net_bps(pnl, sym, entry, qty) if pnl is not None else None
+
         trades.append({
             "symbol": sym,
             "strategy": strat,
@@ -160,8 +168,10 @@ def _pair_trades(records: list[dict]) -> list[dict]:
             "exit": match.get("exit") if match else None,
             "reason": match.get("reason") if match else None,
             "pnl": pnl,
+            "pnl_net": pnl_net,
             "r_mult": r_mult,
             "bps": bps,
+            "bps_net": bps_net,
             "hold_bars": match.get("hold_bars") if match else None,
             "closed": match is not None,
             "win": (match.get("pnl", 0) or 0) > 0 if match else None,
@@ -186,11 +196,151 @@ def _overview(trades: list[dict]) -> None:
     pf = gross_win / gross_loss if gross_loss > 0 else float("inf")
     print(f"  Trades opened:  {len(trades)}")
     print(f"  Trades closed:  {len(closed)}  (open: {len(trades) - len(closed)})")
-    if closed:
-        print(f"  Win rate:       {len(wins)}/{len(closed)} = {100*len(wins)/len(closed):.1f}%")
-        print(f"  Total PnL:      {total_pnl:+.2f}")
-        print(f"  Profit factor:  {pf:.3f}")
-        print(f"  Avg PnL/trade:  {total_pnl/len(closed):+.2f}")
+    if not closed:
+        return
+    print(f"  Win rate:       {len(wins)}/{len(closed)} = {100*len(wins)/len(closed):.1f}%")
+    print(f"  Total PnL:      {total_pnl:+.2f}")
+    print(f"  Profit factor:  {pf:.3f}")
+    print(f"  Avg PnL/trade:  {total_pnl/len(closed):+.2f}")
+
+    # --- net of costs, with sampling uncertainty (Goal A1 + A4) -------------------
+    gross_pnls = [t["pnl"] for t in closed if t["pnl"] is not None]
+    net_pnls = [t["pnl_net"] for t in closed if t["pnl_net"] is not None]
+    g, n = stats.summarize(gross_pnls), stats.summarize(net_pnls)
+
+    def _fmt_pf(v: float) -> str:
+        return "∞" if v == float("inf") else ("—" if v != v else f"{v:.3f}")
+
+    print()
+    print(f"  {'':<16} {'gross':>12} {'net of costs':>14}")
+    print(f"  {'-'*44}")
+    print(f"  {'Total PnL':<16} {g['total']:>+12.2f} {n['total']:>+14.2f}")
+    print(f"  {'Profit factor':<16} {_fmt_pf(g['pf']):>12} {_fmt_pf(n['pf']):>14}")
+    print(f"  {'Avg PnL/trade':<16} {g['mean']:>+12.3f} {n['mean']:>+14.3f}")
+    print(f"  {'PF 95% CI':<16} "
+          f"{f'[{_fmt_pf(g['pf_ci'][0])}, {_fmt_pf(g['pf_ci'][1])}]':>12} "
+          f"{f'[{_fmt_pf(n['pf_ci'][0])}, {_fmt_pf(n['pf_ci'][1])}]':>14}")
+    print(f"  {'P(mean > 0)':<16} {g['prob_positive']:>12.2f} {n['prob_positive']:>14.2f}")
+    print()
+    if n["pf_ci"][0] <= 1.0 <= n["pf_ci"][1]:
+        print("  ⚠  Net PF confidence interval contains 1.0 — this sample is consistent")
+        print("     with ZERO EDGE. Do not treat the point estimate as a result.")
+    print(f"  (costs: mm/costs.py — SPY/QQQ {costs.round_trip_bps('US.SPY')}bps, "
+          f"IWM {costs.round_trip_bps('US.IWM')}bps, "
+          f"unlisted {costs.DEFAULT_ROUND_TRIP_BPS}bps round trip)")
+
+
+def _capital_and_benchmark(trades: list[dict], logs_dir: Path,
+                           capital: float | None = None) -> None:
+    """Return on capital, against a buy-and-hold benchmark (Goal A2 + A3).
+
+    Per-share PnL — the unit every report in this repo used before 2026-08-29 — cannot
+    answer "did this make money", because it has no denominator. This section supplies
+    one, and the null hypothesis any equity strategy has to beat.
+    """
+    section("1c. CAPITAL, RETURN, AND BENCHMARK")
+    closed = [t for t in trades if t["closed"] and t["pnl_net"] is not None]
+    if not closed:
+        print("  No closed trades.")
+        return
+
+    # Capital required = peak simultaneous notional. Derived from the trades themselves
+    # rather than assumed, because TOTAL_CAPITAL=0 in .env disables sizing entirely and
+    # there is no configured capital base to read.
+    events: list[tuple[datetime, float]] = []
+    for t in closed:
+        notional = (t["entry"] or 0.0) * (t["qty"] or 0)
+        events.append((t["open_et"], notional))
+        if t["close_et"]:
+            events.append((t["close_et"], -notional))
+    events.sort(key=lambda e: e[0])
+    running = peak = 0.0
+    for _, delta in events:
+        running += delta
+        peak = max(peak, running)
+
+    base = capital if capital else peak
+    if base <= 0:
+        print("  Could not derive a capital base (no notional in logs).")
+        return
+
+    net_total = sum(t["pnl_net"] for t in closed)
+    gross_total = sum(t["pnl"] for t in closed if t["pnl"] is not None)
+    start_et, end_et = closed[0]["open_et"], max(t["close_et"] for t in closed if t["close_et"])
+    days = max((end_et - start_et).days, 1)
+    years = days / 365.25
+
+    print(f"  Window:              {start_et:%Y-%m-%d} → {end_et:%Y-%m-%d}  ({days} days)")
+    print(f"  Peak concurrent notional: ${peak:,.0f}   (capital base used: ${base:,.0f})")
+    if capital:
+        print("    ^ supplied via --capital")
+    else:
+        print("    ^ derived from peak simultaneous exposure; override with --capital")
+    print()
+    print(f"  Gross return on capital: {gross_total/base*100:+.2f}%"
+          f"   (annualized {((gross_total/base)/years)*100:+.1f}%)")
+    print(f"  NET   return on capital: {net_total/base*100:+.2f}%"
+          f"   (annualized {((net_total/base)/years)*100:+.1f}%)")
+
+    # Benchmark: SPY buy-and-hold over the identical window.
+    spy_csv = logs_dir / "US_SPY_K_5M_combined.csv"
+    if not spy_csv.exists():
+        print("\n  Benchmark unavailable (no logs/US_SPY_K_5M_combined.csv).")
+        return
+    try:
+        import pandas as pd
+        spy = pd.read_csv(spy_csv, usecols=["time_key", "close"])
+        spy["time_key"] = pd.to_datetime(spy["time_key"])
+        lo = spy[spy["time_key"] >= start_et.replace(tzinfo=None)]
+        hi = lo[lo["time_key"] <= end_et.replace(tzinfo=None)]
+        if len(hi) < 2:
+            print("\n  Benchmark unavailable (SPY archive does not cover this window).")
+            return
+        first, last = float(hi["close"].iloc[0]), float(hi["close"].iloc[-1])
+        bh = (last - first) / first * 100
+        print(f"\n  Benchmark — SPY buy & hold, same window: {bh:+.2f}%"
+              f"  ({first:.2f} → {last:.2f})")
+        print(f"  Strategy net return: {net_total/base*100:+.2f}%   "
+              f"Difference vs benchmark: {net_total/base*100 - bh:+.2f} pts")
+        if hi["time_key"].iloc[-1] < pd.Timestamp(end_et.replace(tzinfo=None)) - pd.Timedelta(days=5):
+            print("  ⚠  SPY archive ends before the trade window does — benchmark is partial.")
+        print("\n  Caveat: these strategies hold minutes, so capital is idle most of the")
+        print("  time. This is not a like-for-like comparison of risk taken — it is the")
+        print("  null hypothesis the effort has to beat to have been worth doing.")
+    except Exception as e:
+        print(f"\n  Benchmark failed to compute: {e}")
+
+
+def _cost_sensitivity(trades: list[dict]) -> None:
+    """Where does the edge die? More useful than arguing about one cost number."""
+    section("1b. COST SENSITIVITY")
+    closed = [t for t in trades if t["closed"] and t["pnl"] is not None]
+    if not closed:
+        print("  No closed trades.")
+        return
+
+    strats = sorted({t["strategy"] for t in closed})
+    hdr = f"  {'bps':>5} {'ALL':>18}  " + "  ".join(f"{s:>14}" for s in strats)
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+    for bps in costs.COST_SCENARIOS:
+        def _net(ts):
+            return [costs.net_pnl(t["pnl"], t["symbol"], t["entry"], t["qty"],
+                                  bps_override=bps) for t in ts]
+        cells = []
+        for s in strats:
+            sp = _net([t for t in closed if t["strategy"] == s])
+            pf = stats.profit_factor(sp)
+            cells.append(f"{sum(sp):>+7.2f} {pf:>6.2f}" if pf == pf and pf != float('inf')
+                         else f"{sum(sp):>+7.2f} {'∞':>6}")
+        allp = _net(closed)
+        pf_all = stats.profit_factor(allp)
+        pf_all_s = f"{pf_all:.2f}" if pf_all == pf_all and pf_all != float("inf") else "∞"
+        print(f"  {bps:>5.1f} {sum(allp):>+10.2f} PF {pf_all_s:>4}  "
+              + "  ".join(cells))
+    print("\n  Each cell: net PnL then PF, at that round-trip cost in bps.")
+    print("  The project's own stated hurdle is 1–3 bps; 0.0 is the frictionless view")
+    print("  every report in this repo used before 2026-08-29.")
 
 
 def _per_strategy(trades: list[dict]) -> None:
@@ -199,30 +349,43 @@ def _per_strategy(trades: list[dict]) -> None:
     for t in trades:
         by_strat[t["strategy"]].append(t)
 
-    header = (f"  {'Strategy':<12} {'Trades':>6} {'W':>4} {'L':>4} {'Win%':>6} {'PnL':>8} "
-              f"{'PF':>6} {'AvgR':>6} {'AvgBps':>7} {'AvgHold':>8}")
+    header = (f"  {'Strategy':<12} {'n':>4} {'Win%':>5} {'GrossPnL':>9} {'NetPnL':>8} "
+              f"{'NetPF':>6} {'GrsBps':>7} {'NetBps':>7} {'NetPF 95% CI':>18} {'Hold':>6}")
     print(header)
     print("  " + "-" * (len(header) - 2))
+
+    def _pfs(v: float) -> str:
+        return "∞" if v == float("inf") else ("—" if v != v else f"{v:.2f}")
+
+    flagged = []
     for strat in sorted(by_strat):
         ts = by_strat[strat]
         closed = [t for t in ts if t["closed"]]
+        if not closed:
+            print(f"  {strat:<12} {len(ts):>4} {'—':>5}")
+            continue
         wins = [t for t in closed if t["win"]]
-        losses = [t for t in closed if not t["win"]]
-        total_pnl = sum(t["pnl"] for t in closed if t["pnl"] is not None)
-        gross_win = sum(t["pnl"] for t in closed if t["pnl"] and t["pnl"] > 0)
-        gross_loss = abs(sum(t["pnl"] for t in closed if t["pnl"] and t["pnl"] < 0))
-        pf = gross_win / gross_loss if gross_loss > 0 else float("inf")
-        avg_hold = sum(t["hold_bars"] for t in closed if t["hold_bars"]) / len(closed) if closed else 0
-        r_vals = [t["r_mult"] for t in closed if t["r_mult"] is not None]
+        gross_pnls = [t["pnl"] for t in closed if t["pnl"] is not None]
+        net_pnls = [t["pnl_net"] for t in closed if t["pnl_net"] is not None]
+        avg_hold = sum(t["hold_bars"] for t in closed if t["hold_bars"]) / len(closed)
         bps_vals = [t["bps"] for t in closed if t["bps"] is not None]
-        avg_r = f"{sum(r_vals)/len(r_vals):+.2f}" if r_vals else "—"
+        bpsn_vals = [t["bps_net"] for t in closed if t["bps_net"] is not None]
         avg_bps = f"{sum(bps_vals)/len(bps_vals):+.1f}" if bps_vals else "—"
-        win_pct = f"{100*len(wins)/len(closed):.0f}%" if closed else "—"
-        pf_str = f"{pf:.2f}" if gross_loss > 0 else "∞" if gross_win > 0 else "—"
-        print(f"  {strat:<12} {len(ts):>6} {len(wins):>4} {len(losses):>4} {win_pct:>6} "
-              f"{total_pnl:>+8.2f} {pf_str:>6} {avg_r:>6} {avg_bps:>7} {avg_hold:>7.1f}b")
-    print("\n  AvgR = avg PnL / initial risk (entry−stop).  AvgBps = avg return on notional.")
-    print("  Slippage hurdle: SPY/QQQ/IWM round-trip spread+slip ≈ 1–3 bps. AvgBps must clear it.")
+        avg_bpsn = f"{sum(bpsn_vals)/len(bpsn_vals):+.1f}" if bpsn_vals else "—"
+        net_pf = stats.profit_factor(net_pnls)
+        lo, hi = stats.bootstrap_pf_ci(net_pnls)
+        ci = f"[{_pfs(lo)}, {_pfs(hi)}]"
+        print(f"  {strat:<12} {len(ts):>4} {100*len(wins)/len(closed):>4.0f}% "
+              f"{sum(gross_pnls):>+9.2f} {sum(net_pnls):>+8.2f} {_pfs(net_pf):>6} "
+              f"{avg_bps:>7} {avg_bpsn:>7} {ci:>18} {avg_hold:>5.1f}b")
+        if lo == lo and hi == hi and lo <= 1.0 <= hi:
+            flagged.append(strat)
+
+    print("\n  GrsBps/NetBps = avg return on notional before/after mm/costs.py.")
+    print("  NetPF 95% CI is a percentile bootstrap over this strategy's own trades.")
+    if flagged:
+        print(f"\n  ⚠  CI contains 1.0 (consistent with zero edge): {', '.join(flagged)}")
+        print("     At these sample sizes the point estimates are not evidence.")
 
 
 def _time_of_day(trades: list[dict]) -> None:
@@ -753,6 +916,9 @@ def main() -> None:
     parser.add_argument("--all", action="store_true", help="All available dates (default when no --date)")
     parser.add_argument("--from", dest="from_date", metavar="YYYY-MM-DD",
                         help="Exclude logs before this date (default: 2026-06-10 for live logs)")
+    parser.add_argument("--capital", type=float, default=None,
+                        help="Capital base in dollars for return-on-capital. "
+                             "Default: peak simultaneous notional derived from the logs.")
     parser.add_argument("--symbol", help="Filter to one symbol, e.g. US.SPY")
     parser.add_argument("--strategy", help="Filter to one strategy, e.g. vwap_pb")
     parser.add_argument("--dir", dest="logs_dir", metavar="PATH",
@@ -804,6 +970,8 @@ def main() -> None:
     buf = io.StringIO() if args.interpret else None
     with redirect_stdout(buf if buf else sys.stdout):
         _overview(trades)
+        _capital_and_benchmark(trades, logs_dir, args.capital)
+        _cost_sensitivity(trades)
         _per_strategy(trades)
         _time_of_day(trades)
         _exit_reasons(trades)

@@ -1,6 +1,7 @@
 # Research Reset — Measurement Rebuild + Universe Expansion
 
-> **Status:** Scoped 2026-08-29, not started. Two goals, sequenced (A gates B).
+> **Status:** Scoped 2026-08-29. **Goal A substantially built the same day** (A1/A3/A4 done,
+> A2 done, A5 run — see "Goal A results" below). Goal B not started. A gates B.
 > **Supersedes as top priority:** Route 2b Phases 2–6 (`docs/expansions/route-2b-volatility-engine.md`)
 > — parked, not cancelled. Phase 1 keeps collecting `vol_state.jsonl` for free.
 > **Does not touch:** the live paper runner. It keeps running unchanged throughout.
@@ -103,6 +104,60 @@ current positive results to shrink or invert.** That is the point; it is a findi
 
 **Gate A→B:** every existing report reproduces net of costs, in dollars, against benchmark, with
 CIs. No new symbols fetched until this holds.
+
+## Goal A results (built and run 2026-08-29)
+
+**Built:** `mm/costs.py` (per-symbol round-trip cost model, self-contained constants, no cfg —
+same rationale as `mm/gap_fade.py`), `mm/stats.py` (percentile bootstrap CIs, re-exporting the
+canonical `mm.backtest.profit_factor` rather than reimplementing it), and four new sections in
+`scripts/analyze_trades.py` (net columns, cost sensitivity sweep, capital/benchmark, CI flags).
+22 new tests in `tests/test_costs.py` + `tests/test_stats.py`.
+
+**A5 — the same 102 live trades, re-measured (local logs through 2026-08-24):**
+
+| | gross | net of costs |
+|---|---|---|
+| Total PnL | +$12.92 | **−$0.57** |
+| Profit factor | 1.189 | **0.992** |
+| Avg PnL/trade | +$0.127 | −$0.006 |
+| PF 95% CI | [0.663, 2.167] | **[0.545, 1.782]** |
+| P(mean > 0) | 0.72 | **0.48** |
+
+**The entire reported profit was transaction costs.** Net PF is 0.992 — below breakeven — and the
+confidence interval spans 1.0 from 0.55 to 1.78, so the sample is consistent with zero edge in
+either direction. P(mean > 0) = 0.48 is a coin flip.
+
+Cost sensitivity (net PnL / PF at each round-trip bps):
+
+| bps | ALL | bb_kdj | bb_kdj_loose | gap_fade | orb | vwap_pb |
+|---|---|---|---|---|---|---|
+| 0.0 | +12.92 / 1.19 | +0.92 / 1.32 | +3.97 / 1.73 | −4.52 / 0.29 | +1.86 / 1.04 | +10.71 / 2.46 |
+| 1.0 | +5.24 / 1.07 | +0.45 / 1.15 | +3.12 / 1.54 | −5.27 / 0.23 | −1.66 / 0.97 | +8.59 / 2.02 |
+| 2.0 | −2.45 / 0.97 | −0.02 / 0.99 | +2.28 / 1.37 | −6.02 / 0.18 | −5.17 / 0.90 | +6.48 / 1.67 |
+| 5.0 | −25.52 / 0.71 | −1.43 / 0.61 | −0.26 / 0.96 | −8.27 / 0.08 | −15.71 / 0.72 | +0.15 / 1.01 |
+
+**The portfolio crosses from profitable to unprofitable between 1 and 2 bps — inside the project's
+own stated 1–3 bps uncertainty about what its costs actually are.** ORB goes negative at 1 bp.
+gap_fade is negative at every level. Only vwap_pb survives to 5 bps, and only barely (PF 1.01).
+
+**Return on capital / benchmark:** peak simultaneous notional was $4,625 (derived from the logs;
+`TOTAL_CAPITAL=0` means there is no configured capital base to read). Net return on that capital
+over 75 days is **−0.01%**. The SPY benchmark currently reports partial — the local archive ends
+2026-06-25 while trades run to 08-24, and the script says so rather than quoting a wrong number.
+**A3 is not fully closed until B1's bulk fetch fills that gap.**
+
+**Every per-strategy CI contains 1.0** (bb_kdj, bb_kdj_loose, orb, vwap_pb) — none of the live
+per-strategy results are evidence at current sample sizes. That is the finding, and it is what
+Goal B exists to fix.
+
+### A bug found while building this
+`mm/stats.py` initially reimplemented `profit_factor` with a `< 0` loss convention, while the
+canonical `mm.backtest.profit_factor` uses `<= 0`. This is precisely the ~8-way metric divergence
+that was consolidated on 2026-06-18 and is guarded by `tests/test_metric_consistency.py`. Removed
+and replaced with a re-export; `test_stats_reexports_the_canonical_profit_factor_not_a_copy` now
+pins it so it cannot silently return. Also fixed: `np.percentile` linear-interpolating between two
+`inf` order statistics yields `nan`, which silently destroyed the whole CI on small mostly-winning
+samples — `method="nearest"` returns `inf`, the honest answer.
 
 ## Goal B — Universe Expansion
 

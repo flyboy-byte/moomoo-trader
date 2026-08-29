@@ -46,7 +46,13 @@ Package layout:
   mm/indicators.py     — bollinger_bands(), atr(), kdj(), rsi(), adx(), vwap(), ema(), add_all()
   mm/signals.py        — score_df(), snapshot() — BB+KDJ signal scoring
   mm/strategy.py       — compute_signals(), run_signals(), Trade, Signal
-  mm/backtest.py       — run_backtest(), walk_forward(), print_summary()
+  mm/backtest.py       — run_backtest(), walk_forward(), print_summary(), profit_factor() (CANONICAL PF —
+                         never reimplement it, see tests/test_metric_consistency.py)
+  mm/costs.py          — transaction cost model: round_trip_bps(), net_pnl(), net_bps() (added 2026-08-29,
+                         docs/research-reset.md Goal A1). Self-contained constants, no cfg import — costs are
+                         not a strategy knob and must not become tunable-until-profitable.
+  mm/stats.py          — bootstrap CIs: bootstrap_pf_ci(), bootstrap_mean_ci(), prob_positive(), summarize().
+                         Re-exports mm.backtest.profit_factor; does NOT define its own.
   mm/research.py       — compare_variants(), sweep_parameters(), analyze_stop_exits(), sweep_signal_filter()
   mm/premarket.py      — premarket_session(), premarket_fill_pct(), premarket_volume_ratio() (research, not live-wired)
   mm/gap_fade.py        — Gap Fade strategy engine (live 2026-07-12) + backtest engine
