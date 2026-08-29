@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm import clock
 from mm.config import cfg
+from mm import costs
 from mm.notifications import notify
 
 
@@ -79,6 +80,20 @@ class SessionSummary:
     @property
     def realized_pnl(self) -> float:
         return sum(t.pnl for t in self.closed_trades)
+
+    @property
+    def realized_pnl_net(self) -> float:
+        """Realized P&L after round-trip transaction costs (mm/costs.py).
+
+        Added 2026-08-29. Until then every EOD post to Discord reported the
+        frictionless simulator fill as if it were the result — the same defect
+        the web dashboard had. Across the 102 live trades that difference was
+        the entire reported profit (+$12.92 gross -> -$0.57 net).
+        """
+        return sum(
+            costs.net_pnl(t.pnl, t.symbol, t.entry_price, t.qty or 1)
+            for t in self.closed_trades
+        )
 
     @property
     def wins(self) -> int:
@@ -273,6 +288,9 @@ def format_summary(s: SessionSummary) -> str:
     ct = s.closed_trades
     pnl = s.realized_pnl
     pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+    # Net is the headline; gross stays beside it so the cost drag is visible.
+    net = s.realized_pnl_net
+    net_str = f"+${net:.2f}" if net >= 0 else f"-${abs(net):.2f}"
 
     lines = [
         f"=== moomoo-trader EOD Summary  {date_str} ===",
@@ -294,7 +312,7 @@ def format_summary(s: SessionSummary) -> str:
         lines += [
             f"Closed trades: {len(ct)}   (wins: {s.wins}  losses: {s.losses})",
             f"  Targets hit: {s.targets}   Stops hit: {s.stops}",
-            f"  Realized P&L: {pnl_str}",
+            f"  Realized P&L: {net_str}  net of costs   (gross {pnl_str})",
         ]
         if ct:
             lines.append(f"  Avg hold:    {s.avg_hold_minutes:.0f} min")
@@ -341,6 +359,8 @@ def format_discord(s: SessionSummary) -> str:
     ct = s.closed_trades
     pnl = s.realized_pnl
     pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+    net = s.realized_pnl_net
+    net_str = f"+${net:.2f}" if net >= 0 else f"-${abs(net):.2f}"
     date_str = s.session_date.strftime("%Y-%m-%d")
 
     if not ct and not s.open_at_close:
@@ -354,7 +374,7 @@ def format_discord(s: SessionSummary) -> str:
     win_str = f"{s.wins}/{len(ct)}" if ct else "—"
     lines = [
         f"**moomoo-trader EOD {date_str}**",
-        f"Trades: {len(ct)}  Win: {win_str}  P&L: **{pnl_str}**",
+        f"Trades: {len(ct)}  Win: {win_str}  P&L: **{net_str}** net  (gross {pnl_str})",
         f"Targets: {s.targets}  Stops: {s.stops}",
     ]
     vix_line = _vix_shadow_line(s)

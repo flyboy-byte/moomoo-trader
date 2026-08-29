@@ -27,6 +27,7 @@ import pandas as pd
 
 from .indicators import add_all
 from .logger import get_logger
+from .backtest import profit_factor as _profit_factor  # canonical PF, never redefine
 
 log = get_logger("ema_momentum")
 
@@ -173,9 +174,9 @@ def print_ema_summary(
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
     total_pnl = sum(t.pnl for t in trades)
-    gross_win = sum(t.pnl for t in wins)
-    gross_loss = abs(sum(t.pnl for t in losses))
-    pf = gross_win / gross_loss if gross_loss else 999.0
+    # Canonical PF (mm/backtest.py) — see the note in mm/vwap_pullback.py. Same
+    # surviving `999.0` sentinel, same cause.
+    pf = _profit_factor(trades)
 
     from collections import Counter
     reasons = Counter(t.exit_reason for t in trades)

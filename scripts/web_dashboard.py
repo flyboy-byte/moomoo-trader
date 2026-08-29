@@ -28,8 +28,13 @@ import pyotp
 import qrcode
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup, escape
-from mm import clock
+from mm import clock, costs, stats
 from mm.config import cfg
+# Canonical trade reconstruction + cost model. Before 2026-08-29 this file paired
+# trades itself, applied no cost model, and labelled the resulting gross figure
+# "net_pnl" — so the dashboard showed +$12.92 / PF 1.189 for a portfolio that
+# analyze_trades.py scored at net −$0.57 / PF 0.992. See mm/trades.py's docstring.
+from mm.trades import load_trades, profit_factor
 from eod_summary import SessionSummary, load_summary
 
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -307,61 +312,66 @@ def api_stats() -> Response:
     })
 
 
-@app.route("/api/scoreboard")
+def _net_of(t) -> float:
+    """Net PnL for one eod_summary.TradeRecord, via the canonical cost model."""
+    return costs.net_pnl(t.pnl, t.symbol, t.entry_price, t.qty or 1)
 
+
+def _pf_json(values: list[float]) -> float | None:
+    """Canonical PF, JSON-safe. inf is not valid JSON — send null and let the UI
+    render it as ∞ rather than silently emitting NaN."""
+    if not values:
+        return None
+    pf = profit_factor(values)
+    return None if pf == float("inf") else round(pf, 3)
+
+
+@app.route("/api/scoreboard")
 def api_scoreboard() -> Response:
-    """Per-strategy P&L scorecard from all historical JSONL logs.
+    """Per-strategy scorecard from all historical JSONL logs, gross AND net of costs.
 
     Accepts optional ?start=YYYY-MM-DD to limit the date range.
-    Returns {strategy: {trades, wins, win_pct, net_pnl, pf, last_trade}} sorted by net_pnl desc.
+
+    Both views are returned deliberately. The whole finding of docs/research-reset.md
+    Goal A is that the difference between them was the entire reported profit, so
+    showing only one would hide the result — showing net alone hides how much of the
+    edge the costs ate; showing gross alone is the bug this endpoint used to have.
     """
     start_str = request.args.get("start")
-    per: dict[str, dict] = {}
+    trades = [t for t in load_trades(cfg.logs_dir, start=start_str) if t["closed"]]
 
-    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
-        if start_str:
-            date_part = f.stem.rsplit("_", 1)[-1]
-            if date_part < start_str:
-                continue
-        try:
-            for line in f.read_text().splitlines():
-                if not line:
-                    continue
-                ev = json.loads(line)
-                if ev.get("event") != "position_close":
-                    continue
-                strat = ev.get("strategy") or "unknown"
-                pnl = float(ev.get("pnl", 0))
-                ts = ev.get("ts", "")
-                s = per.setdefault(strat, {
-                    "trades": 0, "wins": 0,
-                    "gross_win": 0.0, "gross_loss": 0.0,
-                    "net_pnl": 0.0, "last_trade": "",
-                })
-                s["trades"] += 1
-                s["net_pnl"] = round(s["net_pnl"] + pnl, 4)
-                if pnl > 0:
-                    s["wins"] += 1
-                    s["gross_win"] = round(s["gross_win"] + pnl, 4)
-                else:
-                    s["gross_loss"] = round(s["gross_loss"] - pnl, 4)
-                if ts > s["last_trade"]:
-                    s["last_trade"] = ts
-        except Exception:
-            continue
+    per: dict[str, list[dict]] = {}
+    for t in trades:
+        per.setdefault(t["strategy"] or "unknown", []).append(t)
 
     result = []
-    for strat, s in per.items():
-        pf = round(s["gross_win"] / s["gross_loss"], 3) if s["gross_loss"] > 0 else float("inf")
-        win_pct = round(s["wins"] / s["trades"] * 100, 1) if s["trades"] else 0.0
+    for strat, ts in per.items():
+        gross = [t["pnl"] for t in ts if t["pnl"] is not None]
+        net = [t["pnl_net"] for t in ts if t["pnl_net"] is not None]
+        bps_net = [t["bps_net"] for t in ts if t["bps_net"] is not None]
+        wins = sum(1 for t in ts if t["pnl"] is not None and t["pnl"] > 0)
+        last = max((t["close_ts"] or "" for t in ts), default="")
+
+        # Bootstrap CI on the net PF. A strategy whose interval contains 1.0 is
+        # consistent with zero edge no matter how good the point estimate looks —
+        # the dashboard should say so rather than let a PF of 1.04 read as a result.
+        lo, hi = stats.bootstrap_pf_ci(net) if len(net) >= 2 else (float("nan"),) * 2
+        inconclusive = not (lo != lo) and lo <= 1.0 <= hi
+
         result.append({
             "strategy": strat,
-            "trades": s["trades"],
-            "wins": s["wins"],
-            "win_pct": win_pct,
-            "net_pnl": s["net_pnl"],
-            "pf": pf if pf != float("inf") else None,
-            "last_trade": s["last_trade"][:10] if s["last_trade"] else "",
+            "trades": len(ts),
+            "wins": wins,
+            "win_pct": round(wins / len(ts) * 100, 1) if ts else 0.0,
+            "gross_pnl": round(sum(gross), 4) if gross else 0.0,
+            "net_pnl": round(sum(net), 4) if net else 0.0,
+            "gross_pf": _pf_json(gross),
+            "net_pf": _pf_json(net),
+            "avg_bps_net": round(sum(bps_net) / len(bps_net), 1) if bps_net else None,
+            "ci_lo": None if lo != lo else round(lo, 3),
+            "ci_hi": None if hi != hi or hi == float("inf") else round(hi, 3),
+            "inconclusive": inconclusive,
+            "last_trade": last[:10] if last else "",
         })
     result.sort(key=lambda x: x["net_pnl"], reverse=True)
     return jsonify(result)
@@ -372,38 +382,37 @@ def api_scoreboard() -> Response:
 def api_pnl_history() -> Response:
     """Cumulative P&L per strategy over time, from JSONL position_close events.
 
-    Returns {strategy: [{date, pnl, cumulative}]} sorted by date.
+    Returns {strategy: [{date, pnl, cumulative, pnl_net, cumulative_net}]} by date.
     Accepts optional ?start=YYYY-MM-DD to limit date range.
+
+    Carries both curves so the equity chart can show the cost drag as the gap
+    between them — the single clearest picture of the Goal A finding.
     """
     start_str = request.args.get("start")
-    # {strategy: [(date_str, pnl)]}
-    by_strat: dict[str, list[tuple[str, float]]] = {}
+    by_strat: dict[str, list[dict]] = {}
 
-    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
-        date_part = f.stem.rsplit("_", 1)[-1]
-        if start_str and date_part < start_str:
+    for t in load_trades(cfg.logs_dir, start=start_str):
+        if not t["closed"] or t["pnl"] is None:
             continue
-        try:
-            for line in f.read_text().splitlines():
-                if not line:
-                    continue
-                ev = json.loads(line)
-                if ev.get("event") != "position_close":
-                    continue
-                strat = ev.get("strategy") or "unknown"
-                pnl = float(ev.get("pnl", 0))
-                by_strat.setdefault(strat, []).append((date_part, pnl))
-        except Exception:
-            continue
+        by_strat.setdefault(t["strategy"] or "unknown", []).append(t)
 
     result: dict[str, list[dict]] = {}
-    for strat, entries in by_strat.items():
-        entries.sort(key=lambda x: x[0])
-        cum = 0.0
+    for strat, ts in by_strat.items():
+        ts.sort(key=lambda t: t["close_ts"] or "")
+        cum = cum_net = 0.0
         series = []
-        for date_str, pnl in entries:
+        for t in ts:
+            pnl = t["pnl"]
+            pnl_net = t["pnl_net"] if t["pnl_net"] is not None else pnl
             cum = round(cum + pnl, 4)
-            series.append({"date": date_str, "pnl": round(pnl, 4), "cumulative": cum})
+            cum_net = round(cum_net + pnl_net, 4)
+            series.append({
+                "date": (t["close_ts"] or "")[:10],
+                "pnl": round(pnl, 4),
+                "cumulative": cum,
+                "pnl_net": round(pnl_net, 4),
+                "cumulative_net": cum_net,
+            })
         result[strat] = series
 
     return jsonify(result)
@@ -424,64 +433,28 @@ def api_trades() -> Response:
     except ValueError:
         limit = 200
 
-    # Pass 1: collect opens and closes per (symbol, strategy), preserving order
-    opens_by_key: dict[tuple, list[dict]] = {}   # (sym, strat) -> [open events...]
-    closes: list[dict] = []
+    # Uses the canonical pairing (mm/trades.py) rather than a second, uncosted
+    # implementation local to this file — which is what lived here until 2026-08-29
+    # and is why the dashboard and analyze_trades.py disagreed about the same trades.
+    closed = [t for t in load_trades(cfg.logs_dir, start=start_str) if t["closed"]]
+    closed.sort(key=lambda t: t["close_ts"] or "", reverse=True)
 
-    for f in sorted(cfg.logs_dir.glob("paper_US_*_????-??-??.jsonl")):
-        date_part = f.stem.rsplit("_", 1)[-1]
-        if start_str and date_part < start_str:
-            continue
-        sym_safe = f.stem.removeprefix("paper_").removesuffix(f"_{date_part}")
-        sym = sym_safe.replace("_", ".", 1)
-        try:
-            for line in f.read_text().splitlines():
-                if not line:
-                    continue
-                ev = json.loads(line)
-                ev.setdefault("symbol", sym)
-                event = ev.get("event")
-                if event == "position_open":
-                    key = (ev.get("symbol", sym), ev.get("strategy", ""))
-                    opens_by_key.setdefault(key, []).append(ev)
-                elif event == "position_close":
-                    closes.append(ev)
-        except Exception:
-            continue
-
-    # Sort closes newest-first, pair each with its most recent preceding open
-    closes.sort(key=lambda e: e.get("ts", ""), reverse=True)
-
-    trades = []
-    for c in closes[:limit * 2]:   # fetch extra before pairing, trim at end
-        sym = c.get("symbol", "?")
-        strat = c.get("strategy", "?")
-        key = (sym, strat)
-        close_ts = c.get("ts", "")
-        # Find the latest open for this (symbol, strategy) that precedes the close
-        entry_price = None
-        entry_qty = None
-        matching_opens = opens_by_key.get(key, [])
-        for o in reversed(matching_opens):
-            if o.get("ts", "") <= close_ts:
-                entry_price = o.get("entry")
-                entry_qty = o.get("qty")
-                break
-        trades.append({
-            "ts": close_ts,
-            "date": close_ts[:10],
-            "symbol": sym,
-            "strategy": strat,
-            "direction": c.get("direction", "long"),
-            "entry": entry_price,
-            "exit": c.get("exit"),
-            "qty": entry_qty,
-            "pnl": c.get("pnl"),
-            "hold_bars": c.get("hold_bars", 0),
-            "reason": c.get("reason", ""),
-        })
-        if len(trades) >= limit:
-            break
+    trades = [{
+        "ts": t["close_ts"],
+        "date": (t["close_ts"] or "")[:10],
+        "symbol": t["symbol"],
+        "strategy": t["strategy"],
+        "direction": t["direction"],
+        "entry": t["entry"],
+        "exit": t["exit"],
+        "qty": t["qty"],
+        "pnl": t["pnl"],
+        "pnl_net": t["pnl_net"],
+        "bps": round(t["bps"], 1) if t["bps"] is not None else None,
+        "bps_net": round(t["bps_net"], 1) if t["bps_net"] is not None else None,
+        "hold_bars": t["hold_bars"] or 0,
+        "reason": t["reason"] or "",
+    } for t in closed[:limit]]
 
     return jsonify(trades)
 
@@ -492,9 +465,12 @@ def api_today_summary() -> Response:
     """Live today stats: P&L, win%, PF, regime, VIX. Polled by the dashboard JS every 30s."""
     summary = load_summary(_session_date())
     ct = summary.closed_trades
-    gross_win = sum(t.pnl for t in ct if t.pnl > 0)
-    gross_loss = sum(-t.pnl for t in ct if t.pnl <= 0)
-    pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else None
+    # Canonical PF (mm/backtest.py) — this was one of three inline reimplementations
+    # in this file, all using a `<= 0` loss convention that happened to match but was
+    # never guarded. See docs/strategy_graveyard.md "Reimplemented-Metric Drift".
+    pf = _pf_json([t.pnl for t in ct])
+    net_pnls = [_net_of(t) for t in ct]
+    net_pf = _pf_json(net_pnls)
     win_pct = round(summary.wins / len(ct) * 100, 1) if ct else 0.0
 
     regime = _load_regime_today()
@@ -505,11 +481,13 @@ def api_today_summary() -> Response:
 
     return jsonify({
         "pnl": summary.realized_pnl,
+        "pnl_net": round(sum(net_pnls), 4) if net_pnls else 0.0,
         "trades": len(ct),
         "wins": summary.wins,
         "losses": summary.losses,
         "win_pct": win_pct,
         "pf": pf,
+        "net_pf": net_pf,
         "targets": summary.targets,
         "stops": summary.stops,
         "bar_evals": summary.bar_evals,
@@ -960,13 +938,19 @@ def index() -> str:
     ct = summary.closed_trades
     pnl = summary.realized_pnl
     pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-    gross_win = sum(t.pnl for t in ct if t.pnl > 0)
-    gross_loss = sum(-t.pnl for t in ct if t.pnl <= 0)
-    _pf = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
+    # Net of transaction costs — the headline number the header shows. Gross is kept
+    # beside it rather than replaced, because the gap between them IS the finding.
+    _net_pnls = [_net_of(t) for t in ct]
+    pnl_net = round(sum(_net_pnls), 2) if _net_pnls else 0.0
+    pnl_net_str = f"+${pnl_net:.2f}" if pnl_net >= 0 else f"-${abs(pnl_net):.2f}"
+    _pf = _pf_json([t.pnl for t in ct])
+    _net_pf = _pf_json(_net_pnls)
     _win_pct = round(summary.wins / len(ct) * 100, 1) if ct else 0.0
     pf_str = f"{_pf:.2f}" if _pf is not None else "∞"
-    pf_color = ("var(--green)" if (_pf is None or _pf >= 1.5)
-                else "var(--orange)" if _pf >= 1.0 else "var(--red)")
+    net_pf_str = f"{_net_pf:.2f}" if _net_pf is not None else ("∞" if ct else "—")
+    # Colour off the NET PF: a gross PF of 1.2 that is 0.95 net is not a green number.
+    pf_color = ("var(--green)" if (_net_pf is None or _net_pf >= 1.5)
+                else "var(--orange)" if _net_pf >= 1.0 else "var(--red)")
 
     # Regime
     regime_label = regime.get("regime", "")
@@ -1018,8 +1002,11 @@ def index() -> str:
         evals=evals,
         pnl=pnl,
         pnl_str=pnl_str,
+        pnl_net=pnl_net,
+        pnl_net_str=pnl_net_str,
         win_pct=_win_pct,
         pf_str=pf_str,
+        net_pf_str=net_pf_str,
         pf_color=pf_color,
         status_label=status_label,
         status_pill_cls=status_pill_cls,

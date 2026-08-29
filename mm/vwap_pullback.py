@@ -31,6 +31,7 @@ import pandas as pd
 
 from .indicators import add_all
 from .logger import get_logger
+from .backtest import profit_factor as _profit_factor  # canonical PF, never redefine
 
 log = get_logger("vwap_pullback")
 
@@ -156,9 +157,11 @@ def print_vwap_pb_summary(trades: list[VWAPPBTrade], symbol: str = "", days: int
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
     total_pnl = sum(t.pnl for t in trades)
-    gross_win = sum(t.pnl for t in wins)
-    gross_loss = abs(sum(t.pnl for t in losses))
-    pf = gross_win / gross_loss if gross_loss else 999.0
+    # Canonical PF (mm/backtest.py). Was an inline `999.0` no-loss sentinel — the
+    # exact divergence the 2026-06-18 consolidation was meant to end, which survived
+    # here because that pass fixed scripts/backtest_vwap_pb.py and not this engine.
+    # 999.0 and inf are not interchangeable in any average across runs.
+    pf = _profit_factor(trades)
 
     from collections import Counter
     reasons = Counter(t.exit_reason for t in trades)

@@ -22,6 +22,7 @@ import pandas as pd
 
 from .indicators import add_all
 from .logger import get_logger
+from .backtest import profit_factor as _profit_factor  # canonical PF, never redefine
 
 log = get_logger("orb_strategy")
 
@@ -212,9 +213,7 @@ def print_orb_summary(trades: list[ORBTrade], df: pd.DataFrame | None = None) ->
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
     total_pnl = sum(t.pnl for t in trades)
-    gross_win = sum(t.pnl for t in wins)
-    gross_loss = abs(sum(t.pnl for t in losses))
-    pf = gross_win / gross_loss if gross_loss else float("inf")
+    pf = _profit_factor(trades)   # canonical (mm/backtest.py), was inline
     avg_hold = sum(
         (t.exit_time - t.entry_time).total_seconds() / 60 for t in trades
     ) / len(trades)

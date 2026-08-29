@@ -444,8 +444,79 @@ brackets is not guaranteed to contain it. Two new tests:
 `test_bootstrap_ci_uses_the_same_loss_convention_as_the_point_estimate`.
 
 **Standing lesson:** the category is not fully guarded. A repo-wide grep test for
-`def profit_factor` outside `mm/backtest.py` would close it properly. Not built yet —
-recorded here so the next occurrence isn't diagnosed from scratch a fifth time.
+`def profit_factor` outside `mm/backtest.py` would close it properly. ~~Not built yet~~
+— **BUILT 2026-08-29**, see the entry below.
+
+### Reimplemented-Metric Drift — instances 5-7, and the guard finally built (2026-08-29)
+**What it was:** wiring `mm/costs.py` into the web dashboard (step B2a) turned up three
+*more* inline PF computations in `scripts/web_dashboard.py` (`api_scoreboard`,
+`api_today_summary`, and the server-rendered page header), plus two surviving `999.0`
+no-loss sentinels in `mm/vwap_pullback.py` and `mm/ema_momentum.py`.
+
+**Why the 2026-06-18 consolidation missed them:** that pass fixed the `scripts/backtest_*.py`
+wrappers — which is exactly what `mm/backtest.py`'s docstring still claims it fixed,
+naming `backtest_vwap_pb.py` and `backtest_ema_momentum.py` — but left the `mm/` engine
+modules *underneath* those wrappers untouched. The dashboard was never in scope at all.
+So the metric the whole project reports by had been computed four different ways in
+production for over two months after the "consolidation".
+
+The `999.0` cases are the dangerous half: `999.0` and `inf` are not interchangeable in
+any average across runs. `inf` poisons an average loudly; `999.0` quietly produces a
+plausible wrong number, which is the worse failure mode.
+
+**Fix:** all seven call sites now use `mm.backtest.profit_factor`. `mm/vwap_pullback.py`,
+`mm/ema_momentum.py`, `mm/orb_strategy.py` and `mm/gap_fade.py` import it as
+`_profit_factor`; the dashboard uses a thin JSON-safe `_pf_json()` wrapper around it
+(`inf` is not valid JSON — it serializes to `null` and renders as ∞).
+
+**The guard, finally built** — two tests in `tests/test_metric_consistency.py`:
+`test_only_mm_backtest_defines_profit_factor` (repo-wide grep for `def profit_factor`
+outside the canonical module) and `test_no_999_no_loss_sentinel_survives_anywhere`.
+The first is the one the previous entry asked for. Behavioural tests structurally
+cannot catch this class — they pin the canonical function and are blind to the
+existence of rivals — so a static grep is the right shape of guard, not a lazy one.
+
+### Weekly synthesis silently failed 5/5 weeks on a truncated max_tokens — FOUND & FIXED 2026-08-29
+**What it was:** `synthesize_week()` called Haiku with `max_tokens=512` against a
+six-field JSON response schema. Every run since deployment — W30, W31, W32, W33, W34 —
+was cut off mid-string, `json.loads()` raised `Unterminated string`, and the fail-open
+branch swallowed it. Discord received "**Weekly Synthesis 2026-WNN** / No summary
+available." every Monday for five weeks.
+
+**Found by:** `/claude-api cost-optimize`, profiling `logs/api_usage.jsonl`. The audit's
+actual cost finding was that there is no cost finding — 185 calls over 33 days total
+**$0.12**, a run-rate of ~$0.11/month, with no lever worth pulling (prompts are 234-356
+tokens, below the minimum cacheable prefix; the regime call is pre-open and the ORB
+scorer is on the live entry path, so neither can batch). The value was entirely in what
+the profile exposed on the way.
+
+**Three things let a 100% failure rate hide for five weeks:**
+1. `max_tokens` treated as a tuning knob rather than a backstop.
+2. `stop_reason` never checked — a truncated response was parsed as if complete, so the
+   symptom was a confusing JSON error rather than "the response was cut off".
+3. The `except` branch returned *before* `_append_api_usage()`, so five weeks of
+   billed-but-failed calls wrote **zero** records to `api_usage.jsonl`. That silence
+   read as "the job never ran" rather than "the job is failing" — the most expensive
+   detail of the whole thing.
+
+**Fix:** `SYNTHESIS_MAX_TOKENS = 2048` module constant; explicit `stop_reason ==
+"max_tokens"` check raising a plain-language truncation error; raw response and
+`stop_reason` preserved in the failure dict; usage logged in a `finally` (but *not* when
+the call never reached the API — a connection error bills nothing and must not write a
+zero-token record). 11 new tests in `tests/test_weekly_synthesis.py`; the function had
+**no** test coverage at all, which is the structural reason this survived.
+
+**Caveat kept deliberately:** truncation is inference, not proof — `stop_reason` was
+never recorded, so the diagnosis rests on 5/5 failures all breaking at ~1000-1350 chars.
+The fix logs `stop_reason`, so the next Monday run settles it either way. If the
+failures continue with `stop_reason == "end_turn"`, the cause is something else and this
+entry should be corrected rather than trusted.
+
+**Related, same audit:** 163 of 185 `api_usage.jsonl` records carried no `model` field,
+so the 2026-08-25 Sonnet→Haiku split — made explicitly to save money — could not be
+verified from the project's own logs. `mm/analyst.py` had also hardcoded
+`claude-haiku-4-5-20251001` in a module constant, opting itself out of that split
+entirely. Both fixed.
 
 ### np.percentile silently returned nan for bootstrap CIs on mostly-winning samples — FOUND & FIXED 2026-08-29
 **What it was:** `mm/stats.py::bootstrap_pf_ci()` resamples trades and computes a profit

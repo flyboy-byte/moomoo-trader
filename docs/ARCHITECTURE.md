@@ -138,7 +138,7 @@ the term-structure backfill gap above was actually discovered). Logged as `fetch
 ## Test & Verify Commands
 
 ```bash
-python -m pytest tests/ -q                           # 299 unit tests, all passing (2026-08-29)
+python -m pytest tests/ -q                           # 333 unit tests, all passing (2026-08-29)
                                                      # (the 3 long-standing test_data.py failures were a real
                                                      #  bug, fixed 2026-08-24 — see graveyard "Stale cfg in mm/data.py")
 python scripts/diagnose_logs.py --date YYYY-MM-DD    # session health check

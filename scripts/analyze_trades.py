@@ -35,6 +35,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mm import clock  # noqa: E402
 from mm import costs, stats  # noqa: E402
+# _pair_trades/_to_et/_load_jsonl moved to mm/trades.py 2026-08-29 so the web
+# dashboard reports the same net numbers this script does, instead of its own
+# uncosted pairing labelled "net_pnl". Re-exported here under the old private names
+# so the rest of this file (and anything importing them) is unchanged.
+from mm.trades import (  # noqa: E402
+    load_jsonl as _load_jsonl,
+    pair_trades as _pair_trades,
+    to_et as _to_et,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -43,25 +52,6 @@ from mm import costs, stats  # noqa: E402
 
 _SYM_PATTERN = re.compile(r"paper_(.+)_\d{4}-\d{2}-\d{2}\.jsonl$")
 
-
-def _load_jsonl(paths: list[Path]) -> list[dict]:
-    records = []
-    for p in paths:
-        m = _SYM_PATTERN.match(p.name)
-        source_sym = m.group(1).replace("_", ".", 1) if m else ""
-        with p.open() as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                    # Annotate with source symbol (bar_eval doesn't include symbol field)
-                    r.setdefault("_sym", source_sym)
-                    records.append(r)
-                except json.JSONDecodeError:
-                    pass
-    return sorted(records, key=lambda r: r.get("ts", ""))
 
 
 def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dates: bool,
@@ -94,89 +84,6 @@ def section(title: str) -> None:
     print(f"{'='*60}")
 
 
-def _to_et(ts_str: str) -> datetime:
-    """Parse event timestamp and return as Eastern Time.
-
-    events.py writes ts = clock.now_et().isoformat() (fixed 2026-06-18, previously UTC).
-    Naive timestamps are assumed to be ET — attaching ZoneInfo is needed only for
-    astimezone() to work; no offset conversion should happen.
-    """
-    dt = datetime.fromisoformat(ts_str)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("America/New_York"))
-    return dt.astimezone(ZoneInfo("America/New_York"))
-
-
-def _pair_trades(records: list[dict]) -> list[dict]:
-    """Pair position_open with position_close. Returns list of trade dicts.
-
-    Deduplicates by (symbol, strategy, ts) — old fire-and-forget logs (pre-Jun-10)
-    wrote position_open/close once per poll cycle instead of once on entry/exit.
-    """
-    def _dedup(events: list[dict]) -> list[dict]:
-        seen: set = set()
-        out = []
-        for r in events:
-            key = (r.get("symbol") or r.get("_sym"), r.get("strategy"), r.get("ts"))
-            if key not in seen:
-                seen.add(key)
-                out.append(r)
-        return out
-
-    opens = _dedup([r for r in records if r.get("event") == "position_open"])
-    closes = _dedup([r for r in records if r.get("event") == "position_close"])
-    trades = []
-    for o in opens:
-        sym = o.get("symbol") or o.get("_sym", "?")
-        strat = o.get("strategy") or "unknown"
-        match = next(
-            (c for c in closes
-             if c.get("symbol") == sym and c.get("strategy") == strat
-             and c.get("ts", "") > o["ts"]),
-            None,
-        )
-        entry = o.get("entry", 0.0)
-        stop = o.get("stop", 0.0)
-        qty = o.get("qty", 1) or 1
-        direction = o.get("direction", "long")
-        pnl = match.get("pnl") if match else None
-
-        # Size-independent metrics. R = PnL / initial risk; bps = return on notional.
-        risk_share = (entry - stop) if direction == "long" else (stop - entry)
-        r_mult = (pnl / (risk_share * qty)) if (pnl is not None and risk_share > 0) else None
-        bps = (pnl / (entry * qty) * 10000) if (pnl is not None and entry > 0) else None
-
-        # Net of transaction costs (docs/research-reset.md Goal A1). Everything above
-        # this line is frictionless and was the only view the project had until
-        # 2026-08-29; both are kept so the difference stays visible rather than being
-        # silently swapped in.
-        pnl_net = costs.net_pnl(pnl, sym, entry, qty) if pnl is not None else None
-        bps_net = costs.net_bps(pnl, sym, entry, qty) if pnl is not None else None
-
-        trades.append({
-            "symbol": sym,
-            "strategy": strat,
-            "entry": entry,
-            "stop": stop,
-            "qty": qty,
-            "direction": direction,
-            "kdj_cross_age": o.get("kdj_cross_age"),
-            "open_ts": o["ts"],
-            "open_et": _to_et(o["ts"]),
-            "close_ts": match["ts"] if match else None,
-            "close_et": _to_et(match["ts"]) if match else None,
-            "exit": match.get("exit") if match else None,
-            "reason": match.get("reason") if match else None,
-            "pnl": pnl,
-            "pnl_net": pnl_net,
-            "r_mult": r_mult,
-            "bps": bps,
-            "bps_net": bps_net,
-            "hold_bars": match.get("hold_bars") if match else None,
-            "closed": match is not None,
-            "win": (match.get("pnl", 0) or 0) > 0 if match else None,
-        })
-    return trades
 
 
 # ---------------------------------------------------------------------------

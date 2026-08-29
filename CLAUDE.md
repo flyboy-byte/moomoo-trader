@@ -56,6 +56,14 @@ Package layout:
                          not a strategy knob and must not become tunable-until-profitable.
   mm/stats.py          — bootstrap CIs: bootstrap_pf_ci(), bootstrap_mean_ci(), prob_positive(), summarize().
                          Re-exports mm.backtest.profit_factor; does NOT define its own.
+  mm/trades.py         — CANONICAL trade reconstruction: pair_trades(), load_trades(), load_jsonl(),
+                         to_et(), summarize_costs(), LIVE_LOGS_START (added 2026-08-29, step B2a).
+                         Every reporter pairs open/close events and applies mm/costs.py THROUGH THIS
+                         MODULE — analyze_trades.py, web_dashboard.py. Before it, the dashboard had its
+                         own uncosted pairing and reported +$12.92/PF 1.189 for the same trades
+                         analyze_trades.py scored at net −$0.57/PF 0.992. Re-exports profit_factor;
+                         does NOT define its own. Guarded by tests/test_trades_module.py, which asserts
+                         the two reporters produce identical totals.
   mm/research.py       — compare_variants(), sweep_parameters(), analyze_stop_exits(), sweep_signal_filter()
   mm/premarket.py      — premarket_session(), premarket_fill_pct(), premarket_volume_ratio() (research, not live-wired)
   mm/gap_fade.py        — Gap Fade strategy engine (live 2026-07-12) + backtest engine

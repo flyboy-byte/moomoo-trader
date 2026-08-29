@@ -93,13 +93,19 @@ let _isToday = false;  // set by template
 function pollSummary() {
   fetch("/api/today_summary").then(r => r.json()).then(function(d) {
     // Stats
+    // Headline figures are NET of transaction costs; gross sits underneath so the
+    // cost drag stays visible rather than being silently swapped in or out.
+    const pnlNet = (d.pnl_net !== undefined && d.pnl_net !== null) ? d.pnl_net : d.pnl;
     const pEl = document.getElementById("stat-pnl");
-    if (pEl) { pEl.textContent = fmtPnl(d.pnl); pEl.style.color = pnlColor(d.pnl); }
+    if (pEl) { pEl.textContent = fmtPnl(pnlNet); pEl.style.color = pnlColor(pnlNet); }
+    setEl("stat-pnl-gross", "gross " + fmtPnl(d.pnl));
 
     setEl("stat-winpct", (d.win_pct || 0).toFixed(1) + "%");
 
+    const netPf = (d.net_pf !== undefined) ? d.net_pf : d.pf;
     const pfEl = document.getElementById("stat-pf");
-    if (pfEl) { pfEl.textContent = pfStr(d.pf); pfEl.style.color = pfColor(d.pf); }
+    if (pfEl) { pfEl.textContent = pfStr(netPf); pfEl.style.color = pfColor(netPf); }
+    setEl("stat-pf-gross", "gross " + pfStr(d.pf));
 
     setEl("stat-trades", d.trades);
     setEl("stat-wins", d.wins);
@@ -142,10 +148,21 @@ function pollMarketConditions() {
 let _pnlChart = null;
 let _pnlDays = 0;
 
+let _pnlMode = "net";   // "net" | "gross"
+
+function setPnlMode(mode) {
+  _pnlMode = mode;
+  document.querySelectorAll(".pnl-mode-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.mode === mode));
+  loadPnlChart(_pnlDays);
+}
+
 function loadPnlChart(days) {
   _pnlDays = days;
   document.querySelectorAll(".pnl-range-btn").forEach(b =>
     b.classList.toggle("active", parseInt(b.dataset.days) === days));
+  document.querySelectorAll(".pnl-mode-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.mode === _pnlMode));
 
   const url = days > 0 ? "/api/pnl_history?start=" + daysAgoDate(days) : "/api/pnl_history";
   fetch(url).then(r => r.json()).then(function(data) {
@@ -156,9 +173,12 @@ function loadPnlChart(days) {
       strategies.flatMap(s => data[s].map(p => p.date))
     )].sort();
 
+    // Net is the default view. Gross is one click away rather than shown alongside —
+    // five strategies × two curves is ten lines and reads as noise.
+    const key = (_pnlMode === "gross") ? "cumulative" : "cumulative_net";
     const datasets = strategies.map(function(s) {
       const byDate = {};
-      data[s].forEach(p => { byDate[p.date] = p.cumulative; });
+      data[s].forEach(p => { byDate[p.date] = (p[key] !== undefined) ? p[key] : p.cumulative; });
       let last = 0;
       const points = allDates.map(d => {
         if (byDate[d] !== undefined) last = byDate[d];
@@ -231,28 +251,45 @@ function loadScoreboard(days) {
     b.classList.toggle("active", parseInt(b.dataset.days) === days));
 
   const url = days > 0 ? "/api/scoreboard?start=" + daysAgoDate(days) : "/api/scoreboard";
+  const NCOL = 10;
   const tbody = document.getElementById("scorecard-tbody");
-  if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="muted" style="padding:8px 10px">Loading…</td></tr>';
+  const span = (cls, msg) =>
+    `<tr><td colspan="${NCOL}" class="${cls}" style="padding:8px 10px">${msg}</td></tr>`;
+  if (tbody) tbody.innerHTML = span("muted", "Loading…");
 
   fetch(url).then(r => r.json()).then(function(rows) {
     if (!tbody) return;
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="muted" style="padding:8px 10px">No trades yet.</td></tr>';
-      return;
-    }
+    if (!rows.length) { tbody.innerHTML = span("muted", "No trades yet."); return; }
     tbody.innerHTML = rows.map(r => {
       const stCol = STRAT_COLORS[r.strategy] || "#8b949e";
-      return `<tr>
+      // A CI straddling 1.0 means the sample cannot distinguish this strategy from
+      // no edge at all. Dim the row and mark it, so a flattering point estimate
+      // can't be read as a result — every live strategy currently qualifies.
+      const dim = r.inconclusive ? ' class="inconclusive"' : "";
+      const ci = (r.ci_lo === null || r.ci_lo === undefined)
+        ? '<span class="muted">n&lt;2</span>'
+        : `[${r.ci_lo.toFixed(2)}, ${r.ci_hi === null ? "∞" : r.ci_hi.toFixed(2)}]`;
+      const flag = r.inconclusive
+        ? ' <span class="zero-edge" title="95% CI contains 1.0 — consistent with zero edge">⚠</span>'
+        : "";
+      const bps = (r.avg_bps_net === null || r.avg_bps_net === undefined)
+        ? "—"
+        : (r.avg_bps_net > 0 ? "+" : "") + r.avg_bps_net.toFixed(1);
+      return `<tr${dim}>
         <td><span class="strat-badge ${r.strategy}" style="color:${stCol};border-color:${stCol}">${r.strategy}</span></td>
         <td class="right num">${r.trades}</td>
         <td class="right num">${r.win_pct}%</td>
-        <td class="right num" style="color:${pfColor(r.pf)}">${pfStr(r.pf)}</td>
-        <td class="right num" style="color:${pnlColor(r.net_pnl)}">${fmtPnl(r.net_pnl)}</td>
+        <td class="right num muted">${pfStr(r.gross_pf)}</td>
+        <td class="right num" style="color:${pfColor(r.net_pf)}">${pfStr(r.net_pf)}${flag}</td>
+        <td class="right num" style="font-size:11px">${ci}</td>
+        <td class="right num" style="color:${pnlColor(r.avg_bps_net)}">${bps}</td>
+        <td class="right num muted">${fmtPnl(r.gross_pnl)}</td>
+        <td class="right num" style="color:${pnlColor(r.net_pnl)}"><b>${fmtPnl(r.net_pnl)}</b></td>
         <td class="right muted" style="font-size:11px">${r.last_trade}</td>
       </tr>`;
     }).join("");
   }).catch(function() {
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="muted" style="padding:8px 10px">Failed to load.</td></tr>';
+    if (tbody) tbody.innerHTML = span("muted", "Failed to load.");
   });
 }
 
@@ -298,13 +335,19 @@ function renderTradeLog() {
   const tbody = document.getElementById("tradelog-tbody");
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="muted" style="padding:8px 10px">No trades.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="muted" style="padding:8px 10px">No trades.</td></tr>';
     return;
   }
   const stCol = s => STRAT_COLORS[s] || "#8b949e";
   tbody.innerHTML = rows.map(r => {
     const pnl = r.pnl !== null ? r.pnl : 0;
+    const net = (r.pnl_net !== null && r.pnl_net !== undefined) ? r.pnl_net : pnl;
+    const bpsn = (r.bps_net !== null && r.bps_net !== undefined)
+      ? (r.bps_net > 0 ? "+" : "") + r.bps_net.toFixed(1) : "—";
     const reasonCls = r.reason === "TARGET" ? "TARGET" : r.reason === "STOP" ? "STOP" : "TIME_STOP";
+    // Gross is muted, net is bold: costs are not optional, so net is the number
+    // that should catch the eye. A trade that flips sign between them is the
+    // whole point of showing both.
     return `<tr>
       <td class="muted">${r.date || "?"}</td>
       <td><b>${(r.symbol || "").replace("US.", "")}</b></td>
@@ -312,7 +355,9 @@ function renderTradeLog() {
       <td><span class="dir-badge ${r.direction || "long"}">${(r.direction || "long").toUpperCase()}</span></td>
       <td class="right num">${r.entry !== null ? r.entry.toFixed(2) : "—"}</td>
       <td class="right num">${r.exit !== null ? r.exit.toFixed(2) : "—"}</td>
-      <td class="right num" style="color:${pnlColor(pnl)}">${fmtPnl(pnl)}</td>
+      <td class="right num muted">${fmtPnl(pnl)}</td>
+      <td class="right num" style="color:${pnlColor(net)}"><b>${fmtPnl(net)}</b></td>
+      <td class="right num" style="color:${pnlColor(net)}">${bpsn}</td>
       <td class="right muted">${r.hold_bars || 0}</td>
       <td><span class="reason-badge ${reasonCls}">${r.reason || "?"}</span></td>
     </tr>`;

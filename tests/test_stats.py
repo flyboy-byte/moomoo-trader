@@ -16,8 +16,11 @@ def test_stats_reexports_the_canonical_profit_factor_not_a_copy():
     docstring and tests/test_metric_consistency.py exist to prevent. A second
     implementation here with a `< 0` loss convention was written and removed on
     2026-08-29 — this pins the re-export so it cannot come back silently."""
-    from mm.backtest import profit_factor as canonical
-    assert stats.profit_factor is canonical
+    # Provenance, not identity — mm.backtest gets reloaded by other tests, which
+    # would break an `is` check without anything being wrong. See the same note in
+    # tests/test_trades_module.py.
+    assert stats.profit_factor.__module__ == "mm.backtest"
+    assert stats.profit_factor.__qualname__ == "profit_factor"
     assert stats.profit_factor([10.0, 0.0, -5.0]) == pytest.approx(2.0)   # 0 counts as loss
     assert stats.profit_factor([]) == float("inf")                        # not nan
 

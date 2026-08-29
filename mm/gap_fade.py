@@ -33,6 +33,7 @@ import pandas as pd
 from .indicators import add_all
 from .logger import get_logger
 from .premarket import premarket_fill_pct as _premarket_fill_pct
+from .backtest import profit_factor as _profit_factor  # canonical PF, never redefine
 
 log = get_logger("gap_fade")
 
@@ -280,9 +281,7 @@ def print_gap_fade_summary(
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
     total_pnl = sum(t.pnl for t in trades)
-    gross_win = sum(t.pnl for t in wins)
-    gross_loss = abs(sum(t.pnl for t in losses))
-    pf = gross_win / gross_loss if gross_loss else float("inf")
+    pf = _profit_factor(trades)   # canonical (mm/backtest.py), was inline
 
     from collections import Counter
     reasons = Counter(t.exit_reason for t in trades)

@@ -242,6 +242,57 @@ a:hover { text-decoration: underline; }
 .stat-box.pnl.positive { border-top-color: var(--green); }
 .stat-box.pnl.negative { border-top-color: var(--red); }
 
+/* "net" tag beside a stat label — the headline figures are net of transaction
+   costs, and the label has to say so or the number is ambiguous. */
+.stat-box .label .qualifier {
+  color: var(--accent, #58a6ff);
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+
+/* Gross figure under the net headline. Deliberately small and dim: present for
+   comparison, never competing to be read as the result. */
+.stat-box .substat {
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  line-height: 1;
+}
+
+/* A strategy whose net-PF confidence interval contains 1.0 is statistically
+   indistinguishable from no edge. Dim the whole row so a good-looking point
+   estimate can't be mistaken for a finding. */
+tr.inconclusive td { opacity: 0.62; }
+tr.inconclusive:hover td { opacity: 1; }
+.zero-edge { color: var(--orange); cursor: help; font-size: 11px; }
+
+/* Explanatory footnote under a data table — says what the numbers mean so the
+   table doesn't need outside context to be read correctly. */
+.table-note {
+  margin: 10px 2px 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.table-note code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+/* Divider between two button groups sharing one toolbar. */
+.btn-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
 /* ── Open position ──────────────────────────────────── */
 .open-pos-grid {
   display: grid;

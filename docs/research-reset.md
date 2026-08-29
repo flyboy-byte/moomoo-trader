@@ -8,15 +8,22 @@
 
 ## Session state — resume from here (2026-08-29)
 
-**Repo:** clean, `e3bc988`, pushed to `origin/master`. VPS at the same commit, services `active`,
-no kill switches. 299 tests pass (`python -m pytest tests/ -q`, ~2m45s).
+**Repo:** clean, pushed to `origin/master`. VPS needs a `git pull` + dashboard restart to pick up
+the 2026-08-29 reporting changes. Services `active`, no kill switches.
 
 **Verify state in one command each:**
 ```bash
-git log --oneline -1                       # expect e3bc988 or later
-python -m pytest tests/ -q                 # expect 299 passed
-python scripts/analyze_trades.py --all     # sections 1, 1b, 1c now show net-of-cost
+git log --oneline -1
+python -m pytest tests/ -q                 # expect 333 passed (~3m)
+python scripts/analyze_trades.py --all     # sections 1, 1b, 1c show net-of-cost
+python scripts/eod_summary.py --date YYYY-MM-DD   # P&L line leads with net, gross in parens
 ```
+
+**Reporting is now single-ruler (2026-08-29).** `mm/trades.py` is the canonical trade
+reconstruction and every reporter goes through it: `analyze_trades.py`, `web_dashboard.py`,
+`eod_summary.py`. The dashboard used to publish +$12.92 / PF 1.189 against `analyze_trades.py`'s
+net −$0.57 / PF 0.992 for the same trades — it no longer can, and a test enforces that. The
+backtest engines are **not** yet wired; see "Loose ends" §1.
 
 **The one number that matters:** re-measuring the same 102 live trades net of costs turns
 gross +$12.92 / PF 1.189 into **net −$0.57 / PF 0.992**, CI [0.545, 1.782], P(mean>0) = 0.48.
@@ -265,23 +272,28 @@ the answer is bad; it is that no answer is reachable.
 
 Ordered by severity. Nothing here is hidden in a commit message; this is the list.
 
-### 1. BLOCKING FOR GOAL B — the cost model is wired into one script only
-`mm/costs.py` is imported by `scripts/analyze_trades.py` and nothing else. **35 other files that
-report PnL or PF are still frictionless**, including every backtest engine
-(`mm/backtest.py`, `mm/orb_strategy.py`, `mm/vwap_pullback.py`, `mm/gap_fade.py`,
-`mm/ema_momentum.py`), `mm/replay.py::summarize()`, and every `scripts/backtest_*.py`.
+### 1. ~~BLOCKING FOR GOAL B — the cost model is wired into one script only~~ — PARTLY CLOSED 2026-08-29
+**Reporters: DONE. Engines: still open.**
 
-Two consequences:
-- **The project currently has two contradictory rulers.** `analyze_trades.py` says net −$0.57 /
-  PF 0.992; the dashboards, `eod_summary.py` (which posts to Discord), `weekly_report.py`, and all
-  backtest scripts still say +$12.92 / PF 1.19. Whichever a future session looks at first wins.
-- **B3 cannot produce cost-aware results until this is fixed**, because the wide scan runs through
-  exactly those un-wired engines. This was not visible when the plan was written.
+**What was done (the user-facing half of B2a):** `mm/trades.py` now holds the canonical trade
+reconstruction — `pair_trades()`, `load_trades()`, `summarize_costs()` — with `mm/costs.py` applied
+inside it. `scripts/analyze_trades.py` and `scripts/web_dashboard.py` both go through it, and
+`scripts/eod_summary.py` gained `SessionSummary.realized_pnl_net`. The dashboard and the Discord
+EOD post now lead with net and show gross beside it.
 
-**Plan correction: a new step B2a — wire `mm/costs.py` into the engines and `replay.summarize()` —
-sits between B2 and B3 and is mandatory.** Highest-value targets in order: `mm/replay.py`,
-the four backtest engines, then `scripts/eod_summary.py` + the two dashboards (user-facing, and
-currently reporting numbers the audit showed to be wrong).
+Two things surfaced while doing it, neither visible when the plan was written:
+- The dashboard had its **own** pairing implementation, uncosted, with the resulting gross figure
+  labelled `net_pnl`. It also had no pre-confirmed-fill cutoff, so it counted **119** trades where
+  `analyze_trades.py` counted 102. Both reporters now agree exactly (102 / +$12.92 gross /
+  −$0.57 net), and `tests/test_trades_module.py` asserts that agreement so they cannot drift again.
+- Three more inline `profit_factor` reimplementations lived in the dashboard, plus two surviving
+  `999.0` sentinels in `mm/vwap_pullback.py` and `mm/ema_momentum.py`. See loose end §4.
+
+**What is still open (the engine half — STILL BLOCKING FOR B3):** `mm/replay.py::summarize()` and
+the four backtest engines (`mm/backtest.py`, `mm/orb_strategy.py`, `mm/vwap_pullback.py`,
+`mm/gap_fade.py`, `mm/ema_momentum.py`) remain frictionless. **B3's wide scan runs through exactly
+those**, so it still cannot produce cost-aware results until they are wired. That is the remaining
+content of step B2a and it is unchanged in priority.
 
 ### 2. `evaluation_criteria.md` gates are silent on gross vs net
 Every gate says "PF < 1.0 at N trades" without specifying which PF. Under the old frictionless
@@ -298,12 +310,16 @@ while trades run to 08-24. The script detects this and prints a warning rather t
 number. Closes naturally when B1's bulk fetch backfills SPY. Do not treat the current
 "+2.50 pts vs benchmark" as real.
 
-### 4. Metric-drift category is still not fully guarded
-The 4th instance of reimplemented `profit_factor` was written *and caught* this session, 2.5 months
-after the consolidation meant to end it. `tests/test_metric_consistency.py` pins the canonical
-function's behaviour but cannot stop a new module defining its own. A repo-wide grep test for
-`def profit_factor` outside `mm/backtest.py` would close the category. **Not built.** Full writeup
-in `strategy_graveyard.md`.
+### 4. ~~Metric-drift category is still not fully guarded~~ — CLOSED 2026-08-29
+The repo-wide grep guard is **built**: `test_only_mm_backtest_defines_profit_factor` and
+`test_no_999_no_loss_sentinel_survives_anywhere` in `tests/test_metric_consistency.py`.
+
+Building it immediately turned up instances 5-7 (three inline PFs in `scripts/web_dashboard.py`)
+and two live `999.0` no-loss sentinels in `mm/vwap_pullback.py` and `mm/ema_momentum.py` — the
+2026-06-18 consolidation had fixed the `scripts/backtest_*.py` wrappers and missed the `mm/`
+engines underneath them, so the metric had been computed four different ways in production for
+over two months after the pass that was supposed to end it. All seven now call the canonical
+function. Full writeup in `strategy_graveyard.md`.
 
 ### 5. Local vs VPS candle archives are divergent by design
 Local: 2022-01-03 → 2026-06-25 (~87k bars/symbol). VPS: ~58 days rolling. `sync_logs.sh` explicitly
