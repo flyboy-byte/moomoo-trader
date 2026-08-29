@@ -1,31 +1,23 @@
-# Research Reset — Measurement Rebuild + Universe Expansion
+# Research Reset — evidence archive (superseded as the plan)
 
-> **Status (2026-08-29, end of session):** Goal A **BUILT AND RUN** — A1/A2/A4/A5 done, A3 partial.
-> Goal B **NOT STARTED**, fully scoped, decisions locked. A gates B.
-> **Step B2a (wire `mm/costs.py` everywhere) is half done.** The *reporters* are wired and now
-> agree — `analyze_trades.py`, `web_dashboard.py`, `eod_summary.py` all go through `mm/trades.py`.
-> The *engines* are not: `mm/replay.py::summarize()` and the four backtest engines are still
-> frictionless, and B3's wide scan runs through exactly those. Read "Loose ends" §1 first.
+> **⚠️ This is no longer the plan. `docs/PLAN.md` is.** (Superseded 2026-08-29, same day this was
+> written — the goals and findings held, but "Goals A/B + a loose-ends list" was not something you
+> could pick up and follow step by step, which is what `PLAN.md` restructures it into.)
 >
-> **NEXT ACTION (do this before anything else):** deploy to the VPS —
-> `ssh <vps> 'cd ~/moomoo && git pull && systemctl --user restart moomoo-dashboard'`.
-> The VPS is running the pre-2026-08-29 dashboard, which still publishes the old gross-only
-> numbers. The paper runner does NOT need restarting — no runtime code changed.
+> **Keep reading this file for:** the Goal A results (the net-of-costs measurement and its cost
+> sensitivity table), the live-verified API scoping numbers, and the reasoning behind the locked
+> decisions. Those are the evidence and they are not repeated in `PLAN.md`.
 >
-> **THEN:** finish B2a's engine half (Loose ends §1), which unblocks Goal B.
+> **Do not use this file for:** what to do next, or what is still open. Both moved to `PLAN.md`,
+> reordered and split into testable chunks, and this file's "Loose ends" section is no longer
+> maintained.
+>
+> Nothing below has been edited for accuracy-as-of-writing; the status lines are as of 2026-08-29.
 
-## Session state — resume from here (2026-08-29)
+## Session state as of 2026-08-29 (historical)
 
 **Repo:** clean, pushed to `origin/master`. VPS needs a `git pull` + dashboard restart to pick up
 the 2026-08-29 reporting changes. Services `active`, no kill switches.
-
-**Verify state in one command each:**
-```bash
-git log --oneline -1
-python -m pytest tests/ -q                 # expect 333 passed (~3m)
-python scripts/analyze_trades.py --all     # sections 1, 1b, 1c show net-of-cost
-python scripts/eod_summary.py --date YYYY-MM-DD   # P&L line leads with net, gross in parens
-```
 
 **Reporting is now single-ruler (2026-08-29).** `mm/trades.py` is the canonical trade
 reconstruction and every reporter goes through it: `analyze_trades.py`, `web_dashboard.py`,
@@ -276,9 +268,12 @@ equities has no edge — it is the most-competed trade in existence, so that is 
 crowded. The current structure cannot produce even that. The failure being fixed here is not that
 the answer is bad; it is that no answer is reachable.
 
-## Loose ends (honest inventory, 2026-08-29)
+## Loose ends (frozen 2026-08-29 — now tracked in `docs/PLAN.md`)
 
-Ordered by severity. Nothing here is hidden in a commit message; this is the list.
+> **No longer maintained.** Every item below became a numbered step in `docs/PLAN.md`:
+> §1 engine half → Step 2 · §2 gross-vs-net gates → Step 1 · §3 benchmark → Step 10 ·
+> §4 metric drift → closed · §5 archives → Step 9 · §6 housekeeping → H1 · §7 Route 2b → Parked.
+> Kept below for the detail behind each.
 
 ### 1. ~~BLOCKING FOR GOAL B — the cost model is wired into one script only~~ — PARTLY CLOSED 2026-08-29
 **Reporters: DONE. Engines: still open.**

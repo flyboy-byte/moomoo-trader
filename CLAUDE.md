@@ -17,13 +17,16 @@ Build a practical Python project for AI-assisted stock strategy research and Moo
 Intended for GitHub publication. Keep it clean, readable, and extensible but not over-engineered.
 
 Where the real state lives (read these, not your memory of past sessions):
-- docs/research-reset.md    — **START HERE (as of 2026-08-29).** Has a "Session state — resume from
-  here" block at the top and an explicit "Loose ends" inventory: read both before starting work.
-  Goal A (measurement rebuild) is BUILT — re-measuring the 102 live trades net of costs turned
-  gross +$12.92/PF 1.189 into net −$0.57/PF 0.992, i.e. the reported profit was the transaction
-  costs. Goal B (universe expansion) is scoped, not started, and gated on step B2a. Contains the
+- docs/PLAN.md              — **START HERE. The single active plan (as of 2026-08-29).** Ordered,
+  checkboxed steps, each with a "Done when" that is a command or a test name. Also holds what is
+  parked, what is deliberately not being done, and the deferred OpenD/moomoo-api version item.
+  Work the steps in order; the top of the file names the current one.
+- docs/research-reset.md    — evidence archive behind PLAN.md, superseded as the plan 2026-08-29.
+  Read it once for the numbers, not for what to do next. Goal A (measurement rebuild) results:
+  re-measuring the 102 live trades net of costs turned gross +$12.92/PF 1.189 into
+  net −$0.57/PF 0.992, i.e. the reported profit was the transaction costs. Also holds the
   live-verified API scoping numbers (history_kl_quota=100 hard cap, ~650x engine throughput gap,
-  history depth ≥2019) — do not re-derive them. Supersedes Route 2b Phases 2-6 as the priority.
+  history depth ≥2019) — do not re-derive them — and the reasoning behind the locked decisions.
 - docs/ARCHITECTURE.md      — data flow diagram, deployed strategy table, config reference, kill switches
 - docs/PROJECT_MAP.md       — full file map, strategy specs with backtest numbers, risk/sizing, event log format
 - docs/evaluation_criteria.md — pre-registered gates per strategy (the "knob freeze" — read before touching any strategy parameter)
@@ -149,7 +152,7 @@ Strategy (BB + KDJ mean reversion, 5-min candles) — the core spec, parameters 
 Current priorities — this is a snapshot, not a sequence. Use judgment about what's actually most
 useful right now; deviate freely when something better surfaces (e.g. a dashboard bug, an unblocked
 strategy, a doc cleanup). Don't treat this list as a gate against doing other useful work.
-- **TOP PRIORITY as of 2026-08-29: docs/research-reset.md.** The 2026-08-29 audit found the
+- **TOP PRIORITY as of 2026-08-29: docs/PLAN.md — work its steps in order.** The audit found the
   portfolio's measured edge (+1.31 bps weighted across 106 live trades) sits *inside* the project's
   own 1-3 bps cost band, on frictionless fills — i.e. no demonstrated edge, and the reporting layer
   (per-share PnL, no benchmark, no CIs, no cost model) can't show it. Goal A rebuilds measurement;

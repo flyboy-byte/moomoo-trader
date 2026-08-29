@@ -184,7 +184,8 @@ Same session also closed all 3 outstanding bugs from the 2026-08-25 external aud
 
 ## Current status (update this line as phases advance)
 
-**⚠️ 2026-08-29 — BOTH ROUTES PARKED behind `docs/research-reset.md`.** An audit found the live
+**⚠️ 2026-08-29 — BOTH ROUTES PARKED behind `docs/PLAN.md`** (the single active plan; the audit
+that caused this is written up in `docs/research-reset.md`). An audit found the live
 portfolio's weighted edge is +1.31 bps across 106 trades, inside the project's own 1–3 bps cost
 band, on frictionless fills — no demonstrated edge, and the reporting layer can't reveal it (no
 cost model, no dollar accounting, no benchmark, no CIs). Adding more strategy/AI surface (Route 2b
@@ -202,5 +203,9 @@ Accumulating live sessions toward the 10-session gate. ORB scorer stays shadow-m
 The Phase 4 PF evidence was re-verified 2026-08-25 after a PF-pooling bug fix in
 `validate_regime.py` — number changed (0.513→0.813) but verdict held, gate stays enabled.
 Route 2b (volatility engine) is a new, separate-but-related track started 2026-08-25 — see section
-above and `route-2b-volatility-engine.md`. Phase 1 done, data accumulating, nothing live yet.
-Next: let Route 2b's vol_state.jsonl accumulate a few sessions, then start Route 2b Phase 2.**
+above and `route-2b-volatility-engine.md`. Phase 1 done, data accumulating, nothing live yet.**
+
+**Next is NOT in this file.** Both routes are parked; `docs/PLAN.md` holds the ordered work.
+Route 2b Phase 2 reopens after PLAN.md Step 12; Route 2 Phase 5 (the gate keep/remove/tune
+decision) is behind PLAN.md Step 1, since it is a gate evaluation and the gates do not yet say
+whether they mean gross or net PF.
