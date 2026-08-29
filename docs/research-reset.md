@@ -2,9 +2,17 @@
 
 > **Status (2026-08-29, end of session):** Goal A **BUILT AND RUN** — A1/A2/A4/A5 done, A3 partial.
 > Goal B **NOT STARTED**, fully scoped, decisions locked. A gates B.
-> **Blocking discovery: the cost model is wired into exactly ONE script.** Wiring it into the
-> engines is now a prerequisite for B3, not polish — see "Loose ends" below. Read that section
-> before starting anything.
+> **Step B2a (wire `mm/costs.py` everywhere) is half done.** The *reporters* are wired and now
+> agree — `analyze_trades.py`, `web_dashboard.py`, `eod_summary.py` all go through `mm/trades.py`.
+> The *engines* are not: `mm/replay.py::summarize()` and the four backtest engines are still
+> frictionless, and B3's wide scan runs through exactly those. Read "Loose ends" §1 first.
+>
+> **NEXT ACTION (do this before anything else):** deploy to the VPS —
+> `ssh <vps> 'cd ~/moomoo && git pull && systemctl --user restart moomoo-dashboard'`.
+> The VPS is running the pre-2026-08-29 dashboard, which still publishes the old gross-only
+> numbers. The paper runner does NOT need restarting — no runtime code changed.
+>
+> **THEN:** finish B2a's engine half (Loose ends §1), which unblocks Goal B.
 
 ## Session state — resume from here (2026-08-29)
 
