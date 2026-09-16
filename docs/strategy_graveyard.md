@@ -5,6 +5,56 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
+## Health Review — 2026-09-16 (PLAN.md Step 0b, partial)
+
+**Status: PROVISIONAL.** SSH to the VPS failed (TCP connects on :22, no SSH banner within 30s,
+twice; host otherwise healthy — ping fine, nginx fast, load 0.17, mem 25%, `fail2ban-server`
+running). Cause UNKNOWN, not retried further. Data below came from the dashboard's public
+read-only API (`/api/trades`, `/api/scoreboard`, `/api/stats`), **not** from synced logs.
+
+**What could be verified:** the runner is trading (trades dated 2026-09-16), OpenD is running.
+**The VPS is still on pre-2026-08-29 dashboard code** — its scoreboard has the old `pf`/`net_pnl`
+fields, where `net_pnl` is really gross. So PLAN.md Step 0 is not done. **Not verified:** VPS
+commit, `.env` gate values, reconciliation errors, unfilled orders.
+
+**Caveat on the numbers:** the old dashboard pairs trades itself, not via `mm/trades.py`. For
+the prior window it gives 101 trades / gross +$9.53, vs canonical 102 / +$12.92. Costs applied
+here with `mm/costs.py`; CIs are i.i.d. bootstrap (understated — see PLAN.md Step 4). Trades
+before `LIVE_LOGS_START` (2026-06-10) excluded. Many slices below → some will look extreme by
+chance.
+
+| Slice | n | Win% | Gross | Net | Net PF | Net PF CI | P(mean>0) |
+|---|--:|--:|--:|--:|--:|---|--:|
+| All, 06-11 → 09-16 | 133 | 44 | −8.44 | −26.43 | 0.76 | [0.44, 1.24] | 0.14 |
+| All ≤ 08-24 (prior sample) | 101 | 47 | +9.53 | −3.85 | 0.95 | [0.52, 1.70] | 0.43 |
+| **All ≥ 08-25 (new, 14 days)** | 32 | 34 | −17.98 | −22.58 | **0.32** | **[0.08, 0.83]** | 0.01 |
+| orb | 57 | 44 | −11.73 | −19.14 | 0.72 | [0.31, 1.50] | 0.19 |
+| — orb < 07-09 (all shorts) | 25 | 48 | −11.05 | −14.18 | 0.63 | [0.19, 1.81] | 0.19 |
+| — orb 07-09 → 08-13 | 20 | 45 | +12.56 | +9.97 | 2.01 | [0.44, 7.09] | 0.83 |
+| — **orb ≥ 08-14 (`ORB_LATEST_ENTRY=12:30`)** | 12 | 33 | −13.23 | −14.93 | **0.20** | [0.01, 0.93] | 0.02 |
+| — orb by symbol: SPY / QQQ / IWM | 24 / 21 / 12 | | | −7.19 / +4.11 / −16.07 | 0.63 / 1.17 / 0.33 | | |
+| vwap_pb | 37 | 41 | +7.83 | +2.97 | 1.25 | [0.48, 3.07] | 0.68 |
+| gap_fade | 16 | 38 | −2.83 | −5.39 | 0.58 | [0.09, 2.24] | 0.21 |
+| bb_kdj_loose | 16 | 50 | −1.56 | −3.73 | 0.70 | [0.15, 2.55] | 0.28 |
+| bb_kdj | 7 | 57 | −0.15 | −1.14 | 0.74 | [0.12, 5.07] | 0.36 |
+
+**Readings (INFERRED, not verdicts):**
+- The 14 days since the last review are the worst stretch recorded: the first pooled CI in the
+  project that sits wholly below 1.0. Broad-based — orb, bb_kdj_loose and vwap_pb all lost.
+- ORB since the 2026-08-14 `ORB_LATEST_ENTRY=12:30` change: PF 0.20 net on 12 trades. That
+  change was justified by a backtest (PF 0.76 → 1.04 gross). Twelve trades cannot overturn it,
+  but it is the obvious thing to check first. ORB IWM carries most of ORB's loss.
+- vwap_pb is the only lane net-positive over the whole window; its CI still spans 1.0.
+- Nothing here changes a live knob — per the knob freeze, each "review" item needs its gate.
+
+| Strategy | Next action |
+|---|---|
+| orb | **Review strategy** — look at the post-08-14 era and IWM, through the gate process |
+| gap_fade | Continue — 16 trades, still short of its gate |
+| vwap_pb | Continue |
+| bb_kdj / bb_kdj_loose | Continue — too few trades to say anything |
+| infrastructure | **Investigate** — restore SSH, then do Step 0 and redo this table from synced logs |
+
 ## Data Mining Results (Route 1 — scripts/mine_*.py)
 
 ### H1 — First-Bar Direction Predicts 10am-11am Returns — TESTED 2026-07-23, NULL

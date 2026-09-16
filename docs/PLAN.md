@@ -95,6 +95,12 @@ the knob freeze like anything else.
 **Done when:** the table is in `docs/strategy_graveyard.md` under a dated heading, and anything
 that could not be verified is named as such.
 
+**2026-09-16 — partial.** SSH to the VPS hangs before the banner, so a provisional table was built
+from the dashboard's public API instead (`docs/strategy_graveyard.md` § "Health Review —
+2026-09-16"). Headline: the 32 trades since 08-24 are net PF 0.32, and ORB since the 08-14
+`ORB_LATEST_ENTRY` change is net PF 0.20 on 12 trades. It also showed **Step 0 is not done** (the VPS
+still serves the old dashboard). Redo it from synced logs once SSH is back.
+
 ---
 
 ### Step 1 — Decide: do the pre-registered gates mean gross or net? ☐
