@@ -8,12 +8,17 @@
 > and testable one at a time. Each has a `Done when` line that is a command or a test name, not a
 > feeling.
 >
-> **Right now: Step 0.**
+> **Amended 2026-09-16** after a Codex review (`docs/CLAUDE_REVIEW_HANDOFF_2026-09-16.md`, kept
+> as its own record). Changes: new Step 0b (health review + per-strategy table), new Step 1b
+> (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
+> bottom.
+>
+> **Right now: Step 0, then Step 0b.**
 
 ## The one number that matters
 
 The same 102 live trades: **gross +$12.92 / PF 1.189** → **net −$0.57 / PF 0.992**, CI
-[0.545, 1.782], P(mean>0) = 0.48. The reported profit *was* the transaction costs. Every
+[0.545, 1.782], P(mean>0) = 0.48. The apparent profit disappears under the modeled costs. Every
 per-strategy CI contains 1.0. There is no demonstrated edge, in either direction — the sample is
 too small to say. Full evidence: `docs/research-reset.md` § "Goal A results".
 
@@ -71,6 +76,27 @@ consistent with zero edge).
 
 ---
 
+### Step 0b — Health review: pull VPS logs, one table per strategy ☐
+**Added 2026-09-16 (Codex review).** The loop so far has been "pull logs, fix bugs, keep
+running" with no decision at the end of it. This step produces that decision.
+
+1. `./sync_logs.sh`, then confirm what is deployed: the VPS commit, the active strategies, the
+   `.env` gate settings, uptime, reconciliation errors, unfilled orders.
+2. Split the trade history **wherever the configuration or behaviour changed** (e.g. ORB QQQ/IWM
+   shorts off 2026-07-09, `ORB_LATEST_ENTRY=12:30` 2026-08-14). The 102 trades mix several eras,
+   and a pooled number blurs them.
+3. For each strategy × era: trades, win rate, gross and net PnL/PF, cost sensitivity, fill
+   anomalies, whether its gate has been reached, and one next action: **continue / investigate
+   execution / review strategy**.
+
+**Read-only.** Nothing here changes a live parameter; a "review strategy" verdict goes through
+the knob freeze like anything else.
+
+**Done when:** the table is in `docs/strategy_graveyard.md` under a dated heading, and anything
+that could not be verified is named as such.
+
+---
+
 ### Step 1 — Decide: do the pre-registered gates mean gross or net? ☐
 **Doc-only. Needs a human call — do not assume one.** *(was loose end §2)*
 
@@ -86,6 +112,19 @@ prevent happening quietly, so it gets an amendment-log entry with a date and a r
 uses, and the per-strategy gate sections say so inline.
 
 **Blocks:** any gate evaluation. ORB and gap_fade are both near their gates.
+
+### Step 1b — Declare a frozen forward cohort ☐
+**Added 2026-09-16 (Codex review). Needs a human call.** All history — live and backtest — has
+been looked at repeatedly while tuning, so none of it is a clean test (see Step 6b). The only
+clean test left is data that does not exist yet: fix one configuration and a start date, and
+count only trades from that date on under that configuration. The runner keeps running as it
+does now; the cohort is a labelled slice of its output, not a second runner.
+
+**Done when:** `docs/evaluation_criteria.md` has a dated entry naming the configuration
+(commit + `.env` gate values), the start date, the question the cohort answers, and the rule for
+reading the result. After that, any live knob change ends the cohort and must be recorded as such.
+
+**Depends on:** Step 0b (know what is actually deployed) and Step 1 (which ruler it is read with).
 
 ---
 
@@ -181,8 +220,14 @@ they clear the tolerance or the disagreement is explained and the plan pauses he
   IWM's 30-minute OR, and so on) tuned on SPY/QQQ/IWM. Running SPY with tuned parameters and AAPL
   with defaults produces a comparison of tuning, not of symbols. **One symbol-agnostic parameter
   set for the whole scan**, written down here, with the tuned live values explicitly out of scope.
-- **6b ☐ IS/OOS split.** Concrete dates, chosen now, never revisited. Suggest IS 2019–2023,
-  OOS 2024–present, which keeps a genuinely untouched recent window.
+- **6b ☐ IS/OOS split.** Concrete dates, chosen now, never revisited. ~~Suggest IS 2019–2023,
+  OOS 2024–present, which keeps a genuinely untouched recent window.~~ **Corrected 2026-09-16:**
+  2024+ is *not* untouched. It was the OOS window for most past research, and live parameters were
+  set from it — the ORB VIX cutoffs were chosen from 2024+ results
+  (`docs/strategy_graveyard.md` § "OOS verification (2024+ only, 2026-07-23)"). For the SPY/QQQ/IWM
+  live settings, 2024+ is development data. For symbols never pulled before, a historical OOS
+  window is still meaningful. **The clean confirmation for the live settings is Step 1b's forward
+  cohort**, not any historical window.
 - **6c ☐ Selection rule and finalist count.** 100 symbols × 5 strategies × sweeps is an
   overfitting machine and the plan currently answers it with culture rather than a rule. Fix a
   number of finalists (suggest ≤ 10) and a multiple-testing-aware threshold *before* seeing
@@ -370,3 +415,12 @@ equities has no edge — it is the most competed trade in existence, so that is 
 **A hard null at that sample is a real finding** and frees the engine to point somewhere less
 crowded. The current structure cannot produce even that. The failure being fixed is not that the
 answer is bad; it is that no answer is reachable.
+
+## Amendments
+
+- **2026-09-16** — Folded in a Codex review (`docs/CLAUDE_REVIEW_HANDOFF_2026-09-16.md`, committed
+  unedited as its own artifact; cross-model findings are input to verify, not fact). Verified
+  against the repo before adopting: the 2024+ contamination (graveyard line ~56). Adopted: Step 0b,
+  Step 1b, the 6b correction, and a softer headline ("disappears under the modeled costs" rather
+  than "was the transaction costs" — same numbers, more precise claim). Its engineering
+  recommendations matched Steps 2–7 and did not change the order.
