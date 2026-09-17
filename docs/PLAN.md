@@ -684,3 +684,11 @@ Daily loss limit checked 2026-09-17 (user asked whether it had been stopping oth
 strategies): on the VPS it fired on exactly one day, **2026-06-08**, when the limit was $5
 (pnl −$5.89). It has been $20 since then and has never fired. No change: raising it would
 change nothing and would end the forward cohort.
+
+## Parked 2026-09-17 — next market being scouted
+
+User decision 2026-09-17: park strategy work on the 85-symbol US universe. The paper runner,
+dashboard and cron keep running unchanged. Point the engine and machinery at a different market.
+Candidates are compared in `docs/scouting_next_market_2026-09.md`; **none has been chosen yet**.
+If one is, pilot it inside this repo first. Rename or re-scope the repo only if the pilot is worth
+continuing.
