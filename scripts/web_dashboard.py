@@ -42,6 +42,22 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 # First session of the frozen forward cohort (docs/evaluation_criteria.md amendment log,
 # 2026-09-16/17). The only clean test of the live settings; shown as its own range.
 COHORT_START = "2026-09-17"
+
+# load_trades re-parses every JSONL (~4 s on the VPS) and the scorecard tab makes three
+# such calls. Cache on a fingerprint of the log files themselves, so a new event
+# invalidates immediately; there is no TTL to go stale.
+_trades_cache: dict[tuple, list[dict]] = {}
+
+
+def _trades(start: str | None) -> list[dict]:
+    files = sorted(cfg.logs_dir.glob("paper_*_????-??-??.jsonl"))
+    stamp = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in files)
+    loader = load_trades               # resolved per call, so a patched loader is honoured
+    key = (str(cfg.logs_dir), start, hash(stamp), loader)  # holding loader pins its identity
+    if key not in _trades_cache:
+        _trades_cache.clear()          # one live fingerprint at a time
+        _trades_cache[key] = loader(cfg.logs_dir, start=start)
+    return _trades_cache[key]
 _SCRIPTS_DIR = Path(__file__).parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 
@@ -342,7 +358,7 @@ def api_scoreboard() -> Response:
     edge the costs ate; showing gross alone is the bug this endpoint used to have.
     """
     start_str = request.args.get("start")
-    trades = [t for t in load_trades(cfg.logs_dir, start=start_str) if t["closed"]]
+    trades = [t for t in _trades(start_str) if t["closed"]]
 
     per: dict[str, list[dict]] = {}
     for t in trades:
@@ -404,7 +420,7 @@ def api_pnl_history() -> Response:
     start_str = request.args.get("start")
     by_strat: dict[str, list[dict]] = {}
 
-    for t in load_trades(cfg.logs_dir, start=start_str):
+    for t in _trades(start_str):
         if not t["closed"] or t["pnl"] is None:
             continue
         by_strat.setdefault(t["strategy"] or "unknown", []).append(t)
@@ -449,7 +465,7 @@ def api_trades() -> Response:
     # Uses the canonical pairing (mm/trades.py) rather than a second, uncosted
     # implementation local to this file — which is what lived here until 2026-08-29
     # and is why the dashboard and analyze_trades.py disagreed about the same trades.
-    closed = [t for t in load_trades(cfg.logs_dir, start=start_str) if t["closed"]]
+    closed = [t for t in _trades(start_str) if t["closed"]]
     closed.sort(key=lambda t: t["close_ts"] or "", reverse=True)
 
     trades = [{

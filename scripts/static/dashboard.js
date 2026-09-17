@@ -5,7 +5,7 @@
 
 const STRAT_COLORS = {
   bb_kdj:       "#3fb950",
-  bb_kdj_loose: "#56d364",
+  bb_kdj_loose: "#39c5cf",
   orb:          "#58a6ff",
   vwap_pb:      "#d29922",
   gap_fade:     "#db61a2",
