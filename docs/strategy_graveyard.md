@@ -5,6 +5,30 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
+## Replay tests leaked output into the real logs/ — FOUND & FIXED 2026-09-17
+
+**What it was:** `mm/replay.py` redirected only `mm.paper.cfg.logs_dir` to its output folder, but
+`mm/events.py` writes JSONL and `*_traded.json` through `mm.config.cfg`. Several tests
+(`test_risk`, `test_strategy`, `test_bb_kdj_loose`) reload `mm.config` without reloading
+`mm.paper`, which leaves two different config objects in play. Any replay test that ran after
+them wrote into the **real** `logs/`. That was invisible in the full suite (the files are dated
+before `LIVE_LOGS_START`, so no report read them). It surfaced as two replay tests that failed
+only in a `-k` subset, the same "fails depending on order" signature the 2026-08-24 lesson warns
+about.
+
+**What it cost:** 11 files of pure replay output in `logs/`: `paper_US_{SPY,QQQ,IWM}_2026-05-27..29.jsonl`,
+`paper_US_QQQ_2026-03-20/23.jsonl`, plus an overwritten local `paper_US_QQQ_gap_fade_traded.json`.
+They were identified by every timestamp ending in `:10`, the replay's bar-close + 10 s signature
+(real logs have varied seconds). The IWM/QQQ May files date from 2026-07-25, so this had been
+happening for at least two months. **No reported number was affected:** all of those dates are
+before 2026-06-10. The files were moved to `logs/quarantine-replay-leak-20260917/`, and the state
+file was restored from the VPS.
+
+**Fix:** replay now redirects (and restores) `logs_dir` on every distinct config object.
+`tests/test_replay.py::test_replay_never_writes_to_real_logs_after_config_reload` reproduces the
+split, and it fails without the fix. **New suite-wide guard:** `tests/conftest.py` snapshots
+`logs/` before the session and fails the run if any watched file was created or modified.
+
 ## Archive price-basis seams — CONFIRMED & FIXED 2026-09-17 (PLAN.md Step 7)
 
 **Test (no quota spent):** SPY/QQQ/IWM were already in the 30-day history set because of the VPS

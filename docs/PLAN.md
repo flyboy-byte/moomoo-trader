@@ -407,6 +407,13 @@ not SPY's. Add it.
 **Done when:** `analyze_trades.py` stops printing the partial-benchmark warning, and per-symbol
 benchmarks appear in the scan output.
 
+**2026-09-17 — built, one wait left.** Per-symbol buy-and-hold over the scan window is in
+`mm/scan.py::buy_and_hold` and in every `wide_scan.py dev` output. For the live benchmark, the VPS
+nightly job now also keeps `US_SPY_K_DAY_combined.csv` (~400 days re-pulled each night, one page,
+free), which `sync_logs.sh` copies down. `analyze_trades.py` prefers it and labels which bars it
+used. **Done** once the first nightly run has produced the file and a sync shows no
+partial-benchmark warning.
+
 ---
 
 ### Step 11 — Wide scan ☐
@@ -424,6 +431,19 @@ holdout unless a committed finalist file exists.
 
 **Done when:** results exist for the full universe with net PF, block-bootstrap CIs, and the
 symbol's own benchmark, and the finalist list is produced by Step 6c's rule rather than by reading.
+
+**2026-09-17 — built and trial-tested, waiting on Step 9's data.**
+- **Code:** `mm/scan.py` holds the rules and constants from evaluation_criteria.md and
+  `run_engines` (now shared with the Step 5 script, which reproduces its earlier output
+  byte-for-byte). `scripts/wide_scan.py dev|holdout` does the rest:
+  - `dev` writes `docs/wide_scan/dev_results.json` and `finalists.json`.
+  - `holdout` refuses unless `finalists.json` is committed and unmodified.
+  - Partial runs (`--symbols`, missing files) are trials: they write to `logs/wide_scan/trial/`
+    and never touch the committed files.
+- **Tests:** 7 in `tests/test_scan_rules.py`.
+- **Trial:** SPY/QQQ/IWM on the dev window took 34 s (a plumbing check only; dev is not sealed).
+- **To run** after the fetch: rsync `logs/wide_scan/` from the VPS, run
+  `python scripts/wide_scan.py dev --workers 10`, commit `docs/wide_scan/`, then run `holdout`.
 
 ---
 
@@ -449,6 +469,46 @@ swallowed it, and Discord got "No summary available." every week. Fixed 2026-08-
 records `stop_reason` — **but the diagnosis is inference, not proof.** Check the next Monday run.
 If it fails again with `stop_reason == "end_turn"`, the truncation theory is wrong and the
 `docs/strategy_graveyard.md` entry needs correcting.
+
+---
+
+### H3 — Extended README design ☐
+*(user request, 2026-09-17)* Give `README.md` (328 lines) a proper design pass. **Must use the
+`readme` skill** (user instruction): structure a skimmer can follow in 30 seconds, status tables, collapsibles, and a
+diagram of the runner → logs → dashboard flow. It has to tell the honest story: a paper-only
+research platform, currently no demonstrated edge net of costs, with measurement rebuilt and a
+wide scan in progress. Don't sell it as a profitable system.
+**Done when:** README renders cleanly on GitHub (checked in a browser), and every claim in it
+matches `docs/` as of that date.
+
+### H4 — GitHub Pages site ☐
+*(user request, 2026-09-17)* A small public page for the project, e.g. an overview, the
+methodology (the gross→net finding, the preregistration and holdout discipline, the Step 5
+engine cross-validation), and possibly a static snapshot of wide-scan results once Step 11 exists.
+Open decisions: plain `docs/`-folder Pages vs a `gh-pages` branch (the repo's `docs/` is already
+the deep-doc folder, so a separate folder or branch is likely cleaner), and what to publish.
+**Nothing live or account-specific:** no positions, no VPS host, nothing from `.env`.
+**Done when:** the site builds from the repo and links back to README.
+
+### H5 — Do the 2026-09 changes warrant dashboard changes? ☐
+*(user request, 2026-09-17)* Review `scripts/web_dashboard.py` against what changed since Step 0's
+deploy, then decide what (if anything) to build. Candidates:
+- the **forward cohort** (a "since 2026-09-17" view, separate from all-time);
+- the **gap-filter fix** (`gap_large_short` skips are now real events);
+- the **day-blocked CIs** (Step 4);
+- a wide-scan results page once Step 11 lands.
+Related, found 2026-09-16: `/api/*` endpoints are readable without login, including `/api/stats`'s
+process list. Decide whether that is intended for a public showcase.
+Constraint: `feedback_config_ui` memory (toggles/pills/numbers only, TOTP auth).
+**Done when:** a short decision list is written here, and anything chosen is built and deployed.
+
+### H6 — Retire the terminal dashboard ☐
+*(user request, 2026-09-17: "long obsolete")* Remove `scripts/dashboard.py` (571 lines, TUI).
+The web dashboard replaced it. Before deleting, check the references in `start.sh`, `README.md`,
+`CLAUDE.md`, `docs/PROJECT_MAP.md`, `scripts/eod_summary.py`, and the `mm/stats.py` comment, and
+make sure nothing imports it. Record it in `docs/strategy_graveyard.md` ("Decided Against /
+retired") so it isn't rebuilt.
+**Done when:** the file is gone, no reference is left dangling, and the full suite passes.
 
 ---
 

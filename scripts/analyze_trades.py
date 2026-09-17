@@ -204,15 +204,21 @@ def _capital_and_benchmark(trades: list[dict], logs_dir: Path,
           f"   (annualized {((net_total/base)/years)*100:+.1f}%)")
 
     # Benchmark: SPY buy-and-hold over the identical window.
-    spy_csv = logs_dir / "US_SPY_K_5M_combined.csv"
-    if not spy_csv.exists():
-        print("\n  Benchmark unavailable (no logs/US_SPY_K_5M_combined.csv).")
+    # Prefer the VPS-maintained daily archive (kept current nightly); the local 5-min
+    # archive is a research snapshot that stops wherever it was last extended.
+    spy_csv = next((p for p in (logs_dir / "US_SPY_K_DAY_combined.csv",
+                                logs_dir / "US_SPY_K_5M_combined.csv") if p.exists()), None)
+    if spy_csv is None:
+        print("\n  Benchmark unavailable (no SPY archive in logs/).")
         return
     try:
         import pandas as pd
         spy = pd.read_csv(spy_csv, usecols=["time_key", "close"])
         spy["time_key"] = pd.to_datetime(spy["time_key"])
-        lo = spy[spy["time_key"] >= start_et.replace(tzinfo=None)]
+        day_bars = "K_DAY" in spy_csv.name
+        first_day = pd.Timestamp(start_et.replace(tzinfo=None)).normalize()
+        # A daily bar is stamped at midnight: include the entry day, compare on dates.
+        lo = spy[spy["time_key"] >= (first_day if day_bars else start_et.replace(tzinfo=None))]
         hi = lo[lo["time_key"] <= end_et.replace(tzinfo=None)]
         if len(hi) < 2:
             print("\n  Benchmark unavailable (SPY archive does not cover this window).")
@@ -220,7 +226,7 @@ def _capital_and_benchmark(trades: list[dict], logs_dir: Path,
         first, last = float(hi["close"].iloc[0]), float(hi["close"].iloc[-1])
         bh = (last - first) / first * 100
         print(f"\n  Benchmark — SPY buy & hold, same window: {bh:+.2f}%"
-              f"  ({first:.2f} → {last:.2f})")
+              f"  ({first:.2f} → {last:.2f}, {'daily' if day_bars else '5-min'} bars)")
         print(f"  Strategy net return: {net_total/base*100:+.2f}%   "
               f"Difference vs benchmark: {net_total/base*100 - bh:+.2f} pts")
         if hi["time_key"].iloc[-1] < pd.Timestamp(end_et.replace(tzinfo=None)) - pd.Timedelta(days=5):

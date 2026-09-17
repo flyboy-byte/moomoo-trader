@@ -24,11 +24,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from collections import defaultdict
-from datetime import time as dtime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,17 +36,9 @@ SYMBOLS = ["US.SPY", "US.QQQ", "US.IWM"]
 
 
 def pin_config(path: Path) -> None:
-    """Load ONLY `path` into the environment. Must run before any mm import."""
-    import dotenv
-    dotenv.load_dotenv = lambda *a, **k: False  # mm/config.py must not read .env
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ[key.strip()] = value.strip()
-    os.environ["ANTHROPIC_API_KEY"] = ""
-    os.environ["DISCORD_WEBHOOK_URL"] = ""
+    sys.path.insert(0, str(ROOT))
+    from mm.scan import pin_config as _pin
+    _pin(path)
 
 
 def load_window(symbols: list[str], start: str, end: str) -> dict:
@@ -58,55 +48,17 @@ def load_window(symbols: list[str], start: str, end: str) -> dict:
 
 
 def fast_pass(dfs: dict) -> dict:
-    from mm import config as _config
-    from mm.backtest import run_backtest, summarize_trades
-    from mm.gap_fade import run_gap_fade
-    from mm.orb_strategy import run_orb_signals
-    from mm.vwap_pullback import run_vwap_pullback
+    from mm.backtest import summarize_trades
+    from mm.scan import run_engines
 
-    cfg = _config.cfg
-    latest = (dtime(*map(int, cfg.orb_latest_entry.split(":")))
-              if cfg.orb_latest_entry else None)
     result: dict = {}
     pooled: dict[str, list] = defaultdict(list)
-
     for sym, df in dfs.items():
-        runs: dict[str, list] = {}
-
-        base_window = cfg.kdj_window_bars
-        cfg.kdj_window_bars = cfg.kdj_window_overrides.get(sym, base_window)
-        try:
-            runs["bb_kdj"], _ = run_backtest(df.copy())
-        finally:
-            cfg.kdj_window_bars = base_window
-
-        runs["orb"], _ = run_orb_signals(
-            df.copy(),
-            vol_mult=cfg.orb_vol_mult_overrides.get(sym, cfg.orb_vol_mult),
-            orb_minutes=cfg.orb_minutes_overrides.get(sym, cfg.orb_minutes),
-            target_mult=cfg.orb_target_mult_overrides.get(sym, cfg.orb_target_mult),
-            latest_entry=latest,
-            shorts_allowed=cfg.orb_shorts_enabled
-            and (not cfg.orb_short_symbols or sym in cfg.orb_short_symbols),
-        )
-
-        if not cfg.vwap_pb_symbols or sym in cfg.vwap_pb_symbols:
-            runs["vwap_pb"] = run_vwap_pullback(
-                df.copy(),
-                stop_mult=cfg.vwap_pb_stop_mult,
-                max_crosses=cfg.vwap_pb_max_crosses,
-                min_entry_time=dtime(*cfg.vwap_pb_min_entry_time),
-            )
-
-        runs["gap_fade"] = run_gap_fade(df.copy())
-
+        runs = run_engines(sym, df)
         result[sym] = {}
         for strat, trades in runs.items():
-            for t in trades:
-                t.symbol = sym
             pooled[strat].extend(trades)
             result[sym][strat] = summarize_trades(trades, symbol=sym)
-
     result["aggregate"] = {s: summarize_trades(pooled[s]) for s in STRATEGIES}
     return result
 

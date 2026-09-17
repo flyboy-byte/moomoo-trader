@@ -201,6 +201,12 @@ def replay(
     replay events and position files into the REAL logs/ directory.
     """
     pcfg = paper.cfg
+    # mm.events writes through mm.config.cfg, mm.paper through its own import-time
+    # binding. A test that reloads mm.config without mm.paper leaves them as two
+    # different objects; redirecting only one sent replay output into the REAL
+    # logs/ (found 2026-09-17: SPY 2026-05-27..29 and QQQ 2026-03-20/23 files).
+    from . import config as _config
+    all_cfgs = list({id(c): c for c in (pcfg, _config.cfg)}.values())
     out_dir = out_dir or (pcfg.logs_dir.parent / "replay_out")
     if out_dir.exists():
         shutil.rmtree(out_dir)
@@ -218,7 +224,7 @@ def replay(
     timeline = sorted(set().union(*[set(df["time_key"]) for df in dfs.values()]))
 
     saved = {
-        "logs_dir": pcfg.logs_dir,
+        "logs_dirs": [(c, c.logs_dir) for c in all_cfgs],
         "clock_now": _clock.now,
         "clock_now_et": _clock.now_et,
         "clock_today": _clock.today,
@@ -235,7 +241,8 @@ def replay(
         import logging
         paper.log.setLevel(logging.ERROR)
 
-    pcfg.logs_dir = out_dir
+    for c in all_cfgs:
+        c.logs_dir = out_dir
     _clock.now = lambda: SimClock.now
     _clock.now_et = lambda: SimClock.now
     _clock.today = lambda: SimClock.now.date()
@@ -291,7 +298,8 @@ def replay(
             if reconcile_every and bars_done % reconcile_every == 0:
                 paper._reconcile_positions(broker, 1, positions, elogs)
     finally:
-        pcfg.logs_dir = saved["logs_dir"]
+        for c, d in saved["logs_dirs"]:
+            c.logs_dir = d
         _clock.now = saved["clock_now"]
         _clock.now_et = saved["clock_now_et"]
         _clock.today = saved["clock_today"]

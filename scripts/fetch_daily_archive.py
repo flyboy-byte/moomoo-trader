@@ -36,6 +36,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Daily rolling RTH + extended-hours archive fetch")
     parser.add_argument("--symbols", default=",".join(cfg.symbols))
     parser.add_argument("--lookback-days", type=int, default=10)
+    parser.add_argument("--daily-lookback-days", type=int, default=400,
+                        help="daily-bar window re-pulled each run (benchmark, PLAN.md Step 10)")
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
@@ -59,6 +61,20 @@ def main() -> None:
                 # runs unattended from cron, so a single bad day must not silently stop
                 # every other symbol's archive from updating.
                 print(f"{symbol} [{kind}]: FAILED ({e}) — continuing with remaining symbols")
+
+        # Daily bars for the buy-and-hold benchmark. One page; the symbol already holds
+        # its quota slot. Re-pulling ~400 days each night rewrites almost the whole file
+        # on the current price basis (daily files are too short per day for the 5-min
+        # rebase check to apply).
+        try:
+            dstart = (datetime.strptime(end, "%Y-%m-%d")
+                      - timedelta(days=args.daily_lookback_days)).strftime("%Y-%m-%d")
+            df = fetch_candles(symbol=symbol, ktype="K_DAY", start=dstart, end=end)
+            if not df.empty:
+                path = update_combined_csv(df, symbol, "K_DAY")
+                print(f"{symbol} [DAY]: fetched {len(df)} rows -> {path}")
+        except Exception as e:
+            print(f"{symbol} [DAY]: FAILED ({e}) — continuing with remaining symbols")
 
 
 if __name__ == "__main__":

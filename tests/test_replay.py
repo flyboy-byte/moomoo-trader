@@ -246,3 +246,22 @@ def test_large_gap_short_shadow_logs_but_trades_when_disabled(tmp_path, monkeypa
     stats, skips = _gap_replay(tmp_path, monkeypatch, enabled=False)
     assert stats["opens"] == 1
     assert [s["reason"] for s in skips] == ["gap_large_short_shadow"]
+
+
+def test_replay_never_writes_to_real_logs_after_config_reload(tmp_path, monkeypatch):
+    """Regression 2026-09-17: after a test reloaded mm.config (but not mm.paper),
+    replay redirected only paper.cfg, and mm.events kept writing JSONL and
+    *_traded.json into the real logs/ directory."""
+    import importlib
+    import mm.config
+    import mm.paper
+    importlib.reload(mm.config)
+    mm.config.cfg = mm.config.Config()
+    assert mm.config.cfg is not mm.paper.cfg          # the split that caused the leak
+    decoy = tmp_path / "real_logs"
+    monkeypatch.setattr(mm.config.cfg, "logs_dir", decoy)
+    replay([CSV_QQQ], ["gap_fade"], start="2026-03-20", end="2026-03-23",
+           fill_mode="close", out_dir=tmp_path / "out", quiet=True)
+    assert not decoy.exists() or not any(decoy.iterdir())
+    assert any((tmp_path / "out").glob("paper_*.jsonl"))
+    assert mm.config.cfg.logs_dir == decoy            # restored afterwards
