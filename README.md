@@ -174,12 +174,12 @@ cd moomoo-trader
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env        # TRD_ENV=SIMULATE stays; see below for live values
-python scripts/health_check.py            # is OpenD reachable?
-python scripts/fetch_candles.py --symbol US.SPY --start 2024-01-01
-python scripts/replay_paper.py --latest   # real runner, fake broker
-./start.sh                                # paper runner
-python scripts/web_dashboard.py           # http://localhost:8080
+cp .env.example .env                    # TRD_ENV=SIMULATE stays
+python scripts/health_check.py          # is OpenD reachable?
+python scripts/fetch_candles.py --symbol US.SPY --start 2026-01-02
+python scripts/replay_paper.py logs/US_SPY_K_5M_2*.csv  # real runner, fake broker
+./start.sh                              # paper runner
+python scripts/web_dashboard.py         # http://localhost:8080
 ```
 
 `.env.example` documents every setting with safe defaults. The settings the VPS actually runs are
