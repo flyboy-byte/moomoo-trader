@@ -102,6 +102,7 @@ What has been run and checked, versus what merely exists.
 | ✅ | **Test suite** | pytest covers risk, signals, engines, replay, costs, statistics, archives, and bulk-fetch quota safety. A session guard fails the run if any test touches the real `logs/`. |
 | 🚧 | **LLM regime gate** | Claude classifies the morning regime and blocks two mean-reversion lanes on trending days. It is live and gating, but its value has **not** been shown against a no-gate baseline. |
 | ✅ | **Wide scan (85 symbols): a null** | 96,129 trades, 2022–2026, under rules frozen in advance. No strategy and none of 340 symbol×strategy lanes shows an edge net of costs; three strategies are significantly negative. The 2019–2021 holdout stays sealed and unspent. [Results](docs/strategy_graveyard.md). |
+| ✅ | **Daily-horizon scan (Route 3): also a null** | Overnight holds, 200-day trend, vol scaling, momentum, weekly reversal, on the same 85 symbols. Overnight earns +3 bps gross a night and loses it to costs; nothing passes. Holdout still unspent. [Results](docs/strategy_graveyard.md). |
 | 🚧 | **Forward cohort** | A frozen live configuration from 2026-09-17 is the only clean test of the live settings. It is too young to say anything. |
 | ❌ | **A profitable strategy** | Not demonstrated. See above. |
 | ❌ | **Live (real-money) trading** | Deliberately not built. `live_trade_runner.py.DISABLED` is never executed. |

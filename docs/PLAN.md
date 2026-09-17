@@ -672,9 +672,9 @@ cross-asset momentum, and weekly reversal. The rules are in `docs/evaluation_cri
 "Route 3", frozen before any result.
 - ☑ R3a — rules committed
 - ☑ R3b — `mm/daily_scan.py` + tests (6)
-- ☐ R3c — D run → `docs/route3/`, finalists committed
-- ☐ R3d — H run (only if anything passed D)
-- ☐ R3e — write-up (graveyard, plan)
+- ☑ R3c — D run → `docs/route3/`, finalists committed — **NULL 2026-09-17** (0 of 5 pooled, 0 of 255 lanes)
+- ~~R3d — H run~~ N/A: nothing passed D; the holdout is still unspent
+- ☑ R3e — write-up: graveyard § "Route 3 — Daily-Horizon Scan", README status row
 
 Live decision recorded 2026-09-17: vwap_pb and gap_fade **stay on** in paper. They cost
 nothing and still add data. The user had asked about turning them off; Claude recommended

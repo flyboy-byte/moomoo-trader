@@ -1477,3 +1477,46 @@ of an already-losing strategy. The note is here to flag that 88% block rate + PF
 contradiction: the strategy has structural problems that vol filtering can't fix. The right lever
 is `ORB_LATEST_ENTRY=12:30` — **activated 2026-08-14** (executive decision: live data consistently
 shows afternoon entries are drag; backtest IS/OOS inconsistency noted but overruled).
+
+---
+
+## Route 3 — Daily-Horizon Scan — 2026-09-17: NULL
+
+**Question.** After the intraday null, does holding longer help, now that costs are small next to
+the moves? Rules were frozen in `docs/evaluation_criteria.md` "Route 3" before any daily bar was
+built (commit `f590941`). Daily bars come from the Step 9 five-minute files: 85 symbols, 0 quota.
+Signals use the 15:45 price and fill at the close. Results are in `docs/route3/dev_results.json`.
+Code is `mm/daily_scan.py` and `scripts/daily_scan.py`.
+
+**Development window 2022-01-03 → 2026-08-31, net of the frozen cost table. Pass = p < 0.01 with
+a positive mean.**
+
+| Strategy | Obs | Gross bps | Net bps | 95% CI | p | Verdict |
+|---|---|---|---|---|---|---|
+| R3-ON (close→open, every night) | 99,280 nights | **+3.01** | −1.20 | [−4.68, +2.31] | 0.75 | fail |
+| R3-TREND (above 200-day SMA), timing return | 82,280 days | −2.01 | −2.09 | [−4.56, +0.11] | 0.97 | fail |
+| R3-VOL (vol-scaled exposure), timing return | 92,480 days | −0.44 | −0.47 | [−1.35, +0.32] | 0.86 | fail |
+| R3-MOM (top-10 by 126-day return, weekly) minus equal-weight | 1,040 days | +3.33 | +3.21 | [−2.21, +8.49] | 0.12 | fail |
+| R3-REV (bottom-10 by 5-day return, weekly) minus equal-weight | 1,164 days | +0.02 | −0.61 | [−5.21, +4.07] | 0.60 | fail |
+
+Per-symbol lanes (255): **0 BH survivors → 0 finalists.** The 2019–2021 holdout is **still
+unspent** (`daily_scan.py holdout` declined, as designed).
+
+**Readings (descriptive, deciding nothing):**
+- **Overnight is the textbook case of an edge eaten by costs.** The documented overnight drift
+  shows up (+3.0 bps a night gross), but one round trip a night costs more than that. Only 26 of
+  85 symbols are positive net. AVGO is the best (+17.5 bps, p 0.0005) but did not survive BH
+  across 255 lanes.
+- **Trend and vol scaling did what the literature says, which is not an edge.** They cut the
+  median max drawdown slightly (trend −19.9% vs buy-and-hold −21.8%; vol −21.4% vs −23.5%), but
+  the median Sharpe fell (trend 0.68 vs 1.03; vol 0.70 vs 0.74). In 2022–2026, timing lost to
+  holding a constant position of the same average size.
+- **Momentum is the closest to anything.** The portfolio returned +185% vs +116% for
+  equal-weight, but with a lower Sharpe (1.25 vs 1.36) and a deeper drawdown (−24% vs −17%). The
+  excess is p 0.12, not significant, and the extra return came with extra risk.
+- Weekly reversal lost on every descriptive measure.
+
+**What this closes.** Two preregistered scans, intraday and daily, over the same 85 symbols and
+4.7 years, both null. Long holds on this universe beat trading only by being buy-and-hold. The
+honest benchmark remains a passive position. Re-open only with a genuinely different information
+source, not a new rule on the same price bars.
