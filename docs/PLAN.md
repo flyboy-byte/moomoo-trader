@@ -13,7 +13,7 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 5 — paused on a FAIL (2026-09-17), needs a user decision.** Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
+> **Right now: Step 6** (freeze the scan configuration). Step 5 closed 2026-09-17 after a preregistered FAIL, a live bug fix, and a documented post-hoc fill-model correction. Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
 > Step 8's universe preregistration was pulled into Step 3 because a per-symbol cost table cannot
 > be built before its symbols are fixed; the bulk OpenD fetch remains Step 9 and has not begun.
 
@@ -246,13 +246,19 @@ the conclusion remains no demonstrated edge. Full suite: **350 passed**.
 
 ---
 
-### Step 5 — Cross-validate the two engines, net, with a number decided in advance ☐
+### ~~Step 5 — Cross-validate the two engines, net, with a number decided in advance~~ ✅ DONE 2026-09-17 (after a preregistered FAIL — see below)
 **2026-09-17 — preregistered run FAILED; paused here, per the rule.** See
 `docs/strategy_graveyard.md` § "Engine Cross-Validation — 2026-09-17". There are two causes. (1) The
 replay's `instant` mode fills at the marketable limit, which costs about 40 bps per round trip;
 live fills don't pay that. (2) **Live gap_fade ignored `GAP_LARGE_SHORT_FILTER_ENABLED`**, a live
 bug, fixed and deployed 2026-09-17 (`f39df61`); the cohort was re-based onto that commit. A diagnostic
 `fill_mode=close` rerun is recorded there. Step 5 stays open until the user decides how to proceed.
+
+**Resolution 2026-09-17 (user: "fix all").** The gap_fade bug was fixed and deployed. The comparison
+of record was switched to `fill_mode=close`, a post-hoc change recorded in evaluation_criteria.md.
+All four strategies then agree exactly. **Carried forward:** both engines assume a fill at the
+signal close. Live slippage (median −3.5 bps on entries) may exceed what `mm/costs.py` covers, so
+check that before trusting a wide-scan net PF near 1.0 (see Step 6).
 
 *(was B2)* `mm/replay.py` and the fast engines are different code paths and are **already known to
 disagree** — 2026-06-12, replay vwap_pb PF 1.89 against a different backtest expectation. If they

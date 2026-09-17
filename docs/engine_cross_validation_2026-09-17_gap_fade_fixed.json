@@ -1,0 +1,55 @@
+{
+  "fast": {
+    "trades": 92,
+    "gross_pnl": 10.660739039999754,
+    "net_pnl": 2.562093872093255,
+    "gross_pf": 1.1810629342061265,
+    "net_pf": 1.0415213502758451,
+    "avg_bps": 5.173873171104953,
+    "avg_bps_net": 3.347786214583214
+  },
+  "replay": {
+    "trades": 92,
+    "gross_pnl": 10.660800000000002,
+    "net_pnl": 2.562154790000001,
+    "gross_pf": 1.1810642928152648,
+    "net_pf": 1.0415224082281467,
+    "avg_bps": 5.17388958253163,
+    "avg_bps_net": 3.3478026260098908
+  },
+  "comparison": {
+    "gate": {
+      "trade_count_difference_pct_max": 2.0,
+      "absolute_net_pf_difference_max": 0.05,
+      "replay_normalization": "one share per trade before costs"
+    },
+    "strategies": {
+      "gap_fade": {
+        "fast": {
+          "trades": 92,
+          "gross_pnl": 10.660739039999754,
+          "net_pnl": 2.562093872093255,
+          "gross_pf": 1.1810629342061265,
+          "net_pf": 1.0415213502758451,
+          "avg_bps": 5.173873171104953,
+          "avg_bps_net": 3.347786214583214
+        },
+        "replay": {
+          "trades": 92,
+          "gross_pnl": 10.660800000000002,
+          "net_pnl": 2.562154790000001,
+          "gross_pf": 1.1810642928152648,
+          "net_pf": 1.0415224082281467,
+          "avg_bps": 5.17388958253163,
+          "avg_bps_net": 3.3478026260098908
+        },
+        "trade_count_difference_pct": 0.0,
+        "absolute_net_pf_difference": 1.0579523015419312e-06,
+        "trade_count_pass": true,
+        "net_pf_pass": true,
+        "pass": true
+      }
+    },
+    "pass": true
+  }
+}

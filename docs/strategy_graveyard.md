@@ -45,6 +45,21 @@ tests on QQQ 2026-03-23 cover it. Deployed before the 09-17 open; the cohort was
 Trade counts otherwise agree closely (bb_kdj exact; orb and vwap_pb within one trade each), so
 the signal logic of the two engines matches.
 
+**Diagnostic rerun: the engines agree exactly once both causes are removed (POST-HOC, labelled).**
+With `fill_mode=close` (`docs/engine_cross_validation_2026-09-17_close.json`), bb_kdj, orb and vwap_pb
+match exactly: 27/27, 76/76 and 80/80 trades, with net PF 1.022, 1.775 and 1.823 on both sides.
+gap_fade matched only after the live fix: a gap_fade-only replay on `f39df61` gives 92/92 trades and
+net PF 1.0415 on both sides (`..._gap_fade_fixed.json`). (orb and vwap_pb were one trade short under
+`instant`: the buffered fills lose more, and the $20 daily-loss limit then blocked one entry.)
+
+**What this does and does not establish.** The fast engines reproduce the live decision logic
+exactly, so the wide scan can use them. They also inherit the same fill assumption, a fill at the
+signal close. **Both engines therefore have zero modeled slippage beyond `mm/costs.py`.** Live
+`slippage_bps` (134 trades) has medians of −3.5 bps on entry and −0.8 bps on exit, with a p10 of
+−16 bps on entries. Whether the 1.5–2.5 bps cost table covers that is an **open question** (sign
+convention of `slippage_bps` not yet checked per direction). It is not a reason to edit the frozen
+cost table. See PLAN.md Step 5.
+
 ## Health Review — 2026-09-16 (PLAN.md Step 0b)
 
 **Source:** `./sync_logs.sh` on 2026-09-17 00:40 UTC, scored with `mm/trades.py` + `mm/costs.py`

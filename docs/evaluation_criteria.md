@@ -175,6 +175,17 @@ Use symbol medians and PLAN Step 4's day-blocked interval rather than pooled tra
 
 ## Amendment log
 
+- 2026-09-17 (Step 5 fill model — POST-HOC, written after seeing the preregistered FAIL): The
+  preregistered `fill_mode=instant` was a specification error. It fills at the marketable limit
+  (0.1% / 0.3% through the close), which neither the fast engines nor live SIMULATE pay, so the
+  comparison could not pass whatever the logic. The run is recorded as FAIL, unchanged. The
+  comparison of record for the engine-logic question is now `fill_mode=close`, which is the
+  assumption both sides share. That run agrees exactly (0% count difference, 0.000 net-PF
+  difference) on all four strategies once the live gap_fade bug is fixed. The 2% / 0.05 tolerances
+  are unchanged. The reader should weigh that this switch was made after the result was known. The
+  mitigating facts are that the corrected run agrees exactly rather than just inside tolerance, and
+  that the cause was verified trade-by-trade.
+
 - 2026-09-17 (forward cohort re-based before its first session): The Step 5 cross-validation
   found that live `_eval_gap_fade` never applied `GAP_LARGE_SHORT_FILTER_ENABLED=true` (the VPS
   setting since 2026-07-29), so gap-up shorts over 1% traded live. The user approved fixing it
