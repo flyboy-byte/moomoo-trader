@@ -13,7 +13,7 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 4.** Steps 0–3 (including 0b/1b) are done (2026-09-16/17). Former
+> **Right now: Step 5.** Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
 > Step 8's universe preregistration was pulled into Step 3 because a per-symbol cost table cannot
 > be built before its symbols are fixed; the bulk OpenD fetch remains Step 9 and has not begun.
 
@@ -220,7 +220,7 @@ suite: **345 passed**.
 
 ---
 
-### Step 4 — Block-bootstrap the CIs before pooling across symbols ☐
+### ~~Step 4 — Block-bootstrap the CIs before pooling across symbols~~ ✅ DONE 2026-09-16
 **Also a newly-found hole.**
 
 `mm/stats.py` resamples trades i.i.d. That is defensible at n=102 on three symbols. It is wrong
@@ -235,6 +235,14 @@ single-symbol reporting, and report which was used.
 **Done when:** `bootstrap_pf_ci` takes a block key, a test shows the block CI is wider than the
 i.i.d. CI on synthetic same-day-correlated data, and every cross-symbol report uses the block
 version.
+
+**Result:** `bootstrap_pf_ci`, `bootstrap_mean_ci`, `prob_positive`, and `summarize` now accept
+aligned block keys and resample whole blocks. A pooled report groups all same-day trades across
+symbols; a one-symbol report retains the original IID method. Fewer than two blocks returns no
+interval rather than false precision. Both `analyze_trades.py` and the dashboard label which method
+they used, and behavioral tests pin the selection rule. On the current 134 live-paper trades, the
+net-PF interval widened from the earlier IID **[0.47, 1.30]** to day-blocked **[0.43, 1.41]**;
+the conclusion remains no demonstrated edge. Full suite: **350 passed**.
 
 ---
 

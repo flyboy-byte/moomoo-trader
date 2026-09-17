@@ -131,6 +131,18 @@ the frozen list. It is a conservative hurdle, not an observed spread. The audit 
 `docs/wide_scan_cost_inputs.csv`; the formula and falsifiable ETF-versus-stock comparison are in
 `docs/wide_scan_methodology.md`. Full suite: **345 passed**.
 
+### Day-blocked uncertainty — BUILT 2026-09-16 (PLAN.md Step 4)
+
+Pooled-symbol confidence intervals now resample whole market days, keeping every trade from a
+sampled day together. One-symbol reports retain IID trade resampling, and both CLI and dashboard
+output identify the method. A one-day sample returns no interval even if it contains many trades.
+
+On the 134 live-paper trades through 2026-09-16, the net-PF point estimate remains **0.79**. Its
+95% interval changes from the earlier IID **[0.47, 1.30]** to day-blocked **[0.43, 1.41]**. The
+wider range is the expected direction once shared market days stop counting as independent
+evidence. It still contains 1.0, so the research conclusion does not change. Full suite:
+**350 passed**.
+
 ## Data Mining Results (Route 1 — scripts/mine_*.py)
 
 ### H1 — First-Bar Direction Predicts 10am-11am Returns — TESTED 2026-07-23, NULL

@@ -96,3 +96,37 @@ def test_pf_ci_upper_bound_is_inf_not_nan_when_resamples_have_no_losses():
     assert not math.isnan(hi)
     assert hi == float("inf")
     assert math.isfinite(lo)
+
+
+def test_day_block_bootstrap_is_wider_for_same_day_correlated_trades():
+    """Two hundred trades on 20 shared market days are 20 regime observations, not 200."""
+    day_pnls = [2.0] * 11 + [-1.0] * 9
+    pnls = [pnl for pnl in day_pnls for _ in range(10)]
+    days = [day for day in range(20) for _ in range(10)]
+
+    iid_lo, iid_hi = stats.bootstrap_pf_ci(pnls, n_boot=5000)
+    block_lo, block_hi = stats.bootstrap_pf_ci(pnls, n_boot=5000, block_keys=days)
+
+    assert block_lo < iid_lo
+    assert block_hi > iid_hi
+
+
+def test_block_bootstrap_preserves_whole_blocks_and_reports_method():
+    pnls = [3.0, 3.0, -1.0, -1.0]
+    days = ["2026-01-02", "2026-01-02", "2026-01-03", "2026-01-03"]
+    summary = stats.summarize(pnls, n_boot=1000, block_keys=days)
+    assert summary["bootstrap_method"] == "block"
+    assert stats.summarize(pnls, n_boot=1000)["bootstrap_method"] == "iid"
+
+
+def test_block_keys_must_align_with_values():
+    with pytest.raises(ValueError, match="same length"):
+        stats.bootstrap_pf_ci([1.0, -1.0], block_keys=["one-day"])
+
+
+def test_one_block_returns_nan_instead_of_a_fake_exact_interval():
+    pnls = [1.0, -0.5, 2.0]
+    one_day = ["2026-01-02"] * len(pnls)
+    assert all(math.isnan(x) for x in stats.bootstrap_pf_ci(pnls, block_keys=one_day))
+    assert all(math.isnan(x) for x in stats.bootstrap_mean_ci(pnls, block_keys=one_day))
+    assert math.isnan(stats.prob_positive(pnls, block_keys=one_day))

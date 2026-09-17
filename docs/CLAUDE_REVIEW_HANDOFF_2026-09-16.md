@@ -72,8 +72,9 @@ were completed, net PF was adopted as the gate ruler, a forward cohort beginning
 declared, and PLAN.md Step 2 wired costs into all fast engines and replay. See the top of
 `docs/strategy_graveyard.md` and the active plan for the current state. A later 2026-09-16 pass
 also completed Step 3 and pulled Step 8 forward: the 97-symbol universe and return-independent
-per-symbol cost table are frozen without spending OpenD quota. The active plan now starts at Step 4
-(day-blocked uncertainty).
+per-symbol cost table are frozen without spending OpenD quota. Step 4 then added day-blocked
+uncertainty for pooled-symbol reports; the active plan now starts at Step 5 (fast-engine versus
+replay cross-validation).
 
 ## Recommended forward path
 

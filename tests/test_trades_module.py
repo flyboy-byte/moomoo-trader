@@ -199,6 +199,32 @@ def test_scoreboard_flags_zero_edge_strategies():
             assert r["inconclusive"] is expected
 
 
+def test_scoreboard_reports_day_blocks_for_pooled_symbols(monkeypatch):
+    import sys
+    sys.path.insert(0, "scripts")
+    import web_dashboard as wd
+
+    records = []
+    for day, pnl in (("2026-08-03", 2.0), ("2026-08-04", -1.0)):
+        for symbol in ("US.SPY", "US.QQQ"):
+            records.extend([
+                _open(f"{day}T10:00:00", sym=symbol),
+                _close(f"{day}T10:20:00", sym=symbol, pnl=pnl),
+            ])
+    pooled = mmt.pair_trades(records)
+    monkeypatch.setattr(wd, "load_trades", lambda *args, **kwargs: pooled)
+
+    with wd.app.test_request_context():
+        row = wd.api_scoreboard().get_json()[0]
+    assert row["ci_method"] == "day_block"
+
+    one_symbol = [trade for trade in pooled if trade["symbol"] == "US.SPY"]
+    monkeypatch.setattr(wd, "load_trades", lambda *args, **kwargs: one_symbol)
+    with wd.app.test_request_context():
+        row = wd.api_scoreboard().get_json()[0]
+    assert row["ci_method"] == "iid"
+
+
 @pytest.mark.skipif(not list(LOGS.glob("paper_*_????-??-??.jsonl")),
                     reason="no live logs on disk")
 def test_scoreboard_emits_json_safe_numbers():

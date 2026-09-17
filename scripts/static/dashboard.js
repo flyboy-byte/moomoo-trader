@@ -266,9 +266,15 @@ function loadScoreboard(days) {
       // no edge at all. Dim the row and mark it, so a flattering point estimate
       // can't be read as a result — every live strategy currently qualifies.
       const dim = r.inconclusive ? ' class="inconclusive"' : "";
+      const blockCI = r.ci_method === "day_block";
+      const ciMethod = blockCI ? "day" : "iid";
+      const ciTitle = blockCI
+        ? "Resampled by market day because this row pools symbols"
+        : "IID trade bootstrap for a single symbol";
       const ci = (r.ci_lo === null || r.ci_lo === undefined)
         ? '<span class="muted">n&lt;2</span>'
-        : `[${r.ci_lo.toFixed(2)}, ${r.ci_hi === null ? "∞" : r.ci_hi.toFixed(2)}]`;
+        : `[${r.ci_lo.toFixed(2)}, ${r.ci_hi === null ? "∞" : r.ci_hi.toFixed(2)}]`
+          + ` <span class="muted" title="${ciTitle}">${ciMethod}</span>`;
       const flag = r.inconclusive
         ? ' <span class="zero-edge" title="95% CI contains 1.0 — consistent with zero edge">⚠</span>'
         : "";

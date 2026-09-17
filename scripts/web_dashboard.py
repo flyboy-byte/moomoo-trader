@@ -355,7 +355,15 @@ def api_scoreboard() -> Response:
         # Bootstrap CI on the net PF. A strategy whose interval contains 1.0 is
         # consistent with zero edge no matter how good the point estimate looks —
         # the dashboard should say so rather than let a PF of 1.04 read as a result.
-        lo, hi = stats.bootstrap_pf_ci(net) if len(net) >= 2 else (float("nan"),) * 2
+        symbols = {t["symbol"] for t in ts}
+        blocks = (
+            [t["open_et"].date().isoformat() for t in ts]
+            if len(symbols) > 1 else None
+        )
+        lo, hi = (
+            stats.bootstrap_pf_ci(net, block_keys=blocks)
+            if len(net) >= 2 else (float("nan"),) * 2
+        )
         inconclusive = not (lo != lo) and lo <= 1.0 <= hi
 
         result.append({
@@ -370,6 +378,7 @@ def api_scoreboard() -> Response:
             "avg_bps_net": round(sum(bps_net) / len(bps_net), 1) if bps_net else None,
             "ci_lo": None if lo != lo else round(lo, 3),
             "ci_hi": None if hi != hi or hi == float("inf") else round(hi, 3),
+            "ci_method": "day_block" if blocks is not None else "iid",
             "inconclusive": inconclusive,
             "last_trade": last[:10] if last else "",
         })

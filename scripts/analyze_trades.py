@@ -53,6 +53,13 @@ from mm.trades import (  # noqa: E402
 _SYM_PATTERN = re.compile(r"paper_(.+)_\d{4}-\d{2}-\d{2}\.jsonl$")
 
 
+def _day_blocks_for_pool(trades: list[dict]) -> list[str] | None:
+    """Block pooled symbols by market day; retain IID for one-symbol reports."""
+    if len({trade["symbol"] for trade in trades}) <= 1:
+        return None
+    return [trade["open_et"].date().isoformat() for trade in trades]
+
+
 
 def _find_logs(logs_dir: Path, date_str: str | None, symbol: str | None, all_dates: bool,
                from_date: str | None = None) -> list[Path]:
@@ -111,9 +118,14 @@ def _overview(trades: list[dict]) -> None:
     print(f"  Avg PnL/trade:  {total_pnl/len(closed):+.2f}")
 
     # --- net of costs, with sampling uncertainty (Goal A1 + A4) -------------------
-    gross_pnls = [t["pnl"] for t in closed if t["pnl"] is not None]
-    net_pnls = [t["pnl_net"] for t in closed if t["pnl_net"] is not None]
-    g, n = stats.summarize(gross_pnls), stats.summarize(net_pnls)
+    gross_rows = [t for t in closed if t["pnl"] is not None]
+    net_rows = [t for t in closed if t["pnl_net"] is not None]
+    g = stats.summarize(
+        [t["pnl"] for t in gross_rows], block_keys=_day_blocks_for_pool(gross_rows)
+    )
+    n = stats.summarize(
+        [t["pnl_net"] for t in net_rows], block_keys=_day_blocks_for_pool(net_rows)
+    )
 
     def _fmt_pf(v: float) -> str:
         return "∞" if v == float("inf") else ("—" if v != v else f"{v:.3f}")
@@ -128,6 +140,8 @@ def _overview(trades: list[dict]) -> None:
           f"{f'[{_fmt_pf(g['pf_ci'][0])}, {_fmt_pf(g['pf_ci'][1])}]':>12} "
           f"{f'[{_fmt_pf(n['pf_ci'][0])}, {_fmt_pf(n['pf_ci'][1])}]':>14}")
     print(f"  {'P(mean > 0)':<16} {g['prob_positive']:>12.2f} {n['prob_positive']:>14.2f}")
+    method = "day-blocked" if n["bootstrap_method"] == "block" else "IID (single symbol)"
+    print(f"  {'Bootstrap':<16} {method:>27}")
     print()
     if n["pf_ci"][0] <= 1.0 <= n["pf_ci"][1]:
         print("  ⚠  Net PF confidence interval contains 1.0 — this sample is consistent")
@@ -257,7 +271,8 @@ def _per_strategy(trades: list[dict]) -> None:
         by_strat[t["strategy"]].append(t)
 
     header = (f"  {'Strategy':<12} {'n':>4} {'Win%':>5} {'GrossPnL':>9} {'NetPnL':>8} "
-              f"{'NetPF':>6} {'GrsBps':>7} {'NetBps':>7} {'NetPF 95% CI':>18} {'Hold':>6}")
+              f"{'NetPF':>6} {'GrsBps':>7} {'NetBps':>7} {'NetPF 95% CI':>18} "
+              f"{'Boot':>5} {'Hold':>6}")
     print(header)
     print("  " + "-" * (len(header) - 2))
 
@@ -273,23 +288,26 @@ def _per_strategy(trades: list[dict]) -> None:
             continue
         wins = [t for t in closed if t["win"]]
         gross_pnls = [t["pnl"] for t in closed if t["pnl"] is not None]
-        net_pnls = [t["pnl_net"] for t in closed if t["pnl_net"] is not None]
+        net_rows = [t for t in closed if t["pnl_net"] is not None]
+        net_pnls = [t["pnl_net"] for t in net_rows]
         avg_hold = sum(t["hold_bars"] for t in closed if t["hold_bars"]) / len(closed)
         bps_vals = [t["bps"] for t in closed if t["bps"] is not None]
         bpsn_vals = [t["bps_net"] for t in closed if t["bps_net"] is not None]
         avg_bps = f"{sum(bps_vals)/len(bps_vals):+.1f}" if bps_vals else "—"
         avg_bpsn = f"{sum(bpsn_vals)/len(bpsn_vals):+.1f}" if bpsn_vals else "—"
         net_pf = stats.profit_factor(net_pnls)
-        lo, hi = stats.bootstrap_pf_ci(net_pnls)
+        blocks = _day_blocks_for_pool(net_rows)
+        lo, hi = stats.bootstrap_pf_ci(net_pnls, block_keys=blocks)
+        method = "day" if blocks is not None else "iid"
         ci = f"[{_pfs(lo)}, {_pfs(hi)}]"
         print(f"  {strat:<12} {len(ts):>4} {100*len(wins)/len(closed):>4.0f}% "
               f"{sum(gross_pnls):>+9.2f} {sum(net_pnls):>+8.2f} {_pfs(net_pf):>6} "
-              f"{avg_bps:>7} {avg_bpsn:>7} {ci:>18} {avg_hold:>5.1f}b")
+              f"{avg_bps:>7} {avg_bpsn:>7} {ci:>18} {method:>5} {avg_hold:>5.1f}b")
         if lo == lo and hi == hi and lo <= 1.0 <= hi:
             flagged.append(strat)
 
     print("\n  GrsBps/NetBps = avg return on notional before/after mm/costs.py.")
-    print("  NetPF 95% CI is a percentile bootstrap over this strategy's own trades.")
+    print("  NetPF 95% CI uses day blocks for pooled symbols and IID for one symbol.")
     if flagged:
         print(f"\n  ⚠  CI contains 1.0 (consistent with zero edge): {', '.join(flagged)}")
         print("     At these sample sizes the point estimates are not evidence.")
