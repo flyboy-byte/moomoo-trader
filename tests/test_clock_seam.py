@@ -45,8 +45,6 @@ ALLOWLIST = {
     ("scripts/fetch_vix_morning.py",
      'start = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")'),
     # Display-only — rendered once, never persisted/compared/sorted.
-    ("scripts/dashboard.py",
-     'updated_at=datetime.now(),'),
     ("scripts/web_dashboard.py",
      'now_str = datetime.now().strftime("%H:%M:%S")'),
     # Docstring prose, not a call.

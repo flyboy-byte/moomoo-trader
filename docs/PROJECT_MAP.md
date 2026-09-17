@@ -78,7 +78,6 @@ moomoo-trader/
 │   │                            #   Cards: TODAY stats, OPEN POSITION, TRADES (w/ slippage),
 │   │                            #   MARKET CONDITIONS (BB+KDJ/ORB/VWAP PB per symbol),
 │   │                            #   SIGNAL FEED (last 20 bb_kdj bars)
-│   ├── dashboard.py             # Textual TUI dashboard — same data, terminal UI (535 lines)
 │   ├── eod_summary.py           # TradeRecord/SessionSummary, load_summary(), Discord post
 │   ├── diagnose_logs.py         # Session health: uptime gaps, signal hit rates, staleness,
 │   │                            #   trade pairs, why-no-entry counts (251 lines)
@@ -162,7 +161,7 @@ moomoo-trader/
 ├── .env                         # Runtime config (gitignored — see .env.example)
 ├── .env.example                 # All config vars with defaults and comments
 ├── CLAUDE.md                    # Claude Code session instructions + full findings index
-├── requirements.txt             # pandas, moomoo-api, flask, textual, yfinance, etc.
+├── requirements.txt             # pandas, moomoo-api, flask, yfinance, etc.
 └── live_trade_runner.py.DISABLED  # Intentionally disabled — never executed
 ```
 
@@ -457,11 +456,7 @@ Auto-refreshes every 30s. Cards:
   - Recent skips: last 12 signal_skip events with reason
 - **SIGNAL FEED** — last 20 bb_kdj bar_eval events with signal dots
 
-### TUI Dashboard (`scripts/dashboard.py`) — Textual
-```bash
-python scripts/dashboard.py                    # live
-python scripts/dashboard.py --date 2026-06-04  # replay past session
-```
+The Textual TUI (`scripts/dashboard.py`) was retired 2026-09-17; see `docs/strategy_graveyard.md`.
 
 ---
 

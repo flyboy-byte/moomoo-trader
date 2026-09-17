@@ -53,7 +53,6 @@ logs/*.jsonl  ──  structured events: bar_eval, signal_skip, risk_block,
                    order_attempt, order_result, position_open, position_close
     │
     ├──► scripts/web_dashboard.py   ──  Flask, port 8080, auto-refresh 30s
-    ├──► scripts/dashboard.py       ──  Textual TUI
     ├──► scripts/diagnose_logs.py   ──  uptime gaps, signal rates, trade pairs, skip reasons
     └──► scripts/compare_paper_vs_backtest.py  ──  BB+KDJ signal engine agreement check
 ```

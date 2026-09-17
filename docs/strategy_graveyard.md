@@ -1312,6 +1312,14 @@ decisions still run entirely through `docs/evaluation_criteria.md`.
 
 ## Decided Against (with data/reasoning)
 
+### Terminal TUI dashboard (`scripts/dashboard.py`) — RETIRED 2026-09-17
+The Textual TUI (571 lines; Overview/Trades/Signals/Log tabs) was removed at the user's request:
+"long obsolete". The Flask web dashboard (`scripts/web_dashboard.py`, on the VPS behind nginx)
+replaced it for monitoring, and `scripts/analyze_trades.py` covers terminal reporting. The TUI
+also predated the canonical `mm/trades.py` pairing and the net-of-costs ruler, so keeping it
+meant a third reporter that could drift. `textual` was dropped from `requirements.txt`. Don't
+rebuild it; the file is in git history (last present at `643eb86`) if it is ever wanted.
+
 ### ORB Afternoon Entry Cutoff (ORB_CUTOFF_HOUR)
 **What it was:** Block ORB entries after 12:00 ET. Motivated by 2026 YTD replay through the
 real runner: hours 12+ = 75 trades, −$93, PF 0.23–0.71, 76% TIME_STOP deaths, while hours

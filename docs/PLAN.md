@@ -459,7 +459,7 @@ Step 5's tolerance, or the disagreement is explained.
 
 ## Independent — do any time
 
-### H1 — Repo housekeeping ☐
+### ~~H1 — Repo housekeeping~~ ✅ DONE 2026-09-17 — all three moved, untouched, into `replay_archive/` (gitignored, with a README)
 *(loose end §6, user-flagged)* `replay_2026_ytd/`, `replay_2026ytd/`, `replay_out/` in the repo root
 are three variants of the same thing. Best done *before* Step 11 writes a fourth.
 
@@ -502,7 +502,7 @@ process list. Decide whether that is intended for a public showcase.
 Constraint: `feedback_config_ui` memory (toggles/pills/numbers only, TOTP auth).
 **Done when:** a short decision list is written here, and anything chosen is built and deployed.
 
-### H6 — Retire the terminal dashboard ☐
+### ~~H6 — Retire the terminal dashboard~~ ✅ DONE 2026-09-17 — removed; references updated; `textual` dropped; graveyard entry added
 *(user request, 2026-09-17: "long obsolete")* Remove `scripts/dashboard.py` (571 lines, TUI).
 The web dashboard replaced it. Before deleting, check the references in `start.sh`, `README.md`,
 `CLAUDE.md`, `docs/PROJECT_MAP.md`, `scripts/eod_summary.py`, and the `mm/stats.py` comment, and

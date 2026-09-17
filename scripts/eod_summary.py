@@ -25,7 +25,7 @@ from mm.notifications import notify
 
 
 # ---------------------------------------------------------------------------
-# Data model (mirrors dashboard.py logic)
+# Data model (originally mirrored the retired TUI dashboard's logic)
 # ---------------------------------------------------------------------------
 
 @dataclass

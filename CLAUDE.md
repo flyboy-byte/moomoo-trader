@@ -120,8 +120,6 @@ Scripts (all run from project root with venv active):
   python scripts/fetch_vix_morning.py                                           # VPS cron: fetch VIX daily data each morning
   python scripts/web_dashboard.py [--host HOST] [--port PORT]                  # Flask dashboard (VPS :8080, behind nginx)
   python scripts/eod_summary.py [--date YYYY-MM-DD] [--dry-run]               # end-of-day summary post to Discord
-  python scripts/dashboard.py                                                  # live TUI dashboard
-  python scripts/dashboard.py --date YYYY-MM-DD                               # review past session
   python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
   ./scripts/verify.sh [--date YYYY-MM-DD] [--no-sync]                         # pytest + sync + diagnose + compare
   ./start.sh                                                                   # start OpenD + paper runner

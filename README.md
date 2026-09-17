@@ -36,8 +36,8 @@ A systematic strategy research and paper-trading platform built on the [Moomoo A
 │                                 │                                    │
 │           ┌─────────────────────┼─────────────────────┐             │
 │           ▼                     ▼                     ▼             │
-│      Discord alerts       TUI dashboard         Web dashboard        │
-│  (entry/exit/EOD/alive)    (terminal)            (:8080)             │
+│      Discord alerts     Terminal reports        Web dashboard        │
+│  (entry/exit/EOD/alive) (analyze_trades.py)       (:8080)             │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -180,7 +180,7 @@ python scripts/backtest_vwap_pb.py --all         # VWAP Pullback
 
 # Run
 ./start.sh
-python scripts/dashboard.py         # terminal dashboard in a second window
+python scripts/web_dashboard.py     # web dashboard at http://localhost:8080
 ```
 
 ---
@@ -212,12 +212,6 @@ python scripts/dashboard.py         # terminal dashboard in a second window
 ---
 
 ## Dashboards
-
-**Terminal TUI** — 4 tabs: Overview, Trades, Signals, Log. Auto-refreshes every 5s. No market connection needed.
-```bash
-python scripts/dashboard.py                      # live session
-python scripts/dashboard.py --date 2026-06-02    # review past session
-```
 
 **Web dashboard** — auto-refreshing browser page, accessible from any device on the network.
 ```bash
@@ -306,7 +300,6 @@ scripts/
   fetch_daily_archive.py   VPS daily rolling candle archive builder (cron)
   fetch_vix_morning.py     daily VIX shadow-logger (observational only, cron)
   flatten_simulate.py      clean orphaned SIMULATE broker shares
-  dashboard.py             terminal TUI (Textual)
   web_dashboard.py         web dashboard (Flask, :8080)
   install_cron.sh          idempotent VPS cron installer
   verify.sh                one-command session health check (pytest + sync + diagnose + compare)

@@ -12,7 +12,7 @@ Code changes always flow: local → GitHub → VPS. Never edit code directly on 
 ```bash
 ./mask_sleep.sh                        # block system suspend
 ./start.sh                             # start OpenD + paper runner
-python scripts/dashboard.py            # monitor in second terminal
+python scripts/web_dashboard.py        # monitor at http://localhost:8080
 ```
 
 At market close (4 PM ET):

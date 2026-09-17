@@ -56,5 +56,5 @@ echo ""
 systemctl --user status moomoo-paper.service --no-pager -l | head -6
 echo ""
 echo "Logs:      journalctl --user -u moomoo-paper.service -f"
-echo "Dashboard: python scripts/dashboard.py"
+echo "Dashboard: python scripts/web_dashboard.py  (http://localhost:8080)"
 echo "Pause:     touch STOP_TRADING.txt"
