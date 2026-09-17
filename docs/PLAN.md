@@ -13,7 +13,7 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 0, then Step 0b.**
+> **Right now: Step 1** (needs your call). Steps 0 and 0b are done (2026-09-17).
 
 ## The one number that matters
 
@@ -60,7 +60,7 @@ python scripts/analyze_trades.py --all     # sections 1, 1b, 1c show net-of-cost
 
 ## The steps
 
-### Step 0 — Deploy the reporting fix to the VPS ☐
+### ~~Step 0 — Deploy the reporting fix to the VPS~~ ✅ DONE 2026-09-17 (VPS `f1ed556`, dashboard restarted, net headline live)
 Five minutes, no code. The VPS runs the pre-2026-08-29 dashboard and is still publishing
 gross-only numbers to a page that now has a net-of-costs design.
 
@@ -76,7 +76,7 @@ consistent with zero edge).
 
 ---
 
-### Step 0b — Health review: pull VPS logs, one table per strategy ☐
+### ~~Step 0b — Health review: pull VPS logs, one table per strategy~~ ✅ DONE 2026-09-17
 **Added 2026-09-16 (Codex review).** The loop so far has been "pull logs, fix bugs, keep
 running" with no decision at the end of it. This step produces that decision.
 
@@ -95,11 +95,12 @@ the knob freeze like anything else.
 **Done when:** the table is in `docs/strategy_graveyard.md` under a dated heading, and anything
 that could not be verified is named as such.
 
-**2026-09-16 — partial.** SSH to the VPS hangs before the banner, so a provisional table was built
-from the dashboard's public API instead (`docs/strategy_graveyard.md` § "Health Review —
-2026-09-16"). Headline: the 32 trades since 08-24 are net PF 0.32, and ORB since the 08-14
-`ORB_LATEST_ENTRY` change is net PF 0.20 on 12 trades. It also showed **Step 0 is not done** (the VPS
-still serves the old dashboard). Redo it from synced logs once SSH is back.
+**2026-09-17 — done** from synced logs after a VPS reboot fixed SSH. Table:
+`docs/strategy_graveyard.md` § "Health Review — 2026-09-16". Headlines: the 32 trades since 08-24
+are net PF 0.32 (CI [0.09, 0.87]); the whole period is net −$23.14, PF 0.79. ORB since the
+08-14 cutoff change is net PF 0.20 on 12 trades. By symbol, QQQ is net positive and SPY and IWM are
+negative, QQQ has passed the 50-trade symbol gate and SPY is 2 trades short of it.
+Actions: review ORB, and evaluate the symbol gate once Step 1 is decided.
 
 ---
 

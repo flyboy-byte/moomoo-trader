@@ -5,55 +5,72 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
-## Health Review — 2026-09-16 (PLAN.md Step 0b, partial)
+## Health Review — 2026-09-16 (PLAN.md Step 0b)
 
-**Status: PROVISIONAL.** SSH to the VPS failed (TCP connects on :22, no SSH banner within 30s,
-twice; host otherwise healthy — ping fine, nginx fast, load 0.17, mem 25%, `fail2ban-server`
-running). Cause UNKNOWN, not retried further. Data below came from the dashboard's public
-read-only API (`/api/trades`, `/api/scoreboard`, `/api/stats`), **not** from synced logs.
+**Source:** `./sync_logs.sh` on 2026-09-17 00:40 UTC, scored with `mm/trades.py` + `mm/costs.py`
+(the canonical ruler). CIs are i.i.d. bootstrap, so they are too narrow (PLAN.md Step 4). Many
+slices below, so expect one or two to look extreme by chance.
 
-**What could be verified:** the runner is trading (trades dated 2026-09-16), OpenD is running.
-**The VPS is still on pre-2026-08-29 dashboard code** — its scoreboard has the old `pf`/`net_pnl`
-fields, where `net_pnl` is really gross. So PLAN.md Step 0 is not done. **Not verified:** VPS
-commit, `.env` gate values, reconciliation errors, unfilled orders.
+**Deployed state (verified over SSH):** SSH hung before the banner on 2026-09-16 (TCP open, no
+banner; cause UNKNOWN). The user rebooted the VPS at 23:10 UTC, after the close. No session was
+missed. After the reboot OpenD, the paper runner and the dashboard all came up clean (health check
+passed, no positions to reconcile). `TRD_ENV=SIMULATE`, `LIVE_TRADING_ENABLED=false`, no
+`STOP_*.txt` files. The `.env` gate values match `project_state` memory (verified 2026-08-24).
+VPS was at `e3bc988`; pulled to `f1ed556` and the dashboard restarted. **PLAN.md Step 0 done.** The
+paper runner was *not* restarted. The pulled runtime diffs only touch backtest-summary PF and the
+weekly synthesis, which runs in its own cron process. No ORB short on QQQ/IWM since 07-09.
 
-**Caveat on the numbers:** the old dashboard pairs trades itself, not via `mm/trades.py`. For
-the prior window it gives 101 trades / gross +$9.53, vs canonical 102 / +$12.92. Costs applied
-here with `mm/costs.py`; CIs are i.i.d. bootstrap (understated — see PLAN.md Step 4). Trades
-before `LIVE_LOGS_START` (2026-06-10) excluded. Many slices below → some will look extreme by
-chance.
+**Sizing note:** `MAX_POSITION_DOLLARS=900` with whole shares means IWM trades 2–3 shares and SPY
+and QQQ trade 1. Dollar PnL therefore over-weights IWM, so compare lanes by the bps column.
 
-| Slice | n | Win% | Gross | Net | Net PF | Net PF CI | P(mean>0) |
-|---|--:|--:|--:|--:|--:|---|--:|
-| All, 06-11 → 09-16 | 133 | 44 | −8.44 | −26.43 | 0.76 | [0.44, 1.24] | 0.14 |
-| All ≤ 08-24 (prior sample) | 101 | 47 | +9.53 | −3.85 | 0.95 | [0.52, 1.70] | 0.43 |
-| **All ≥ 08-25 (new, 14 days)** | 32 | 34 | −17.98 | −22.58 | **0.32** | **[0.08, 0.83]** | 0.01 |
-| orb | 57 | 44 | −11.73 | −19.14 | 0.72 | [0.31, 1.50] | 0.19 |
-| — orb < 07-09 (all shorts) | 25 | 48 | −11.05 | −14.18 | 0.63 | [0.19, 1.81] | 0.19 |
-| — orb 07-09 → 08-13 | 20 | 45 | +12.56 | +9.97 | 2.01 | [0.44, 7.09] | 0.83 |
-| — **orb ≥ 08-14 (`ORB_LATEST_ENTRY=12:30`)** | 12 | 33 | −13.23 | −14.93 | **0.20** | [0.01, 0.93] | 0.02 |
-| — orb by symbol: SPY / QQQ / IWM | 24 / 21 / 12 | | | −7.19 / +4.11 / −16.07 | 0.63 / 1.17 / 0.33 | | |
-| vwap_pb | 37 | 41 | +7.83 | +2.97 | 1.25 | [0.48, 3.07] | 0.68 |
-| gap_fade | 16 | 38 | −2.83 | −5.39 | 0.58 | [0.09, 2.24] | 0.21 |
-| bb_kdj_loose | 16 | 50 | −1.56 | −3.73 | 0.70 | [0.15, 2.55] | 0.28 |
-| bb_kdj | 7 | 57 | −0.15 | −1.14 | 0.74 | [0.12, 5.07] | 0.36 |
+| Slice | n | Win% | Gross $ | Net $ | Net PF | Net PF CI | P(mean>0) | Net bps/trade |
+|---|--:|--:|--:|--:|--:|---|--:|--:|
+| All, 06-11 → 09-16 | 134 | 44 | −5.05 | −23.14 | 0.79 | [0.47, 1.30] | 0.18 | −2.0 |
+| All ≤ 08-24 (the Goal A sample) | 102 | 47 | +12.92 | −0.57 | 0.99 | [0.54, 1.78] | 0.48 | +0.2 |
+| **All ≥ 08-25 (new, 14 sessions)** | 32 | 34 | −17.98 | −22.58 | **0.32** | **[0.09, 0.87]** | 0.01 | −9.1 |
+| orb | 57 | 44 | −11.73 | −19.14 | 0.72 | [0.31, 1.49] | 0.18 | −4.2 |
+| — orb < 07-09 (shorts on all symbols) | 25 | 48 | −11.05 | −14.18 | 0.63 | [0.19, 1.75] | 0.18 | −7.9 |
+| — orb 07-09 → 08-13 | 20 | 45 | +12.56 | +9.97 | 2.01 | [0.43, 7.40] | 0.83 | +6.9 |
+| — **orb ≥ 08-14 (`ORB_LATEST_ENTRY=12:30`)** | 12 | 33 | −13.23 | −14.93 | **0.20** | [0.01, 0.94] | 0.02 | −15.0 |
+| vwap_pb | 38 | 42 | +11.21 | +6.26 | 1.53 | [0.60, 3.68] | 0.82 | +2.3 |
+| — vwap_pb ≥ 08-25 | 10 | 40 | +0.51 | −0.93 | 0.66 | [0.04, 3.31] | 0.28 | −1.5 |
+| gap_fade | 16 | 38 | −2.83 | −5.39 | 0.58 | [0.09, 2.12] | 0.20 | −4.4 |
+| — gap_fade ≥ 08-25 | 6 | 50 | +1.70 | +0.71 | 1.13 | [0.09, 9.09] | 0.54 | +1.5 |
+| bb_kdj_loose | 16 | 50 | −1.56 | −3.73 | 0.70 | [0.15, 2.51] | 0.28 | −2.4 |
+| — bb_kdj_loose ≥ 08-25 (5 stop-outs, 4 on 09-16) | 5 | 20 | −5.53 | −6.17 | 0.00 | — | 0.00 | −16.7 |
+| bb_kdj | 7 | 57 | −0.15 | −1.14 | 0.74 | [0.12, 5.38] | 0.37 | −1.8 |
+| By symbol: SPY | 48 | 27 | −15.60 | −21.02 | 0.40 | [0.15, 0.83] | 0.01 | −5.8 |
+| By symbol: QQQ | 52 | 60 | +26.54 | +20.96 | 1.61 | [0.70, 4.04] | 0.87 | +5.7 |
+| By symbol: IWM | 34 | 44 | −15.99 | −23.08 | 0.42 | [0.16, 1.01] | 0.03 | −8.5 |
 
 **Readings (INFERRED, not verdicts):**
-- The 14 days since the last review are the worst stretch recorded: the first pooled CI in the
-  project that sits wholly below 1.0. Broad-based — orb, bb_kdj_loose and vwap_pb all lost.
-- ORB since the 2026-08-14 `ORB_LATEST_ENTRY=12:30` change: PF 0.20 net on 12 trades. That
-  change was justified by a backtest (PF 0.76 → 1.04 gross). Twelve trades cannot overturn it,
-  but it is the obvious thing to check first. ORB IWM carries most of ORB's loss.
-- vwap_pb is the only lane net-positive over the whole window; its CI still spans 1.0.
-- Nothing here changes a live knob — per the knob freeze, each "review" item needs its gate.
+- The 14 sessions since Goal A are the worst stretch on record. This is the first pooled CI that
+  sits wholly below 1.0, and the loss is broad (orb, bb_kdj_loose and vwap_pb all lost). The
+  whole-period P(mean>0) fell from 0.48 to 0.18.
+- **The symbol cut is sharper than the strategy cut.** QQQ is net positive (+5.7 bps). SPY
+  (CI [0.15, 0.83]) and IWM are net negative. This repeats the 08-24 observation ("QQQ positive
+  in 5/5, SPY negative in 5/5") on 32 more trades. The symbol-level gate
+  (`evaluation_criteria.md`, 50 trades per symbol): QQQ has passed it (52), SPY is 2 trades short
+  (48), and IWM is at 34. SPY's combined PF is already below that gate's 0.8 line, and so is QQQ's
+  above the 1.5 line. Whether "PF" there means gross or net is PLAN.md Step 1.
+- ORB since the 08-14 change: net PF 0.20 on 12 trades, losing on all three symbols. The change
+  was justified by a gross backtest (PF 0.76 → 1.04), so 12 trades cannot overturn it. ORB's
+  07-09 → 08-13 era (PF 2.01) was the whole of ORB's apparent recovery.
+- **Cutoff edge case (not a bug, recorded):** two ORB entries filled at 12:31 (08-25 SPY, 09-01
+  QQQ). `mm/evals.py` compares the *bar* clock against `ORB_LATEST_ENTRY`, so a bar that closes at
+  12:30 is allowed and fills a minute later. Whether the backtest used the same convention was not
+  checked.
+- vwap_pb is still the only lane net positive overall. Its CI spans 1.0, and it was slightly
+  negative in the new window.
 
 | Strategy | Next action |
 |---|---|
-| orb | **Review strategy** — look at the post-08-14 era and IWM, through the gate process |
-| gap_fade | Continue — 16 trades, still short of its gate |
+| orb | **Review strategy** (through the gate process): the post-08-14 era, and IWM |
+| symbol gate | **Evaluate** when SPY reaches 50 (days away), after Step 1 settles gross vs net. QQQ's gate action is "record, do not concentrate" |
+| gap_fade | Continue: 16 trades, short of its gate |
 | vwap_pb | Continue |
-| bb_kdj / bb_kdj_loose | Continue — too few trades to say anything |
-| infrastructure | **Investigate** — restore SSH, then do Step 0 and redo this table from synced logs |
+| bb_kdj / bb_kdj_loose | Continue: too few trades to say anything |
+| infrastructure | Watch SSH; if the pre-banner hang recurs, look at sshd/fail2ban logs before rebooting |
 
 ## Data Mining Results (Route 1 — scripts/mine_*.py)
 
