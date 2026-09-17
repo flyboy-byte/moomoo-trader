@@ -671,7 +671,7 @@ from the 85 files already on disk (0 quota): overnight, 200-day trend, volatilit
 cross-asset momentum, and weekly reversal. The rules are in `docs/evaluation_criteria.md`,
 "Route 3", frozen before any result.
 - ☑ R3a — rules committed
-- ☐ R3b — `mm/daily_scan.py` + tests
+- ☑ R3b — `mm/daily_scan.py` + tests (6)
 - ☐ R3c — D run → `docs/route3/`, finalists committed
 - ☐ R3d — H run (only if anything passed D)
 - ☐ R3e — write-up (graveyard, plan)
@@ -679,3 +679,8 @@ cross-asset momentum, and weekly reversal. The rules are in `docs/evaluation_cri
 Live decision recorded 2026-09-17: vwap_pb and gap_fade **stay on** in paper. They cost
 nothing and still add data. The user had asked about turning them off; Claude recommended
 leaving them on, and nothing changed.
+
+Daily loss limit checked 2026-09-17 (user asked whether it had been stopping other
+strategies): on the VPS it fired on exactly one day, **2026-06-08**, when the limit was $5
+(pnl −$5.89). It has been $20 since then and has never fired. No change: raising it would
+change nothing and would end the forward cohort.
