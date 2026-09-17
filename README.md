@@ -97,15 +97,15 @@ What has been run and checked, versus what merely exists.
 
 ```
                  ┌────────────────────────────────────────────────┐
-  OpenD ────────▶│  Paper runner  (mm/paper.py, polls every 60 s) │
+  OpenD ────────>│  Paper runner  (mm/paper.py, polls every 60 s) │
   127.0.0.1      │                                                │
   :11111         │   5-min candles per symbol                     │
                  │     │                                          │
-                 │     ├─ bb_kdj        ◀── LLM regime gate       │
-                 │     ├─ bb_kdj_loose  ◀── (morning, Claude)     │
-                 │     ├─ orb           ◀── VIX cap, 12:30 cutoff │
+                 │     ├─ bb_kdj        <── LLM regime gate       │
+                 │     ├─ bb_kdj_loose  <── (morning, Claude)     │
+                 │     ├─ orb           <── VIX cap, 12:30 cutoff │
                  │     ├─ vwap_pb                                 │
-                 │     └─ gap_fade      ◀── VIX cap, large-gap    │
+                 │     └─ gap_fade      <── VIX cap, large-gap    │
                  │                          short filter          │
                  │   risk checks → SIMULATE order → confirm fill  │
                  │   positions on disk · JSONL event log          │
