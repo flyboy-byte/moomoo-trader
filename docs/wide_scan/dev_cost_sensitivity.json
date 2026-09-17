@@ -1,0 +1,110 @@
+{
+ "bb_kdj": {
+  "n": 2112,
+  "gross": {
+   "mean_bps": 2.24,
+   "ci95": [
+    -2.04,
+    6.56
+   ],
+   "p_mean_gt0": 0.8488
+  },
+  "uniform_1.5bps": {
+   "mean_bps": 0.74,
+   "ci95": [
+    -3.54,
+    5.06
+   ],
+   "p_mean_gt0": 0.624
+  },
+  "frozen_table": {
+   "mean_bps": -1.88,
+   "ci95": [
+    -6.16,
+    2.44
+   ],
+   "p_mean_gt0": 0.2029
+  }
+ },
+ "orb": {
+  "n": 44720,
+  "gross": {
+   "mean_bps": 1.65,
+   "ci95": [
+    0.23,
+    3.1
+   ],
+   "p_mean_gt0": 0.9874
+  },
+  "uniform_1.5bps": {
+   "mean_bps": 0.15,
+   "ci95": [
+    -1.27,
+    1.6
+   ],
+   "p_mean_gt0": 0.5828
+  },
+  "frozen_table": {
+   "mean_bps": -2.96,
+   "ci95": [
+    -4.39,
+    -1.52
+   ],
+   "p_mean_gt0": 0.0001
+  }
+ },
+ "vwap_pb": {
+  "n": 25650,
+  "gross": {
+   "mean_bps": 0.57,
+   "ci95": [
+    -0.58,
+    1.71
+   ],
+   "p_mean_gt0": 0.8271
+  },
+  "uniform_1.5bps": {
+   "mean_bps": -0.93,
+   "ci95": [
+    -2.08,
+    0.21
+   ],
+   "p_mean_gt0": 0.0549
+  },
+  "frozen_table": {
+   "mean_bps": -3.55,
+   "ci95": [
+    -4.69,
+    -2.41
+   ],
+   "p_mean_gt0": 0.0
+  }
+ },
+ "gap_fade": {
+  "n": 23647,
+  "gross": {
+   "mean_bps": 0.23,
+   "ci95": [
+    -1.07,
+    1.52
+   ],
+   "p_mean_gt0": 0.6253
+  },
+  "uniform_1.5bps": {
+   "mean_bps": -1.27,
+   "ci95": [
+    -2.57,
+    0.02
+   ],
+   "p_mean_gt0": 0.0272
+  },
+  "frozen_table": {
+   "mean_bps": -3.92,
+   "ci95": [
+    -5.22,
+    -2.63
+   ],
+   "p_mean_gt0": 0.0
+  }
+ }
+}

@@ -128,6 +128,61 @@ signal close. **Both engines therefore have zero modeled slippage beyond `mm/cos
 convention of `slippage_bps` not yet checked per direction). It is not a reason to edit the frozen
 cost table. See PLAN.md Step 5.
 
+## Wide Scan — 2026-09-17 (PLAN.md Step 11): **NULL** — no strategy has an edge net of costs
+
+**Preregistered run** (`docs/evaluation_criteria.md`, 2026-09-17 Step 6 section; nothing was changed
+after the fact). 85 primary symbols (60 ETFs, 25 large/mega-cap stocks), development window
+2022-01-03 → 2026-08-31, the four strategies with verified fast engines, the frozen symbol-agnostic
+parameters, frozen per-symbol costs, one-share fills at the signal close. **96,129 trades.**
+Raw output: `docs/wide_scan/dev_results.json` and `finalists.json` (empty).
+Cost sensitivity: `docs/wide_scan/dev_cost_sensitivity.json`. Per-trade rows (not committed):
+`logs/wide_scan/dev_trade_rows.csv.gz`.
+
+| Strategy | n | Gross bps/trade [95% CI] | At uniform 1.5 bps | **At frozen table (the ruler)** | Net PF |
+|---|--:|---|---|---|--:|
+| bb_kdj | 2,112 | +2.24 [−2.04, +6.56] | +0.74 [−3.54, +5.06] | **−1.88 [−6.16, +2.44]** | 1.01 |
+| orb | 44,720 | **+1.65 [+0.23, +3.10]** | +0.15 [−1.27, +1.60] | **−2.96 [−4.39, −1.52]** | 0.90 |
+| vwap_pb | 25,650 | +0.57 [−0.58, +1.71] | −0.93 [−2.08, +0.21] | **−3.55 [−4.69, −2.41]** | 0.77 |
+| gap_fade | 23,647 | +0.23 [−1.07, +1.52] | −1.27 [−2.57, +0.02] | **−3.92 [−5.22, −2.63]** | 0.85 |
+
+All CIs are day-blocked, 10,000 resamples, with the fixed seed.
+
+**Verdicts under the preregistered rule:**
+- **Primary (pooled per strategy):** none passes (p < 0.0125 and a positive mean). Three of the
+  four are negative with the whole CI below zero.
+- **Secondary (340 lanes, BH q = 0.10):** 254 lanes were eligible (≥ 40 trades) and **0
+  survive**, so there are no finalists. Only 3 lanes had p < 0.05, fewer than chance would give,
+  because most lanes are negative. Only 33 of 254 have a positive mean.
+- **Holdout:** `wide_scan.py holdout` had nothing to test. **The 2019–2021 window is still
+  unseen** and remains available for a future, separately preregistered hypothesis.
+
+**Readings (INFERRED from the numbers above, not preregistered tests):**
+- **The null does not depend on the cost table.** The frozen table averages ~4.1–4.6 bps per
+  round trip, which is more than SPY's 1.5, because most ETFs trade thinner. Even at a uniform
+  1.5 bps, no strategy's mean is positive with any confidence.
+- **ORB is the only strategy with a detectable gross edge** (+1.65 bps, P(>0) = 0.99), and it
+  is smaller than the cheapest plausible cost. The live slippage stress (+3.5 bps) would leave it
+  well negative. This is the same shape as the original live finding: the edge sits inside the cost
+  of trading.
+- **vwap_pb and gap_fade show no gross edge at all** across 85 symbols. Their earlier SPY/QQQ
+  backtest results do not generalize.
+- **Asset class (the preregistered residual comparison):** medians of lane gross bps are
+  ETF/stock bb_kdj +0.74/−5.58, orb +1.54/+0.43, vwap_pb +0.47/−0.07, gap_fade +0.24/−0.30.
+  Modeled cost medians are 4.5 (ETF) and 3.0 (stock). Single names are not better gross, and the
+  cost differential favours them. So this is a **no-edge-anywhere** result, not a cost-model
+  result.
+- **The passive null:** median symbol buy-and-hold was **+55.9 %** over the window (76/85 up).
+- **Leads for a future preregistration only:** ORB on QQQ (+6.5 bps net), SMH (+10.9) and SOXX
+  (+9.7). These are three overlapping tech/semiconductor ETFs, and QQQ|orb is also the live lane
+  that looked best. They failed BH. Testing them now on the same data would be exactly the
+  selection this design forbids. If pursued, they need a written hypothesis before the sealed
+  2019–2021 window or the forward cohort is examined.
+
+**What this means for the project:** this is the "honest endgame" in PLAN.md. At ~96k trades,
+retail intraday mean reversion and breakout on liquid US instruments, with these parameter sets,
+shows no edge net of realistic costs. The paper runner keeps running for execution validation and
+the forward cohort. No live settings were changed.
+
 ## Health Review — 2026-09-16 (PLAN.md Step 0b)
 
 **Source:** `./sync_logs.sh` on 2026-09-17 00:40 UTC, scored with `mm/trades.py` + `mm/costs.py`

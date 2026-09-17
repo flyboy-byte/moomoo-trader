@@ -52,6 +52,20 @@ backtest in the repo shows gross and net side by side, and the decision gates ar
 trades logged since that re-measurement have been worse, not better; see the
 [latest health review](docs/strategy_graveyard.md).
 
+**Then the question went wide.** The same four strategies ran across 85 liquid ETFs and large
+caps from 2022 to 2026, with parameters, costs, and the selection rule all frozen in advance. The
+answer is the same at 96,129 trades:
+
+| Strategy | Trades | Gross bps / trade | Net bps / trade (95% CI) |
+|---|---:|---:|---|
+| ORB | 44,720 | +1.65 | −2.96 (−4.39 to −1.52) |
+| VWAP pullback | 25,650 | +0.57 | −3.55 (−4.69 to −2.41) |
+| Gap fade | 23,647 | +0.23 | −3.92 (−5.22 to −2.63) |
+| BB+KDJ | 2,112 | +2.24 | −1.88 (−6.16 to +2.44) |
+
+Only ORB shows an edge before costs, and it is smaller than even SPY's 1.5 bps round trip.
+Meanwhile the median symbol simply held rose 56 %.
+
 The project's value is the machinery that found this, and keeps finding things: an order layer
 that booked fills that never happened, a price archive with silent splice seams, test fixtures
 leaking into research data, a live filter that was configured on but never wired in. All of these
@@ -87,7 +101,7 @@ What has been run and checked, versus what merely exists.
 | ✅ | **Archive integrity** | Forward-adjusted price files are rebased, never spliced, when a dividend or split changes history. The real archives are checked for fixture rows and impossible jumps. |
 | ✅ | **Test suite** | pytest covers risk, signals, engines, replay, costs, statistics, archives, and bulk-fetch quota safety. A session guard fails the run if any test touches the real `logs/`. |
 | 🚧 | **LLM regime gate** | Claude classifies the morning regime and blocks two mean-reversion lanes on trending days. It is live and gating, but its value has **not** been shown against a no-gate baseline. |
-| 🚧 | **Wide scan (85 symbols)** | Universe, costs, parameters, split, and selection rule are frozen in advance; the data pull and scan are in progress. No results yet. |
+| ✅ | **Wide scan (85 symbols): a null** | 96,129 trades, 2022–2026, under rules frozen in advance. No strategy and none of 340 symbol×strategy lanes shows an edge net of costs; three strategies are significantly negative. The 2019–2021 holdout stays sealed and unspent. [Results](docs/strategy_graveyard.md). |
 | 🚧 | **Forward cohort** | A frozen live configuration from 2026-09-17 is the only clean test of the live settings. It is too young to say anything. |
 | ❌ | **A profitable strategy** | Not demonstrated. See above. |
 | ❌ | **Live (real-money) trading** | Deliberately not built. `live_trade_runner.py.DISABLED` is never executed. |

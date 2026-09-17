@@ -13,9 +13,11 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 9** (bulk fetch: throttling, quota ledger, resumability). Steps 5–7 closed 2026-09-17. Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
-> Step 8's universe preregistration was pulled into Step 3 because a per-symbol cost table cannot
-> be built before its symbols are fixed; the bulk OpenD fetch remains Step 9 and has not begun.
+> **Right now: the measurement plan is complete, and the answer is a null (2026-09-17).** The
+> 85-symbol wide scan found no strategy with an edge net of costs; details are in
+> `docs/strategy_graveyard.md` § "Wide Scan — 2026-09-17". The runner keeps running (forward cohort
+> + execution validation). What comes next is a **user decision**: see "After the null" at the end
+> of this file. Open independent items: H2 (Monday 2026-09-21 check).
 
 ## The one number that matters
 
@@ -425,7 +427,7 @@ partial-benchmark warning.
 
 ---
 
-### Step 11 — Wide scan ☐
+### ~~Step 11 — Wide scan~~ ✅ DONE 2026-09-17 — **NULL: no strategy, no lane** (see graveyard § "Wide Scan — 2026-09-17")
 *(was B3)* Fast engines across the frozen universe, sharded by symbol — VPS has ~5 GB available and
 a naive all-symbols-in-memory run would OOM; per-symbol independence is what edge measurement wants
 anyway. Estimated ~56 min single-threaded at the measured 1.56 s per symbol-year per strategy.
@@ -456,7 +458,7 @@ symbol's own benchmark, and the finalist list is produced by Step 6c's rule rath
 
 ---
 
-### Step 12 — Confirm finalists through the real code path ☐
+### ~~Step 12 — Confirm finalists through the real code path~~ — NOT APPLICABLE 2026-09-17 (zero finalists)
 *(was B4)* Only combinations that clear costs by a meaningful margin **in OOS** go to
 `mm/replay.py`. This is where the ~650× slower engine earns its cost — on a handful of candidates,
 not on 450 symbol-years.
@@ -636,3 +638,28 @@ answer is bad; it is that no answer is reachable.
   Step 1b, the 6b correction, and a softer headline ("disappears under the modeled costs" rather
   than "was the transaction costs" — same numbers, more precise claim). Its engineering
   recommendations matched Steps 2–7 and did not change the order.
+
+## After the null — options for the user (2026-09-17, none chosen)
+
+The plan's own endgame says a hard null "frees the engine to point somewhere less crowded." These
+are the honest options; they are not ranked by how interesting they are.
+
+1. **Keep accumulating, change nothing.** The forward cohort runs on its own and costs nothing.
+   The live gates (`evaluation_criteria.md`, net PF) will trip on their own schedule.
+2. **One narrow preregistered follow-up:** ORB on tech/semiconductor ETFs (QQQ, SMH, SOXX, maybe
+   XLK). Write the hypothesis, parameters and decision rule *first*, then test once on the unseen
+   2019–2021 window, then watch it forward. This is the only lead the scan produced, and it failed
+   multiple-testing correction, so expect a null.
+3. **Point the engine somewhere less crowded.** Longer holding periods, different instruments, or
+   non-price data. That would be a new research program with a new plan, and it reuses the
+   machinery (cost ruler, replay, preregistration, sealed windows, quota-safe fetch).
+4. **Wind down the live lanes the data rejects.** vwap_pb and gap_fade showed no gross edge across
+   85 symbols. Any suspension still goes through the live gates or a dated amendment, per the knob
+   freeze.
+5. **Treat the project as done and write it up.** The README and the Pages site already tell this
+   story; the scan result could be added to both.
+
+Also unresolved: the frozen cost table's ETF median (4.5 bps) looks pessimistic next to SPY's 1.5.
+It does not change this verdict (see the uniform 1.5 bps column), but any future work should
+revisit it before a new freeze.
+
