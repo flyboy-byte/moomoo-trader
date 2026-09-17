@@ -5,6 +5,44 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
+## Engine Cross-Validation — 2026-09-17 (PLAN.md Step 5): **FAIL**
+
+Preregistered run (evaluation_criteria.md, 2026-09-16 and 2026-09-17 amendments):
+`scripts/cross_validate_engines.py`, frozen VPS config, SPY/QQQ/IWM 2026-01-02 → 06-09, replay
+`fill_mode=instant`. Raw output: `docs/engine_cross_validation_2026-09-17_instant.json`.
+Gates: trade count within 2%, net PF within 0.05.
+
+| Strategy | Fast n | Replay n | Count diff | Fast net PF | Replay net PF | Pass |
+|---|--:|--:|--:|--:|--:|---|
+| bb_kdj | 27 | 27 | 0.0% | 1.022 | 0.112 | ✗ |
+| orb | 76 | 75 | 1.3% | 1.775 | 0.101 | ✗ |
+| vwap_pb | 80 | 79 | 1.2% | 1.823 | 0.296 | ✗ |
+| gap_fade | 92 | 101 | 9.8% | 1.042 | 0.042 | ✗ |
+
+**Cause 1: the replay fill model (explains the PF gap).** In `instant` mode FakeBroker fills at
+the order's limit price. Live limits are deliberately marketable: entries are 0.1% through the
+close (`mm/evals.py`) and exits 0.3% (`mm/execution.py::_EXIT_BUFFERS`). So `instant` charges
+about 40 bps per round trip. Verified on one trade (SPY 2026-01-16 short): entry 688.59 = close
+689.2776 × 0.999; exit 692.20 = close 690.1303 × 1.003. The module docstring called this mode
+"optimistic"; it is the opposite. Live SIMULATE fills do **not** land at the limit: across 134
+live trades, logged `slippage_bps` has medians of −3.5 (entry) and −0.8 (exit). **So the
+preregistered fill model was the wrong one for this comparison.** This was found only after
+seeing the result, so the preregistered FAIL stands as recorded. A diagnostic rerun with a new
+`fill_mode=close` (fill at the signal close, the fast engines' assumption) follows below. It is
+labeled as a diagnostic, not a replacement result.
+
+**Cause 2: live gap_fade never applies the large-gap short filter. This is a LIVE BUG.** All 9
+extra replay trades are gap-up shorts with gaps of 1.01–1.81%. `GAP_LARGE_SHORT_FILTER_ENABLED=true`
+on the VPS (activated 2026-07-29), but `mm/evals.py::_eval_gap_fade` imports only
+`GAP_MIN_PCT, GAP_MAX_PCT, GAP_TARGET_FILL_PCT, GAP_STOP_BUFFER, GAP_SHORTS_ENABLED`. The filter
+exists only in the research engine, so the setting does nothing live. Live impact is UNKNOWN for
+the five gap-up shorts from 08-04 to 08-21, because gap size was not logged then. The two logged
+since (08-27: 0.79%, 0.30%) were under 1% and unaffected. **Not fixed.** Fixing it changes live
+decisions, which ends the 2026-09-17 forward cohort, so that is the user's call.
+
+Trade counts otherwise agree closely (bb_kdj exact; orb and vwap_pb within one trade each), so
+the signal logic of the two engines matches.
+
 ## Health Review — 2026-09-16 (PLAN.md Step 0b)
 
 **Source:** `./sync_logs.sh` on 2026-09-17 00:40 UTC, scored with `mm/trades.py` + `mm/costs.py`

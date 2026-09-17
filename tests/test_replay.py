@@ -131,6 +131,21 @@ class TestFakeBroker:
         assert pos.empty  # flat positions are not reported
 
 
+def test_close_fill_mode_ignores_marketable_buffer():
+    """fill_mode='close' fills at the signal bar's close, not the buffered limit."""
+    import pandas as pd
+    df = pd.DataFrame({
+        "time_key": pd.to_datetime(["2026-01-05 09:30:00", "2026-01-05 09:35:00"]),
+        "open": [100.0, 99.0], "high": [101.0, 99.5], "low": [99.0, 98.0],
+        "close": [100.0, 99.0], "volume": [1000, 1000],
+    })
+    b = FakeBroker({"US.TEST": df}, fill_mode="close")
+    b.set_index("US.TEST", 0)
+    _, data = b.place_order(price=99.7, qty=1, code="US.TEST", trd_side="SELL")
+    _, od = b.order_list_query(order_id=data["order_id"].iloc[0])
+    assert float(od.iloc[0]["dealt_avg_price"]) == 100.0
+
+
 def test_symbol_from_csv():
     assert symbol_from_csv(Path("logs/US_SPY_K_5M_combined.csv")) == "US.SPY"
     assert symbol_from_csv(Path("US_IWM_K_15M_2026-05-31.csv")) == "US.IWM"

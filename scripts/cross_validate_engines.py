@@ -111,14 +111,14 @@ def fast_pass(dfs: dict) -> dict:
     return result
 
 
-def replay_pass(dfs: dict, out_dir: Path) -> dict:
+def replay_pass(dfs: dict, out_dir: Path, fill_mode: str) -> dict:
     from compare_engine_results import replay_metrics
     from mm.replay import replay
     from mm.trades import load_trades
 
     replay(None, STRATEGIES,
            dfs={s: df.copy() for s, df in dfs.items()},
-           fill_mode="instant", out_dir=out_dir, quiet=True)
+           fill_mode=fill_mode, out_dir=out_dir, quiet=True)
     return replay_metrics(load_trades(out_dir, default_start=None))
 
 
@@ -131,6 +131,8 @@ def main() -> None:
     ap.add_argument("--fast-only", action="store_true")
     ap.add_argument("--replay-dir", type=Path, default=Path("/tmp/moomoo_cross_replay"))
     ap.add_argument("--output", type=Path)
+    ap.add_argument("--fill", default="instant", choices=["instant", "close", "touch"],
+                    help="replay fill model; instant is the preregistered one")
     args = ap.parse_args()
 
     pin_config(FROZEN_ENV)
@@ -143,11 +145,12 @@ def main() -> None:
     fast = fast_pass(dfs)
     print(f"fast pass: {time.time() - t0:.1f}s", file=sys.stderr)
     result: dict = {"config": str(FROZEN_ENV.relative_to(ROOT)),
-                    "window": [args.start, args.end], "fast": fast}
+                    "window": [args.start, args.end],
+                    "fill": None if args.fast_only else args.fill, "fast": fast}
 
     if not args.fast_only:
         t0 = time.time()
-        replay = replay_pass(dfs, args.replay_dir)
+        replay = replay_pass(dfs, args.replay_dir, args.fill)
         print(f"replay pass: {time.time() - t0:.0f}s", file=sys.stderr)
         result["replay"] = replay
         result["comparison"] = compare(fast, replay, STRATEGIES)

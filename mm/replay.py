@@ -5,7 +5,11 @@ Feeds historic 5-min candles bar-by-bar through `_eval_symbol_all_strategies`
 confirmation, position persistence, reconcile) against a fake broker whose fill
 behavior is programmable. This tests the whole machine, not just the signals:
 
-  - instant : every limit fills at its price (optimistic, backtest-like)
+  - instant : every limit fills at its price. NOT optimistic: live limits carry a
+              marketable buffer (entries 0.1%, exits 0.3% through the close), so
+              this charges ~40 bps a round trip that live SIMULATE fills don't pay
+              (measured 2026-09-17: live slippage medians −3.5 / −0.8 bps)
+  - close   : fills at the signal bar's close — the fast engines' assumption
   - touch   : an order fills only if the NEXT bar trades through the limit;
               gaps fill at the open (models live SIMULATE limit-or-better)
   - never   : nothing ever fills (exercises entry_unfilled / exit retry paths)
@@ -64,7 +68,7 @@ class FakeBroker:
     the bar AFTER the signal bar (live orders rest during the next 5 minutes)."""
 
     def __init__(self, dfs: dict[str, pd.DataFrame], fill_mode: str = "touch") -> None:
-        assert fill_mode in ("instant", "touch", "never", "entry_only")
+        assert fill_mode in ("instant", "touch", "never", "entry_only", "close")
         self.dfs = dfs
         self.fill_mode = fill_mode
         self.idx: dict[str, int] = {}          # symbol -> index of bar just evaluated
@@ -108,6 +112,10 @@ class FakeBroker:
             return limit
         if self.fill_mode == "instant":
             return limit
+        if self.fill_mode == "close":
+            # fill at the signal bar's close, ignoring the limit's marketable
+            # buffer — the fast engines' assumption (engine cross-validation)
+            return float(self.dfs[code].iloc[self.idx[code]]["close"])
         # touch: does the NEXT bar trade through the limit?
         df = self.dfs[code]
         i = self.idx.get(code, -1)

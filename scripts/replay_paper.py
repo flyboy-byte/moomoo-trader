@@ -43,7 +43,7 @@ def main() -> None:
     ap.add_argument("--latest", action="store_true", help="use the combined SPY/QQQ/IWM CSVs")
     ap.add_argument("--start", help="YYYY-MM-DD")
     ap.add_argument("--end", help="YYYY-MM-DD")
-    ap.add_argument("--fill", default="touch", choices=["touch", "instant", "never", "entry_only"])
+    ap.add_argument("--fill", default="touch", choices=["touch", "instant", "never", "entry_only", "close"])
     ap.add_argument("--all-modes", action="store_true",
                     help="run all 4 fill modes against the same window and diff them")
     ap.add_argument("--strategies", default=None,
