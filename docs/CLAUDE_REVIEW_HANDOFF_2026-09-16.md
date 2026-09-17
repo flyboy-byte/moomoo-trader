@@ -76,6 +76,40 @@ per-symbol cost table are frozen without spending OpenD quota. Step 4 then added
 uncertainty for pooled-symbol reports; the active plan now starts at Step 5 (fast-engine versus
 replay cross-validation).
 
+### Session update — paused Step 5 run
+
+The next Codex pass implemented the first part of Step 5 and started the preregistered replay. The
+run used the frozen local SPY/QQQ/IWM five-minute CSV snapshots from 2026-01-02 through 2026-06-09,
+`fill_mode=instant`, and the four in-scope strategies: `bb_kdj`, `orb`, `vwap_pb`, and `gap_fade`.
+It drove the real `mm.paper` evaluation path and wrote replay JSONL events under
+`/tmp/moomoo_cross_replay`. It did not contact the VPS, change `.env`, restart services, or place
+orders.
+
+The run was stopped partway through (around 2026-03-09) because the real-path replay was taking
+roughly an hour. Its partial output is not a valid cross-validation result and must not be used as
+one. The reason it was slow is structural: each five-minute bar re-enters the full runner path,
+including indicator windows, persistence, and risk bookkeeping.
+
+Before rerunning, resolve three known semantic mismatches exposed by the setup:
+
+1. The fast ORB engine does not model the live `ORB_LATEST_ENTRY=12:30` cutoff or the live SPY-only
+   short-symbol allowlist.
+2. Replay output does not currently seed the external VIX/regime context, so some gates fail open
+   or behave differently from the fast pass.
+3. Replay uses live quantity sizing while fast engines use one share. Comparison must normalize
+   replay P&L to one share before applying the frozen per-symbol cost table.
+
+`scripts/compare_engine_results.py` and `tests/test_compare_engine_results.py` were added locally;
+the three tests pass. The script compares fast JSON with replay JSONL, performs one-share
+normalization, applies the preregistered 2% trade-count and 0.05 net-PF gates, and reports aggregate
+and per-symbol diagnostics. These two files are currently uncommitted because the automatic Git
+approval layer rejected the elevated commit/push after the account hit its usage limit.
+
+The existing fast-engine aggregate for the preregistered window is preserved at
+`/tmp/moomoo_fast_results.json` for the current machine only. Its net PF values were: bb_kdj 1.022
+(27 trades), orb 1.206 (241), vwap_pb 1.823 (80), and gap_fade 1.042 (92). These are development
+results until the semantic alignment and replay comparison are complete.
+
 ## Recommended forward path
 
 ### Immediate: make the next review decision-oriented
@@ -162,11 +196,19 @@ Please review this handoff and the authoritative files it names. Then:
    could not be verified.
 2. Establish the current deployed state and split the data at material config/behavior changes.
 3. Produce the one-page per-strategy decision table described above.
-4. Inspect the remaining `docs/PLAN.md` measurement steps and identify the smallest coherent batch
+4. Review the “Session update — paused Step 5 run” section. Do not treat the partial replay output
+   as a result. Inspect the two new comparison files and commit/push them if the Git approval limit
+   has cleared.
+5. Make the smallest coherent semantic-alignment fix for the fast/replay comparison, without
+   changing live behavior. Prefer a targeted test or shortened validation window before another
+   full replay.
+6. Only after alignment, rerun the preregistered comparison and record pass/fail numbers in the
+   graveyard. Do not relax the written 2% / 0.05 gates after seeing results.
+7. Inspect the remaining `docs/PLAN.md` measurement steps and identify the smallest coherent batch
    that can be implemented and tested without changing live behavior.
-5. Implement that batch only if the evidence supports it, run the relevant tests, and update the
+8. Implement that batch only if the evidence supports it, run the relevant tests, and update the
    plan/graveyard with dated findings.
-6. End with a recommendation about whether to keep accumulating, investigate execution, retire a
+9. End with a recommendation about whether to keep accumulating, investigate execution, retire a
    lane, or begin a frozen research cohort.
 
 Keep the review grounded in the project’s actual purpose: a serious personal learning and research
