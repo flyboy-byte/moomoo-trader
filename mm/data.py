@@ -13,6 +13,10 @@ from .logger import get_logger
 
 log = get_logger("data")
 
+class FetchError(RuntimeError):
+    """An API error during a strict (all-or-nothing) candle fetch."""
+
+
 _KTYPE_MAP = {
     "K_1M": KLType.K_1M,
     "K_3M": KLType.K_3M,
@@ -31,7 +35,16 @@ def fetch_candles(
     end: str | None = None,
     max_count: int = 1000,
     extended_time: bool = False,
+    strict: bool = False,
+    before_request=None,
 ) -> pd.DataFrame:
+    """Fetch QFQ candles, following pagination.
+
+    strict=True raises FetchError on any API error instead of returning whatever
+    pages arrived so far — a bulk fetch must never save a silently truncated
+    history. before_request, if given, is called before every page request
+    (rate limiting).
+    """
     cfg = _config.cfg
     symbol = symbol or cfg.symbol
     ktype_str = ktype or cfg.candle_ktype
@@ -50,6 +63,8 @@ def fetch_candles(
 
     with quote_context() as ctx:
         while True:
+            if before_request is not None:
+                before_request()
             ret, data, page_key = ctx.request_history_kline(
                 code=symbol,
                 start=start,
@@ -63,6 +78,8 @@ def fetch_candles(
             )
             if ret != RET_OK:
                 log.error("request_history_kline error: %s", data)
+                if strict:
+                    raise FetchError(f"{symbol}: {data}")
                 break
 
             frames.append(data)
