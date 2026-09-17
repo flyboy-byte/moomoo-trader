@@ -100,8 +100,16 @@ def run_orb_signals(
     target_mult: float = ORB_TARGET_MULT,
     vix_map: dict | None = None,
     vix_max: float | None = None,
+    latest_entry: dtime | None = None,
+    shorts_allowed: bool = True,
 ) -> tuple[list[ORBTrade], pd.DataFrame]:
-    """Stateful bar-by-bar ORB evaluation. Returns (trades, annotated_df)."""
+    """Stateful bar-by-bar ORB evaluation. Returns (trades, annotated_df).
+
+    latest_entry / shorts_allowed mirror the live ORB_LATEST_ENTRY and
+    ORB_SHORTS_ENABLED + ORB_SHORT_SYMBOLS gates in mm/evals.py::_eval_orb. The
+    defaults (no cutoff, shorts on) keep the historical research behaviour.
+    Like live, a blocked bar does not use up the day's single entry.
+    """
     df = add_all(df)
     df = df.copy()
     df["orb_signal"] = "none"
@@ -170,6 +178,8 @@ def run_orb_signals(
                 position = None
 
         if position is None and not is_time_stop and bar_date not in entered_today:
+            if latest_entry is not None and bar_clock >= latest_entry:
+                continue
             if vix_map is not None and vix_max is not None:
                 vix_val = vix_map.get(str(bar_date))
                 if vix_val is not None and vix_val > vix_max:
@@ -189,7 +199,7 @@ def run_orb_signals(
                 log.info("ORB LONG  %s  price=%.4f  stop=%.4f  target=%.4f  OR=[%.4f,%.4f]",
                          bar_time, close, stop, target, or_low, or_high)
 
-            elif close < or_low and vol_ok:
+            elif close < or_low and vol_ok and shorts_allowed:
                 target = close - target_mult * or_range
                 stop = or_high
                 position = {"entry_time": bar_time, "entry_price": close,

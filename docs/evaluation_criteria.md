@@ -175,6 +175,21 @@ Use symbol medians and PLAN Step 4's day-blocked interval rather than pooled tra
 
 ## Amendment log
 
+- 2026-09-17 (engine cross-validation alignment, written and committed before any aligned result
+  was seen): The first attempt was abandoned partway through, and its partial output is void. It also ran
+  on the *local* `.env`, which had drifted from the VPS (ORB scorer blocking below 0.50, no
+  `ORB_LATEST_ENTRY`, no short allowlist, no gap large-short filter). Both sides now load only
+  `docs/frozen_config_2026-09-17.env` (the VPS settings, secrets omitted) via
+  `scripts/cross_validate_engines.py`. Alignment: (1) the fast ORB engine takes the live cutoff and
+  short allowlist (`run_orb_signals(latest_entry=, shorts_allowed=)`); (2) per-symbol KDJ, ORB and
+  VWAP settings are passed to the fast engines; (3) `ANTHROPIC_API_KEY` is blanked. The live scorer
+  threshold is 0.0, so no decision changes, and the replay makes no paid calls (the abandoned run
+  made 69); (4) no VIX or regime context exists for 2026-01-02 → 06-09 on either side, so those
+  gates are open on both; (5) replay P&L is normalized to one share. Known residual differences,
+  recorded as diagnostics rather than excuses: replay enforces `MAX_DAILY_LOSS=20` and live
+  sizing, and the fast engines do not. The window, the four strategies, and the 2% / 0.05 gates are
+  unchanged.
+
 - 2026-09-16 (engine cross-validation preregistration, written before the run): Compare the fast
   engines with `mm.replay` on SPY/QQQ/IWM RTH five-minute candles from **2026-01-02 through
   2026-06-09 inclusive**, using the frozen local CSV snapshots (SHA-256 prefixes:
