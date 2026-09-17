@@ -359,7 +359,7 @@ it does not authorize or begin Step 9's quota-consuming fetch.
 
 ---
 
-### Step 9 — Bulk fetch ☐
+### ~~Step 9 — Bulk fetch~~ ✅ DONE 2026-09-17 (85/85 symbols, 82 slots, ledger = OpenD counter)
 *(was B1)* Extend `scripts/fetch_daily_archive.py` — do not rebuild it, `update_combined_csv`
 already dedupes and quarantines correctly. Needs, and each is small enough to test on its own:
 
@@ -393,6 +393,15 @@ recognises all 97 codes. **Free live test:** `--limit 1` fetched SPY (already he
 2019-01-02 → 2026-08-31, **0 slots spent**, 2 m 47 s, 24 MB. The full run is ~4 h and ~2 GB (49 GB
 free). Output goes to `logs/wide_scan/` on the VPS, one full pull per symbol (single price basis).
 The local SPY/QQQ/IWM archives are not touched. **Waiting on user go-ahead to spend the 82 slots.**
+
+**Result 2026-09-17 (04:35 → 08:31 UTC):**
+- **Fetch:** `summary: fetched 84, slots_spent 82`, and SPY was already done. The ledger has 85
+  `done` events and no errors or substitutions. OpenD's own counter reads 85 used, matching the
+  ledger exactly. Every file has 149,688 RTH bars, 2019-01-02 → 2026-08-31.
+- **Quality checks (local, after rsync):** all symbols trade from the first day; zero-volume bars
+  ≤ 0.21 % (IYT); the largest close-to-close moves are real events (ORCL +36 %, NFLX −35 %, USO
+  2020), with no split-sized jumps, so the QFQ adjustment holds.
+- **Storage:** 2.0 GB, in `logs/wide_scan/` on both the VPS and local (gitignored).
 
 ---
 
