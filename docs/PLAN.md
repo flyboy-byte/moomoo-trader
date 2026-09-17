@@ -470,6 +470,17 @@ records `stop_reason` — **but the diagnosis is inference, not proof.** Check t
 If it fails again with `stop_reason == "end_turn"`, the truncation theory is wrong and the
 `docs/strategy_graveyard.md` entry needs correcting.
 
+**2026-09-17 update (user: "def do").** **Check on Monday 2026-09-21, after 13:00 UTC.** The fix
+only reached the VPS on 2026-09-16 (it was at `e3bc988`, which predates `35d12cc`), so every
+Monday so far ran the old 512-token code. Old-code evidence: W35 and W36 parsed fine, and W37
+(2026-09-14) failed with `Unterminated string ... (char 1575)`. That is a cut-off JSON reply, so it
+*supports* the truncation theory without proving it. W38 is the first run on fixed code:
+```bash
+ssh <vps> 'cd ~/moomoo/logs && tail -5 cron_synthesis.log && python3 -c "import json; d=json.load(open(\"synthesis_2026-W38.json\")); a=d[\"analysis\"]; print(a.get(\"error\"), a.get(\"stop_reason\"), str(a)[:200])"'
+```
+**Done when:** W38 has a real `summary` (pass), or its error and `stop_reason` are recorded in the
+graveyard. `stop_reason == "end_turn"` with a parse error means the truncation theory is wrong.
+
 ---
 
 ### ~~H3 — Extended README design~~ ✅ DONE 2026-09-17 — rewritten with the `readme` skill, real dashboard screenshots, render-verified on GitHub; repo description + topics set
@@ -512,7 +523,9 @@ Constraint: `feedback_config_ui` memory (toggles/pills/numbers only, TOTP auth).
   strategy spans more than one symbol.
 - **Wide-scan results page: deferred** until Step 11 produces results (and probably better as the
   H4 Pages site than on the live dashboard).
-- **Open question for the user: public `/api/*`.** The read-only endpoints (trades, scoreboard,
+- ~~**Open question for the user: public `/api/*`.**~~ **DECIDED 2026-09-17 (user): lock
+  `/api/stats`.** It now requires login (a JSON 401 for logged-out API calls); trades and scoreboard
+  stay public. Tested in `tests/test_web_dashboard_config.py` and deployed. Original note: The read-only endpoints (trades, scoreboard,
   stats incl. process list) answer without login; only `/config` is protected. That is harmless
   for a paper showcase, but it is a choice, not an accident to leave unrecorded. Recommendation:
   keep trades/scoreboard public, and put `/api/stats` (host process list, memory, disk) behind

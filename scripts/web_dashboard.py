@@ -161,6 +161,8 @@ def _require_login(f):
         if not _auth_configured():
             return f(*args, **kwargs)
         if not session.get("logged_in"):
+            if request.path.startswith("/api/"):
+                return jsonify(error="login required"), 401
             return redirect(url_for("login", next=request.path))
         session.permanent = True
         return f(*args, **kwargs)
@@ -279,6 +281,7 @@ def logout() -> Response:
 
 
 @app.route("/api/stats")
+@_require_login   # host process list, memory, disk: not for the public dashboard (2026-09-17)
 def api_stats() -> Response:
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("/")

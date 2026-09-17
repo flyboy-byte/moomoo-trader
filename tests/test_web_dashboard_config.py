@@ -48,3 +48,20 @@ def test_write_env_key_rejects_unlisted_key(tmp_path, monkeypatch):
     ok = web_dashboard._write_env_key("DASHBOARD_PASSWORD", "newpass")
     assert ok is False
     assert "DASHBOARD_PASSWORD" not in env_path.read_text()
+
+
+def test_api_stats_requires_login_when_auth_configured(monkeypatch):
+    """/api/stats exposes the host's process list, memory and disk (locked 2026-09-17)."""
+    monkeypatch.setattr(web_dashboard, "_auth_configured", lambda: True)
+    client = web_dashboard.app.test_client()
+    r = client.get("/api/stats")
+    assert r.status_code == 401 and r.get_json() == {"error": "login required"}
+    with client.session_transaction() as s:
+        s["logged_in"] = True
+    assert client.get("/api/stats").status_code == 200
+
+
+def test_public_read_only_apis_stay_public(monkeypatch):
+    monkeypatch.setattr(web_dashboard, "_auth_configured", lambda: True)
+    client = web_dashboard.app.test_client()
+    assert client.get("/api/scoreboard").status_code == 200
