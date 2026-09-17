@@ -490,7 +490,7 @@ the deep-doc folder, so a separate folder or branch is likely cleaner), and what
 **Nothing live or account-specific:** no positions, no VPS host, nothing from `.env`.
 **Done when:** the site builds from the repo and links back to README.
 
-### H5 — Do the 2026-09 changes warrant dashboard changes? ☐
+### ~~H5 — Do the 2026-09 changes warrant dashboard changes?~~ ✅ DONE 2026-09-17 (one open question for the user, below)
 *(user request, 2026-09-17)* Review `scripts/web_dashboard.py` against what changed since Step 0's
 deploy, then decide what (if anything) to build. Candidates:
 - the **forward cohort** (a "since 2026-09-17" view, separate from all-time);
@@ -501,6 +501,22 @@ Related, found 2026-09-16: `/api/*` endpoints are readable without login, includ
 process list. Decide whether that is intended for a public showcase.
 Constraint: `feedback_config_ui` memory (toggles/pills/numbers only, TOTP auth).
 **Done when:** a short decision list is written here, and anything chosen is built and deployed.
+
+**Decisions 2026-09-17:**
+- **Forward cohort: BUILT.** A `cohort` range pill (trades since `COHORT_START = "2026-09-17"` in
+  `web_dashboard.py`) on the P&L chart, the scorecard and the trade log. It uses the existing
+  `?start=` API; there is no new endpoint.
+- **Gap-filter fix: no change.** `gap_large_short` is an ordinary `signal_skip` reason; it shows in
+  the existing skip panels.
+- **Day-blocked CIs: no change.** Already done in Step 4: the scorecard uses day blocks whenever a
+  strategy spans more than one symbol.
+- **Wide-scan results page: deferred** until Step 11 produces results (and probably better as the
+  H4 Pages site than on the live dashboard).
+- **Open question for the user: public `/api/*`.** The read-only endpoints (trades, scoreboard,
+  stats incl. process list) answer without login; only `/config` is protected. That is harmless
+  for a paper showcase, but it is a choice, not an accident to leave unrecorded. Recommendation:
+  keep trades/scoreboard public, and put `/api/stats` (host process list, memory, disk) behind
+  login. Not changed without the user's say-so.
 
 ### ~~H6 — Retire the terminal dashboard~~ ✅ DONE 2026-09-17 — removed; references updated; `textual` dropped; graveyard entry added
 *(user request, 2026-09-17: "long obsolete")* Remove `scripts/dashboard.py` (571 lines, TUI).

@@ -257,6 +257,8 @@
         <button class="btn pnl-range-btn" data-days="30" onclick="loadPnlChart(30)">30d</button>
         <button class="btn pnl-range-btn" data-days="90" onclick="loadPnlChart(90)">90d</button>
         <button class="btn pnl-range-btn active" data-days="0" onclick="loadPnlChart(0)">all</button>
+        <button class="btn pnl-range-btn" data-days="-1" onclick="loadPnlChart(-1)"
+                title="Frozen forward cohort: the clean test of the live settings">cohort</button>
       </div>
     </div>
     <div class="chart-wrap" style="margin-top:14px">
@@ -272,6 +274,8 @@
         <button class="btn score-range-btn" data-days="30" onclick="loadScoreboard(30)">30d</button>
         <button class="btn score-range-btn" data-days="90" onclick="loadScoreboard(90)">90d</button>
         <button class="btn score-range-btn active" data-days="0" onclick="loadScoreboard(0)">all</button>
+        <button class="btn score-range-btn" data-days="-1" onclick="loadScoreboard(-1)"
+                title="Frozen forward cohort: the clean test of the live settings">cohort</button>
       </div>
     </div>
     <div class="scroll-x" style="margin-top:14px">
@@ -312,6 +316,8 @@
         <button class="btn trade-range-btn" data-days="30" onclick="loadTradeLog(30)">30d</button>
         <button class="btn trade-range-btn" data-days="90" onclick="loadTradeLog(90)">90d</button>
         <button class="btn trade-range-btn active" data-days="0" onclick="loadTradeLog(0)">all</button>
+        <button class="btn trade-range-btn" data-days="-1" onclick="loadTradeLog(-1)"
+                title="Frozen forward cohort: the clean test of the live settings">cohort</button>
         <span id="tradelog-sort-label" class="muted" style="font-size:11px;margin-left:8px"></span>
       </div>
     </div>
@@ -458,5 +464,6 @@
 <script>
   // Inject server state into JS
   var _isToday = {{ 'true' if is_today else 'false' }};
+  var _cohortStart = "{{ cohort_start }}";
 </script>
 {% endblock %}

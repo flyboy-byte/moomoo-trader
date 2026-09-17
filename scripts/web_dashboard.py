@@ -38,6 +38,10 @@ from mm.trades import load_trades, profit_factor
 from eod_summary import SessionSummary, load_summary
 
 _PROJECT_ROOT = Path(__file__).parent.parent
+
+# First session of the frozen forward cohort (docs/evaluation_criteria.md amendment log,
+# 2026-09-16/17). The only clean test of the live settings; shown as its own range.
+COHORT_START = "2026-09-17"
 _SCRIPTS_DIR = Path(__file__).parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 
@@ -1002,6 +1006,7 @@ def index() -> str:
     now_str = datetime.now().strftime("%H:%M:%S")
 
     return render_template("index.html",
+        cohort_start=COHORT_START,
         sess_date=sess_date,
         is_today=is_today,
         avail=avail,

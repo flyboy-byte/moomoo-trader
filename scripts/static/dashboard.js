@@ -50,6 +50,12 @@ function nowHMS() {
   return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 }
 
+// days > 0: last N days; 0: all history; -1: the frozen forward cohort.
+function rangeUrl(base, days) {
+  if (days === -1 && typeof _cohortStart !== "undefined") return base + "?start=" + _cohortStart;
+  return days > 0 ? base + "?start=" + daysAgoDate(days) : base;
+}
+
 function daysAgoDate(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -164,7 +170,7 @@ function loadPnlChart(days) {
   document.querySelectorAll(".pnl-mode-btn").forEach(b =>
     b.classList.toggle("active", b.dataset.mode === _pnlMode));
 
-  const url = days > 0 ? "/api/pnl_history?start=" + daysAgoDate(days) : "/api/pnl_history";
+  const url = rangeUrl("/api/pnl_history", days);
   fetch(url).then(r => r.json()).then(function(data) {
     const strategies = Object.keys(data);
     if (!strategies.length) return;
@@ -250,7 +256,7 @@ function loadScoreboard(days) {
   document.querySelectorAll(".score-range-btn").forEach(b =>
     b.classList.toggle("active", parseInt(b.dataset.days) === days));
 
-  const url = days > 0 ? "/api/scoreboard?start=" + daysAgoDate(days) : "/api/scoreboard";
+  const url = rangeUrl("/api/scoreboard", days);
   const NCOL = 10;
   const tbody = document.getElementById("scorecard-tbody");
   const span = (cls, msg) =>
@@ -311,7 +317,7 @@ function loadTradeLog(days) {
   document.querySelectorAll(".trade-range-btn").forEach(b =>
     b.classList.toggle("active", parseInt(b.dataset.days) === days));
 
-  const url = days > 0 ? "/api/trades?start=" + daysAgoDate(days) : "/api/trades";
+  const url = rangeUrl("/api/trades", days);
   fetch(url).then(r => r.json()).then(function(rows) {
     _tradeRows = rows;
     _tradeSortKey = "ts";
