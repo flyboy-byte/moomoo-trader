@@ -472,7 +472,7 @@ If it fails again with `stop_reason == "end_turn"`, the truncation theory is wro
 
 ---
 
-### H3 — Extended README design ☐
+### ~~H3 — Extended README design~~ ✅ DONE 2026-09-17 — rewritten with the `readme` skill, real dashboard screenshots, render-verified on GitHub; repo description + topics set
 *(user request, 2026-09-17)* Give `README.md` (328 lines) a proper design pass. **Must use the
 `readme` skill** (user instruction): structure a skimmer can follow in 30 seconds, status tables, collapsibles, and a
 diagram of the runner → logs → dashboard flow. It has to tell the honest story: a paper-only
@@ -517,6 +517,13 @@ Constraint: `feedback_config_ui` memory (toggles/pills/numbers only, TOTP auth).
   for a paper showcase, but it is a choice, not an accident to leave unrecorded. Recommendation:
   keep trades/scoreboard public, and put `/api/stats` (host process list, memory, disk) behind
   login. Not changed without the user's say-so.
+- **Found while screenshotting (2026-09-17):** `index.html` redeclared `_isToday`, which is a
+  SyntaxError, so its inline script never ran (since `6d325d7`). The live-refresh flag was always
+  false, and the new cohort date was never set. **Fixed and deployed.** The cost footnote still
+  quoted the 5 bps default; fixed.
+- **Open, small:** each `/api/*` call takes ~4 s (it re-parses every JSONL), and the dev server
+  runs them one after another, so the Scorecard tab needs ~12 s to fill. A short-TTL cache in
+  `load_trades` would fix it. `bb_kdj` and `bb_kdj_loose` also share a colour on the P&L chart.
 
 ### ~~H6 — Retire the terminal dashboard~~ ✅ DONE 2026-09-17 — removed; references updated; `textual` dropped; graveyard entry added
 *(user request, 2026-09-17: "long obsolete")* Remove `scripts/dashboard.py` (571 lines, TUI).
