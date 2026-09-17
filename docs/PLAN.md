@@ -699,7 +699,7 @@ Research data comes from the Binance archive; any trading goes through Alpaca **
 read-only check passed). Rules: `docs/evaluation_criteria.md` § "Crypto pilot (C)". Survey:
 `docs/crypto_strategy_survey_2026-09.md`.
 - ☑ C0 — universe, costs, split and rules frozen (`docs/crypto/universe_2026-09-17.json`)
-- ☐ C1 — download Binance daily (and BTC/ETH hourly) klines → `logs/crypto/`
-- ☐ C2 — engine + tests, D run → `docs/crypto/dev_results.json`, finalists committed
-- ☐ C3 — H run (only if something passed D)
-- ☐ C4 — write-up; if anything replicates, propose an Alpaca paper runner
+- ☑ C1 — download Binance daily (and BTC/ETH + SOL hourly) klines → `logs/crypto/` (31 coins)
+- ☑ C2 — engine + tests (5), D run — pooled fails at p 0.051; 3 coin lanes (AVAX/SOL/ADA) survive BH
+- ☑ C3 — H run — **NULL: none of the 3 finalists replicate** (see graveyard § "Crypto Pilot")
+- ☑ C4 — write-up (graveyard § "Crypto Pilot"). Nothing replicated, so no Alpaca paper runner is proposed.
