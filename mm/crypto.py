@@ -63,7 +63,10 @@ def fetch_klines(symbol: str, interval: str, first: str, last: str, out: Path,
     import requests
     get = get or (lambda url: requests.get(url, timeout=60))
     out.parent.mkdir(parents=True, exist_ok=True)
-    have = pd.read_csv(out, parse_dates=["ts"]) if out.exists() else None
+    have = None
+    if out.exists():
+        have = pd.read_csv(out)
+        have["ts"] = pd.to_datetime(have["ts"], format="mixed")
     done = set(have["ts"].dt.strftime("%Y-%m")) if have is not None else set()
     frames = [have] if have is not None else []
     for m in months(first, last):
@@ -75,13 +78,15 @@ def fetch_klines(symbol: str, interval: str, first: str, last: str, out: Path,
         r.raise_for_status()
         frames.append(parse_klines(r.content))
     df = pd.concat(frames).drop_duplicates("ts").sort_values("ts")
-    df.to_csv(out, index=False)
+    df["ts"] = df["ts"].dt.floor("s")           # kline opens are always whole seconds;
+    df.to_csv(out, index=False)                 # avoids a mixed .%f / no-.%f format on disk
     return out
 
 
 def daily_frame(csv_path: Path) -> pd.DataFrame:
     """Daily bars indexed by UTC date, with `sig` = close (decision on the daily close)."""
-    df = pd.read_csv(csv_path, parse_dates=["ts"])
+    df = pd.read_csv(csv_path)
+    df["ts"] = pd.to_datetime(df["ts"], format="mixed")
     idx = df["ts"].dt.strftime("%Y-%m-%d")
     return pd.DataFrame({"open": df["open"].values, "close": df["close"].values,
                          "sig": df["close"].values}, index=idx.values)
@@ -126,8 +131,9 @@ def open_close_gap_bps(d: pd.DataFrame) -> float:
 
 def seasonality(hourly_csv: Path, start: str, end: str) -> dict:
     """Gross mean bps by UTC hour and weekday (diagnostic only)."""
-    h = pd.read_csv(hourly_csv, parse_dates=["ts"])
-    h = h[(h["ts"] >= start) & (h["ts"] < pd.Timestamp(end) + pd.Timedelta(days=1))]
+    h = pd.read_csv(hourly_csv)
+    h["ts"] = pd.to_datetime(h["ts"], format="mixed")
+    h = h[(h["ts"] >= pd.Timestamp(start)) & (h["ts"] < pd.Timestamp(end) + pd.Timedelta(days=1))]
     r = (h["close"] / h["open"] - 1) * 1e4
     by_hour = r.groupby(h["ts"].dt.hour).agg(["mean", "count"])
     by_dow = r.groupby(h["ts"].dt.dayofweek).sum() / h["ts"].dt.date.groupby(
