@@ -850,7 +850,8 @@ def _eval_gap_fade(
     already_entered: True if gap_fade already traded today (one trade per day).
     """
     from .gap_fade import (GAP_MIN_PCT, GAP_MAX_PCT, GAP_TARGET_FILL_PCT,
-                           GAP_STOP_BUFFER, GAP_SHORTS_ENABLED)
+                           GAP_STOP_BUFFER, GAP_SHORTS_ENABLED,
+                           GAP_MAX_SHORT_PCT, GAP_LARGE_SHORT_FILTER_ENABLED)
 
     cfg = _config.cfg
 
@@ -958,6 +959,20 @@ def _eval_gap_fade(
         if direction is None:
             elog.signal_skip("gap_no_rejection", score=0, bonus=0, min_score=0, strategy="gap_fade")
             return position
+
+        # Large gap-up short filter — mirrors mm/gap_fade.py::run_gap_fade. Until
+        # 2026-09-17 this lived only in the research engine, so the VPS setting
+        # GAP_LARGE_SHORT_FILTER_ENABLED=true (since 2026-07-29) did nothing live.
+        if direction == "short" and gap_pct > GAP_MAX_SHORT_PCT:
+            skip = "gap_large_short" if GAP_LARGE_SHORT_FILTER_ENABLED else "gap_large_short_shadow"
+            log.info("%-8s [gap_fade] %s gap=%.3f%% > max=%.1f%%", symbol,
+                     "SKIP  gap_large_short" if GAP_LARGE_SHORT_FILTER_ENABLED else "SHADOW would_filter",
+                     gap_pct * 100, GAP_MAX_SHORT_PCT * 100)
+            elog.signal_skip(skip, score=0, bonus=0, min_score=0, strategy="gap_fade",
+                             gap_pct=round(gap_pct * 100, 3), threshold=GAP_MAX_SHORT_PCT * 100,
+                             would_skip=True, gate_enabled=GAP_LARGE_SHORT_FILTER_ENABLED)
+            if GAP_LARGE_SHORT_FILTER_ENABLED:
+                return position
 
         if _entry_attempted.get((symbol, "gap_fade")) == str(candle_ts):
             return position

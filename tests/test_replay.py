@@ -210,3 +210,39 @@ def test_neutral_regime_does_not_block_bb_kdj(tmp_path, monkeypatch):
 
     # The window is known to produce at least one bb_kdj trade when unblocked
     assert stats["opens"] >= 1, "neutral regime should allow entries in this known-trade window"
+
+
+# ---------------------------------------------------------------------------
+# Gap Fade large gap-up short filter, end-to-end through the live eval path.
+# QQQ 2026-03-23 gapped up 1.58% and faded — the research engine filters it;
+# until 2026-09-17 the live path ignored GAP_LARGE_SHORT_FILTER_ENABLED.
+# ---------------------------------------------------------------------------
+
+CSV_QQQ = Path("logs/US_QQQ_K_5M_combined.csv")
+
+
+def _gap_replay(tmp_path, monkeypatch, enabled):
+    import mm.gap_fade as _gf
+    monkeypatch.setattr(_gf, "GAP_LARGE_SHORT_FILTER_ENABLED", enabled)
+    monkeypatch.setattr(_gf, "GAP_MAX_SHORT_PCT", 0.01)
+    stats = replay([CSV_QQQ], ["gap_fade"], start="2026-03-20", end="2026-03-23",
+                   fill_mode="close", out_dir=tmp_path / "out", quiet=True)
+    events = [json.loads(line)
+              for f in (tmp_path / "out").glob("paper_*.jsonl")
+              for line in f.read_text().splitlines()]
+    return stats, [e for e in events if e.get("event") == "signal_skip"
+                   and str(e.get("reason", "")).startswith("gap_large_short")]
+
+
+@pytest.mark.skipif(not CSV_QQQ.exists(), reason="QQQ candle CSV not on disk")
+def test_large_gap_short_blocked_live_when_enabled(tmp_path, monkeypatch):
+    stats, skips = _gap_replay(tmp_path, monkeypatch, enabled=True)
+    assert stats["opens"] == 0
+    assert [s["reason"] for s in skips] == ["gap_large_short"]
+
+
+@pytest.mark.skipif(not CSV_QQQ.exists(), reason="QQQ candle CSV not on disk")
+def test_large_gap_short_shadow_logs_but_trades_when_disabled(tmp_path, monkeypatch):
+    stats, skips = _gap_replay(tmp_path, monkeypatch, enabled=False)
+    assert stats["opens"] == 1
+    assert [s["reason"] for s in skips] == ["gap_large_short_shadow"]
