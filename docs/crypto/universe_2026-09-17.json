@@ -1,0 +1,230 @@
+{
+ "frozen": "2026-09-17",
+ "spread_snapshot_utc": "2026-09-17T17:01Z",
+ "excluded": {
+  "USDC/USD": "stablecoin",
+  "USDG/USD": "stablecoin",
+  "USDT/USD": "stablecoin",
+  "PAXG/USD": "gold token",
+  "HYPE/USD": "not in Binance spot archive"
+ },
+ "coins": {
+  "AAVE/USD": {
+   "binance": "AAVEUSDT",
+   "binance_first_month": "2020-10",
+   "alpaca_spread_bps": 18.99,
+   "round_trip_bps_taker": 68.99,
+   "round_trip_bps_maker": 48.99
+  },
+  "ADA/USD": {
+   "binance": "ADAUSDT",
+   "binance_first_month": "2018-04",
+   "alpaca_spread_bps": 32.57,
+   "round_trip_bps_taker": 82.57,
+   "round_trip_bps_maker": 62.57
+  },
+  "ARB/USD": {
+   "binance": "ARBUSDT",
+   "binance_first_month": "2023-03",
+   "alpaca_spread_bps": 33.31,
+   "round_trip_bps_taker": 83.31,
+   "round_trip_bps_maker": 63.31
+  },
+  "AVAX/USD": {
+   "binance": "AVAXUSDT",
+   "binance_first_month": "2020-09",
+   "alpaca_spread_bps": 4.84,
+   "round_trip_bps_taker": 54.84,
+   "round_trip_bps_maker": 34.84
+  },
+  "BAT/USD": {
+   "binance": "BATUSDT",
+   "binance_first_month": "2019-03",
+   "alpaca_spread_bps": 65.14,
+   "round_trip_bps_taker": 115.14,
+   "round_trip_bps_maker": 95.14
+  },
+  "BCH/USD": {
+   "binance": "BCHUSDT",
+   "binance_first_month": "2019-11",
+   "alpaca_spread_bps": 60.48,
+   "round_trip_bps_taker": 110.48,
+   "round_trip_bps_maker": 90.48
+  },
+  "BONK/USD": {
+   "binance": "BONKUSDT",
+   "binance_first_month": "2023-12",
+   "alpaca_spread_bps": 72.99,
+   "round_trip_bps_taker": 122.99,
+   "round_trip_bps_maker": 102.99
+  },
+  "BTC/USD": {
+   "binance": "BTCUSDT",
+   "binance_first_month": "2017-08",
+   "alpaca_spread_bps": 1.71,
+   "round_trip_bps_taker": 51.71,
+   "round_trip_bps_maker": 31.71
+  },
+  "CRV/USD": {
+   "binance": "CRVUSDT",
+   "binance_first_month": "2020-08",
+   "alpaca_spread_bps": 18.12,
+   "round_trip_bps_taker": 68.12,
+   "round_trip_bps_maker": 48.12
+  },
+  "DOGE/USD": {
+   "binance": "DOGEUSDT",
+   "binance_first_month": "2019-07",
+   "alpaca_spread_bps": 30.49,
+   "round_trip_bps_taker": 80.49,
+   "round_trip_bps_maker": 60.49
+  },
+  "DOT/USD": {
+   "binance": "DOTUSDT",
+   "binance_first_month": "2020-08",
+   "alpaca_spread_bps": 21.24,
+   "round_trip_bps_taker": 71.24,
+   "round_trip_bps_maker": 51.24
+  },
+  "ETH/USD": {
+   "binance": "ETHUSDT",
+   "binance_first_month": "2017-08",
+   "alpaca_spread_bps": 2.8,
+   "round_trip_bps_taker": 52.8,
+   "round_trip_bps_maker": 32.8
+  },
+  "FIL/USD": {
+   "binance": "FILUSDT",
+   "binance_first_month": "2020-10",
+   "alpaca_spread_bps": 32.18,
+   "round_trip_bps_taker": 82.18,
+   "round_trip_bps_maker": 62.18
+  },
+  "GRT/USD": {
+   "binance": "GRTUSDT",
+   "binance_first_month": "2020-12",
+   "alpaca_spread_bps": 39.52,
+   "round_trip_bps_taker": 89.52,
+   "round_trip_bps_maker": 69.52
+  },
+  "LDO/USD": {
+   "binance": "LDOUSDT",
+   "binance_first_month": "2022-05",
+   "alpaca_spread_bps": 49.26,
+   "round_trip_bps_taker": 99.26,
+   "round_trip_bps_maker": 79.26
+  },
+  "LINK/USD": {
+   "binance": "LINKUSDT",
+   "binance_first_month": "2019-01",
+   "alpaca_spread_bps": 18.49,
+   "round_trip_bps_taker": 68.49,
+   "round_trip_bps_maker": 48.49
+  },
+  "LTC/USD": {
+   "binance": "LTCUSDT",
+   "binance_first_month": "2017-12",
+   "alpaca_spread_bps": 56.02,
+   "round_trip_bps_taker": 106.02,
+   "round_trip_bps_maker": 86.02
+  },
+  "ONDO/USD": {
+   "binance": "ONDOUSDT",
+   "binance_first_month": "2025-04",
+   "alpaca_spread_bps": 51.0,
+   "round_trip_bps_taker": 101.0,
+   "round_trip_bps_maker": 81.0
+  },
+  "PEPE/USD": {
+   "binance": "PEPEUSDT",
+   "binance_first_month": "2023-05",
+   "alpaca_spread_bps": 54.95,
+   "round_trip_bps_taker": 104.95,
+   "round_trip_bps_maker": 84.95
+  },
+  "POL/USD": {
+   "binance": "POLUSDT",
+   "binance_first_month": "2024-09",
+   "alpaca_spread_bps": 44.45,
+   "round_trip_bps_taker": 94.45,
+   "round_trip_bps_maker": 74.45
+  },
+  "RENDER/USD": {
+   "binance": "RENDERUSDT",
+   "binance_first_month": "2024-07",
+   "alpaca_spread_bps": 42.31,
+   "round_trip_bps_taker": 92.31,
+   "round_trip_bps_maker": 72.31
+  },
+  "SHIB/USD": {
+   "binance": "SHIBUSDT",
+   "binance_first_month": "2021-05",
+   "alpaca_spread_bps": 38.1,
+   "round_trip_bps_taker": 88.1,
+   "round_trip_bps_maker": 68.1
+  },
+  "SKY/USD": {
+   "binance": "SKYUSDT",
+   "binance_first_month": "2025-09",
+   "alpaca_spread_bps": 23.28,
+   "round_trip_bps_taker": 73.28,
+   "round_trip_bps_maker": 53.28
+  },
+  "SOL/USD": {
+   "binance": "SOLUSDT",
+   "binance_first_month": "2020-08",
+   "alpaca_spread_bps": 7.89,
+   "round_trip_bps_taker": 57.89,
+   "round_trip_bps_maker": 37.89
+  },
+  "SUSHI/USD": {
+   "binance": "SUSHIUSDT",
+   "binance_first_month": "2020-09",
+   "alpaca_spread_bps": 19.08,
+   "round_trip_bps_taker": 69.08,
+   "round_trip_bps_maker": 49.08
+  },
+  "TRUMP/USD": {
+   "binance": "TRUMPUSDT",
+   "binance_first_month": "2025-01",
+   "alpaca_spread_bps": 32.74,
+   "round_trip_bps_taker": 82.74,
+   "round_trip_bps_maker": 62.74
+  },
+  "UNI/USD": {
+   "binance": "UNIUSDT",
+   "binance_first_month": "2020-09",
+   "alpaca_spread_bps": 20.71,
+   "round_trip_bps_taker": 70.71,
+   "round_trip_bps_maker": 50.71
+  },
+  "WIF/USD": {
+   "binance": "WIFUSDT",
+   "binance_first_month": "2024-03",
+   "alpaca_spread_bps": 37.36,
+   "round_trip_bps_taker": 87.36,
+   "round_trip_bps_maker": 67.36
+  },
+  "XRP/USD": {
+   "binance": "XRPUSDT",
+   "binance_first_month": "2018-05",
+   "alpaca_spread_bps": 38.33,
+   "round_trip_bps_taker": 88.33,
+   "round_trip_bps_maker": 68.33
+  },
+  "XTZ/USD": {
+   "binance": "XTZUSDT",
+   "binance_first_month": "2019-09",
+   "alpaca_spread_bps": 63.11,
+   "round_trip_bps_taker": 113.11,
+   "round_trip_bps_maker": 93.11
+  },
+  "YFI/USD": {
+   "binance": "YFIUSDT",
+   "binance_first_month": "2020-08",
+   "alpaca_spread_bps": 21.91,
+   "round_trip_bps_taker": 71.91,
+   "round_trip_bps_maker": 51.91
+  }
+ }
+}

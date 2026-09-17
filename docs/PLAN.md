@@ -692,3 +692,14 @@ dashboard and cron keep running unchanged. Point the engine and machinery at a d
 Candidates are compared in `docs/scouting_next_market_2026-09.md`; **none has been chosen yet**.
 If one is, pilot it inside this repo first. Rename or re-scope the repo only if the pilot is worth
 continuing.
+
+## Crypto pilot (started 2026-09-17, user-approved)
+
+Research data comes from the Binance archive; any trading goes through Alpaca **paper** (keys in `.env`,
+read-only check passed). Rules: `docs/evaluation_criteria.md` § "Crypto pilot (C)". Survey:
+`docs/crypto_strategy_survey_2026-09.md`.
+- ☑ C0 — universe, costs, split and rules frozen (`docs/crypto/universe_2026-09-17.json`)
+- ☐ C1 — download Binance daily (and BTC/ETH hourly) klines → `logs/crypto/`
+- ☐ C2 — engine + tests, D run → `docs/crypto/dev_results.json`, finalists committed
+- ☐ C3 — H run (only if something passed D)
+- ☐ C4 — write-up; if anything replicates, propose an Alpaca paper runner

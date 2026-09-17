@@ -279,7 +279,60 @@ trading days for R3-ON/TREND/VOL and ISO weeks for R3-MOM/REV.
 live runner, which is intraday-only. A null is recorded as a finding, with no sweeps and no
 threshold changes.
 
+## Crypto pilot (C) — frozen 2026-09-17 (before any crypto price data was downloaded)
+
+Context: the US universe is parked (two nulls). The user chose crypto, with Binance's public
+archive for research and Alpaca **paper** for any trading. Candidates come from
+`docs/crypto_strategy_survey_2026-09.md` (literature, not this data).
+
+**Universe and costs:** `docs/crypto/universe_2026-09-17.json`. It lists the 31 coins that are
+tradable on Alpaca (checked 2026-09-17) and present in the Binance spot archive, minus
+stablecoins and PAXG. Research prices are the Binance `<COIN>USDT` daily klines.
+- **Round-trip cost** = 2 × 25 bps (Alpaca taker fee) + that coin's median Alpaca spread from the
+  2026-09-17 snapshot. That is 51.7 bps for BTC and up to 123 bps.
+- **Maker sensitivity** (2 × 15 bps + spread) is reported but decides nothing.
+- **Known biases, accepted:** survivorship (only coins alive and listed today); USDT ≈ USD; one
+  spread snapshot. Both main statistics are measured *relative to the same coins*, which limits
+  the damage.
+
+**Timing:** decisions use daily closes (00:00 UTC) and are held over the next day. The fill is the
+next day's open, which in a continuous 24/7 market is the next tick. Returns are close-to-close.
+The median |open(t+1)/close(t) − 1| is reported to confirm the gap is negligible. A coin is
+**eligible** once it has 90 days of Binance history. Signals may use any earlier data. Only days
+inside a window count.
+
+**Windows (chronological split):**
+- D = 2018-01-01 → 2022-12-31 (includes the 2018 and 2022 bear markets and the 2020–21 bull)
+- H = 2023-01-01 → 2026-08-31, **sealed** and run once, only for what passes D
+
+**Two strategies, fixed parameters, no sweeps:**
+
+| ID | Rule | Statistic |
+|---|---|---|
+| C1-TREND | Per coin, exposure = mean over L ∈ {10, 30, 90} days of 1[close_s / close_{s−L} > 1], held over day s+1 (values 0, ⅓, ⅔, 1). The ensemble is one test, not three. | Timing return per coin-day: (w_t − w̄)·r_t − \|Δw\|·cost/2, where w̄ is the coin's mean exposure in the window. Blocks are UTC days. |
+| C2-XMOM | Each ISO week's last day (Sunday close): hold the 5 eligible coins with the highest 28-day return, equal weight, long only. | Daily portfolio return minus an equal-weight portfolio of all eligible coins, both net of turnover cost. Blocks are ISO weeks. |
+
+**Selection:**
+- **Primary:** passes D at one-sided p < **0.025** (0.05 / 2) with a positive mean (10,000
+  resamples, fixed seed).
+- **Secondary:** C1 per coin (lanes with ≥ 365 D days); BH q = 0.10; at most 5 finalists, ranked
+  by CI lower bound.
+- **H:** a primary strategy is **replicated** at p < 0.025 with a positive mean. A finalist needs
+  p < 0.05/k, a positive mean, and at least 180 H days.
+
+**Diagnostic only (decides nothing):**
+- BTC and ETH mean gross return by UTC hour and by weekday, D window, from 1-hour klines.
+- Per-coin Sharpe and max drawdown for C1 vs buy-and-hold.
+- C2 vs equal-weight Sharpe and drawdown.
+- The maker-fee rerun.
+
+**What a result authorizes:** a written proposal for an Alpaca **paper** runner. Nothing live;
+there is no live account. A null is recorded as a finding.
+
 ## Amendment log
+
+- 2026-09-17 (crypto pilot): Added the section above before any crypto price data was downloaded.
+  The user approved the pilot ("ya go").
 
 - 2026-09-17 (Route 3): Added the daily-horizon section above, committed before any daily bar was
   built. The user approved the direction after the wide-scan null.
