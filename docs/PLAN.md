@@ -663,3 +663,19 @@ Also unresolved: the frozen cost table's ETF median (4.5 bps) looks pessimistic 
 It does not change this verdict (see the uniform 1.5 bps column), but any future work should
 revisit it before a new freeze.
 
+
+## Route 3 — daily-horizon scan (started 2026-09-17, user-approved)
+
+The null covered intraday trades on 5-minute bars. Route 3 tests longer holds on daily bars built
+from the 85 files already on disk (0 quota): overnight, 200-day trend, volatility scaling,
+cross-asset momentum, and weekly reversal. The rules are in `docs/evaluation_criteria.md`,
+"Route 3", frozen before any result.
+- ☑ R3a — rules committed
+- ☐ R3b — `mm/daily_scan.py` + tests
+- ☐ R3c — D run → `docs/route3/`, finalists committed
+- ☐ R3d — H run (only if anything passed D)
+- ☐ R3e — write-up (graveyard, plan)
+
+Live decision recorded 2026-09-17: vwap_pb and gap_fade **stay on** in paper. They cost
+nothing and still add data. The user had asked about turning them off; Claude recommended
+leaving them on, and nothing changed.

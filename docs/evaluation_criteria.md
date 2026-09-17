@@ -227,7 +227,62 @@ a sweep, or pick a "best" lane by eye. A replicated result authorizes only a Ste
 and a written proposal. It never authorizes a live change by itself: live changes still go
 through the knob freeze and the forward cohort.
 
+## Route 3 — daily-horizon scan, frozen 2026-09-17 (before any daily result was computed)
+
+The wide scan (above) answered no for intraday trades on 5-minute bars. Route 3 asks whether
+**holding longer** changes that, when costs are small compared with the moves. The user approved
+it on 2026-09-17. Every hypothesis comes from published literature (tag: DOCUMENTED elsewhere,
+untested here). None was chosen by looking at this project's data. Publication bias and decay
+are known risks, so they are not reasons to relax anything below.
+
+**Data.** Daily bars built from the Step 9 five-minute files (`logs/wide_scan/`, 85 symbols, QFQ
+basis from one pull per symbol), regular session only. The **signal price** is the close of the
+bar that ends 15 minutes before the session's last bar (15:45 on a normal day). The **fill** is the
+session close, as if placed as a market-on-close order before the 15:50 cutoff. No signal uses
+the close it fills at. Overnight trades fill at the next session's first-bar open. Costs are the
+frozen per-symbol round-trip table (`mm/costs.py`), charged per unit of exposure changed (half the
+round trip each way). Windows, and the one-time holdout rule, are those of 6b: D = 2022-01-03 →
+2026-08-31; H = 2019-01-02 → 2021-12-31. Warmup comes from inside the same window, so H's
+effective start is later for the long-lookback rules. H has not been used by any earlier test.
+Everyone knows how 2020 went, and that caveat stands.
+
+**Five strategies, one parameter set each, no sweeps.**
+
+| ID | Rule | Unit of observation |
+|---|---|---|
+| R3-ON | Long every session from close to the next open (overnight hold). | one symbol-night |
+| R3-TREND | Exposure 1 if the signal price > the SMA of the previous 200 closes, else 0. | one symbol-day |
+| R3-VOL | Exposure = min(1, m / v): v is the 20-day realized volatility of close-to-close returns up to the signal price, and m is the expanding median of v (at least 60 prior values). | one symbol-day |
+| R3-MOM | On each week's last session, hold the 10 symbols with the highest 126-day return (to the signal price), equal weight, until the next rebalance. | one day of the portfolio |
+| R3-REV | Same, but hold the 10 symbols with the **lowest** 5-day return. | one day of the portfolio |
+
+**Statistic (the "timing return").**
+- R3-ON: net bps per night.
+- R3-TREND and R3-VOL: per symbol-day, (w_t − w̄)·r_t minus cost. w_t is the exposure held over day t; w̄ is that symbol's mean exposure in the window; r_t is the close-to-close return. A positive mean means the timing beat a constant position of the same average size, which isolates timing skill from "stocks went up".
+- R3-MOM and R3-REV: daily portfolio return minus the daily return of an equal-weight portfolio of every available symbol on the same rebalance schedule, minus the turnover costs of both.
+
+p-values are one-sided, 1 − `prob_positive`, with 10,000 resamples at the fixed seed. Blocks are
+trading days for R3-ON/TREND/VOL and ISO weeks for R3-MOM/REV.
+
+**Selection.**
+- **Primary (5 tests):** a strategy passes D at **p < 0.01** (0.05 / 5) with a positive mean.
+- **Secondary:** R3-ON, R3-TREND and R3-VOL per symbol (255 lanes, at least 250 D observations).
+  Apply BH at q = 0.10, rank survivors by the CI lower bound, and cap at 10 finalists.
+- **H (run only after the D finalists file is committed):** a pooled strategy or finalist is
+  **replicated** if it has p < 0.01 (pooled) or p < 0.05 / k (finalists), a positive mean, and a
+  mean still positive with an extra 3.5 bps per round trip.
+
+**Reported but not deciding anything:** per-strategy Sharpe and max drawdown alongside buy-and-hold
+(or the equal-weight portfolio), average exposure, and the gross (zero-cost) mean.
+
+**What a result authorizes:** only a written proposal. None of these can run through the current
+live runner, which is intraday-only. A null is recorded as a finding, with no sweeps and no
+threshold changes.
+
 ## Amendment log
+
+- 2026-09-17 (Route 3): Added the daily-horizon section above, committed before any daily bar was
+  built. The user approved the direction after the wide-scan null.
 
 - 2026-09-17 (wide-scan Step 6 freeze): Added the section above. The user asked for Step 6 to be
   drafted and done (2026-09-17). The recommended values were adopted as written.
