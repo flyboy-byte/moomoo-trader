@@ -7,9 +7,10 @@ trade-count-weighted return was +1.31 bps across 106 trades, against this projec
 stated round-trip cost estimate of 1-3 bps. In other words the entire measured "edge"
 was inside its own cost of trading, and no report said so.
 
-This module is the single place that answer lives. Reporting, fast backtests, and replay all apply
-it now, so Goal B wide-scan results and live results stay comparable. See docs/research-reset.md
-and docs/PLAN.md Step 2.
+This module is the single runtime interface for that answer. Reporting, fast backtests, and replay
+all apply it now, so Goal B wide-scan results and live results stay comparable. The frozen
+wide-scan values are generated from the audited inputs in docs/wide_scan_cost_inputs.csv; see
+docs/wide_scan_methodology.md and docs/PLAN.md Steps 2-3.
 
 DELIBERATE DESIGN CHOICES
 -------------------------
@@ -18,9 +19,9 @@ DELIBERATE DESIGN CHOICES
    something that gets quietly tuned until results look good. Changing a number here is a
    visible edit to a file whose whole purpose is to be pessimistic.
 
-2. **One round-trip number per symbol, not a spread/slippage/commission decomposition.**
-   We cannot observe bid-ask from 5-min OHLC bars, so a decomposition would be false
-   precision. One honest, conservative aggregate is better than three invented components.
+2. **One round-trip hurdle per symbol, not a claim of observed execution cost.** Daily bars do
+   not reveal bid-ask or passive-fill adverse selection. The wide-scan table uses a frozen,
+   return-independent price/liquidity heuristic and retains its components in an audit CSV.
 
 3. **Sensitivity over point estimates.** The right cost is genuinely uncertain, so the
    reporting layer sweeps a range (see COST_SCENARIOS) rather than arguing for one value.
@@ -41,30 +42,22 @@ are negligible. They are not, for two reasons this model folds into one number:
   - Fills in the replay/backtest engines are resolved against the NEXT bar's OHLC, which
     is optimistic about intra-bar path.
 
-So the defaults below are not quoted spreads; they are all-in round-trip frictions in the
-range this project already documented for itself (1-3 bps for the liquid ETFs).
-
-Single names are NOT the same regime — a $50 stock with a 1c spread is ~2 bps of spread
-alone before any adverse selection. This is load-bearing for Goal B: a strategy scraping
-+1.3 bps on SPY may be structurally impossible on single stocks, and a per-symbol model is
-the only way to see that rather than discover it after spending API quota.
+The table below therefore contains modeled all-in hurdles rather than quoted spreads. Its
+price/liquidity formula applies identically to ETFs and stocks, so the asset-class comparison is
+not decided in advance. See docs/wide_scan_methodology.md for the formula and audit trail.
 """
 from __future__ import annotations
+
+from .wide_scan_cost_table import WIDE_SCAN_ROUND_TRIP_BPS
 
 # Round-trip cost in basis points of notional, per symbol.
 # Covers spread crossing + adverse selection on passive fills + slippage. Entry and exit
 # together — do NOT apply this twice per trade.
-SYMBOL_ROUND_TRIP_BPS: dict[str, float] = {
-    "US.SPY": 1.5,
-    "US.QQQ": 1.5,
-    "US.IWM": 2.5,   # lower price, wider relative spread than SPY/QQQ
-}
+SYMBOL_ROUND_TRIP_BPS: dict[str, float] = dict(WIDE_SCAN_ROUND_TRIP_BPS)
 
-# Anything not listed above. Deliberately pessimistic: an unknown symbol is assumed to be
-# a single name with a materially worse cost profile than the three index ETFs this
-# project was built on. Goal B should replace this with measured per-symbol values before
-# any wide-scan result is treated as evidence.
-DEFAULT_ROUND_TRIP_BPS: float = 5.0
+# Anything not listed above. Deliberately pessimistic: a missing table row gets the
+# frozen table's maximum cost rather than silently inheriting an SPY-like value.
+DEFAULT_ROUND_TRIP_BPS: float = 12.0
 
 # Per-trade commission in dollars (round trip). Moomoo's US equities tier is
 # commission-free, so this is 0.0 — but it is here as an explicit, visible zero rather

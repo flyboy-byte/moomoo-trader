@@ -151,6 +151,28 @@ confusion (amended 2026-06-18, see log).
   day-to-day swings are noise around an edge too small to see yet. Look whenever you want;
   just don't change a strategy's parameters off a sample smaller than its gate's threshold.
 
+## Wide-scan preregistration — frozen 2026-09-16
+
+The wide-scan universe and its cost inputs were frozen before any new symbol's five-minute history
+or strategy return was fetched. The authoritative list is `docs/wide_scan_universe.csv`: 60
+primary ETFs, 25 primary liquid large/mega-cap stocks, and 12 ordered reserves. Mechanical entry
+requirements are ≥225 daily sessions from 2025-09-17 through 2026-09-15, median adjusted close
+≥$5, and median daily dollar volume ≥$25 million. The screen may replace an unavailable/failing
+primary only with an ordered reserve before the bulk fetch; strategy performance is never a valid
+replacement reason. Survivorship bias is explicit.
+
+The primary net ruler uses the per-symbol round-trip table generated from the frozen inputs in
+`docs/wide_scan_cost_inputs.csv`. The formula and its limitations are in
+`docs/wide_scan_methodology.md`. SPY/QQQ/IWM remain 1.5/1.5/2.5 bps, so this extension does not
+change the active forward cohort's scoring. Unknown symbols receive the table's pessimistic maximum
+of 12 bps rather than the former flat 5-bps default.
+
+The asset-class comparison is preregistered as follows: report ETF and single-name gross bps,
+modeled cost bps, and residual net bps separately. A conclusion that single names are less suitable
+requires their gross-return deficit to exceed the cost differential assigned by the model. If the
+gross results are comparable and only the haircut creates the gap, label it a cost-model result.
+Use symbol medians and PLAN Step 4's day-blocked interval rather than pooled trade count alone.
+
 ## Amendment log
 
 - 2026-09-16 (gate ruler): **All PF gates now mean net PF under the frozen `mm/costs.py` model.**
@@ -160,6 +182,12 @@ confusion (amended 2026-06-18, see log).
   decision ruler because it represents the result after the project's explicit trading-cost
   assumption. Gross remains visible for diagnosis. This is a dated semantic amendment, not a
   threshold change, and it does not retroactively rewrite decisions already made.
+
+- 2026-09-16 (wide-scan cost extension): Expanded the cost table from three active symbols to the
+  frozen 97-slot universe without changing SPY/QQQ/IWM's 1.5/1.5/2.5-bps values. Inputs and the
+  formula were fixed before new-symbol strategy returns. The unknown-symbol fallback became 12 bps,
+  the maximum table value, so a missing table row fails pessimistically. This does not reset the
+  2026-09-17 forward cohort because every symbol in that cohort retains identical scoring.
 
 - 2026-09-16 (frozen forward cohort): The first clean forward cohort begins with the first market
   session after this declaration, **2026-09-17**, using runtime code `f1ed556` and the VPS settings

@@ -70,7 +70,10 @@ Do not describe the strategies as validated profitable systems yet.
 Update after the original handoff: the VPS logs were subsequently pulled and reviewed, Steps 0/0b
 were completed, net PF was adopted as the gate ruler, a forward cohort beginning 2026-09-17 was
 declared, and PLAN.md Step 2 wired costs into all fast engines and replay. See the top of
-`docs/strategy_graveyard.md` and the active plan for the current state.
+`docs/strategy_graveyard.md` and the active plan for the current state. A later 2026-09-16 pass
+also completed Step 3 and pulled Step 8 forward: the 97-symbol universe and return-independent
+per-symbol cost table are frozen without spending OpenD quota. The active plan now starts at Step 4
+(day-blocked uncertainty).
 
 ## Recommended forward path
 

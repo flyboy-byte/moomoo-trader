@@ -110,6 +110,27 @@ SPY archive changes from gross PF 1.133 to **net PF 0.944**, and combined Gap Fa
 gross PF 1.137 to **net PF 1.011**. These are measurements of the existing archives, not new
 strategy verdicts. Full suite: 341 passed.
 
+### Wide-scan universe and cost ruler — FROZEN 2026-09-16 (PLAN.md Steps 3/8)
+
+The 97-slot universe is now explicit: 60 ETFs, 25 liquid large/mega-cap single names, and 12
+ordered reserves. Selection and the cost table used only public adjusted daily close/volume from
+2025-09-17 through 2026-09-15; no new five-minute history, OpenD quota, or strategy return was
+read. All primary symbols passed ≥225 sessions, ≥$5 median price, and ≥$25m median daily dollar
+volume. Reserve DBC failed at roughly $20m/day and was replaced by PDBC, which passed, before the
+universe was frozen.
+
+**Rejected method:** a Corwin-Schultz daily high/low spread estimate produced roughly 17 bps for
+SPY, 23 bps for QQQ, and 33 bps for IWM on monthly-median estimates. Those values are not credible
+as literal spread costs for these liquid anchors, so the method was rejected before it could score
+anything. This is a methodology null, not a strategy result.
+
+**Adopted method:** a documented heuristic combines one-cent tick bps, an inverse median-dollar-
+volume penalty, and a common 1.25-bps execution/model-risk buffer, then rounds upward to 0.5 bps.
+It reproduces the existing SPY/QQQ/IWM 1.5/1.5/2.5-bps values and ranges from 1.5 to 12 bps across
+the frozen list. It is a conservative hurdle, not an observed spread. The audit inputs live in
+`docs/wide_scan_cost_inputs.csv`; the formula and falsifiable ETF-versus-stock comparison are in
+`docs/wide_scan_methodology.md`. Full suite: **345 passed**.
+
 ## Data Mining Results (Route 1 — scripts/mine_*.py)
 
 ### H1 — First-Bar Direction Predicts 10am-11am Returns — TESTED 2026-07-23, NULL

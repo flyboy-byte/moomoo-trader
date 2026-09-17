@@ -1,0 +1,98 @@
+slot,status,asset_class,segment,symbol,ticker,rationale
+1,primary,etf,broad_us,US.SPY,SPY,S&P 500 trading benchmark
+2,primary,etf,broad_us,US.QQQ,QQQ,Nasdaq-100 growth benchmark
+3,primary,etf,broad_us,US.IWM,IWM,Russell 2000 small-cap benchmark
+4,primary,etf,broad_us,US.DIA,DIA,Dow 30 large-cap benchmark
+5,primary,etf,broad_us,US.VTI,VTI,Total US equity market
+6,primary,etf,broad_us,US.IVV,IVV,S&P 500 issuer replication
+7,primary,etf,broad_us,US.VOO,VOO,S&P 500 issuer replication
+8,primary,etf,broad_us,US.RSP,RSP,Equal-weight S&P 500
+9,primary,etf,broad_us,US.MDY,MDY,S&P mid-cap exposure
+10,primary,etf,broad_us,US.IJH,IJH,Core mid-cap exposure
+11,primary,etf,broad_us,US.IJR,IJR,Core small-cap exposure
+12,primary,etf,broad_global,US.VT,VT,Global all-cap equity
+13,primary,etf,sector,US.XLK,XLK,US technology sector
+14,primary,etf,sector,US.XLF,XLF,US financial sector
+15,primary,etf,sector,US.XLE,XLE,US energy sector
+16,primary,etf,sector,US.XLV,XLV,US health-care sector
+17,primary,etf,sector,US.XLI,XLI,US industrial sector
+18,primary,etf,sector,US.XLY,XLY,US consumer discretionary sector
+19,primary,etf,sector,US.XLP,XLP,US consumer staples sector
+20,primary,etf,sector,US.XLU,XLU,US utilities sector
+21,primary,etf,sector,US.XLB,XLB,US materials sector
+22,primary,etf,sector,US.XLRE,XLRE,US real-estate sector
+23,primary,etf,sector,US.XLC,XLC,US communication-services sector
+24,primary,etf,industry,US.SMH,SMH,Semiconductor industry
+25,primary,etf,industry,US.SOXX,SOXX,Semiconductor issuer replication
+26,primary,etf,industry,US.XBI,XBI,Biotechnology industry
+27,primary,etf,industry,US.KRE,KRE,Regional banks
+28,primary,etf,industry,US.XRT,XRT,Retail industry
+29,primary,etf,industry,US.ITB,ITB,Home construction
+30,primary,etf,industry,US.IYT,IYT,Transportation industry
+31,primary,etf,industry,US.XHB,XHB,Homebuilders and related industries
+32,primary,etf,industry,US.IGV,IGV,Software industry
+33,primary,etf,style_factor,US.IWF,IWF,Russell 1000 growth
+34,primary,etf,style_factor,US.IWD,IWD,Russell 1000 value
+35,primary,etf,style_factor,US.IWO,IWO,Russell 2000 growth
+36,primary,etf,style_factor,US.IWN,IWN,Russell 2000 value
+37,primary,etf,style_factor,US.VUG,VUG,Large-cap growth
+38,primary,etf,style_factor,US.VTV,VTV,Large-cap value
+39,primary,etf,style_factor,US.MTUM,MTUM,Momentum factor
+40,primary,etf,style_factor,US.QUAL,QUAL,Quality factor
+41,primary,etf,style_factor,US.USMV,USMV,Minimum-volatility factor
+42,primary,etf,style_factor,US.SCHD,SCHD,Dividend quality factor
+43,primary,etf,international,US.EFA,EFA,Developed markets ex-US
+44,primary,etf,international,US.EEM,EEM,Emerging markets
+45,primary,etf,international,US.VEA,VEA,Developed markets broad
+46,primary,etf,international,US.VWO,VWO,Emerging markets broad
+47,primary,etf,international,US.IEFA,IEFA,Core developed markets
+48,primary,etf,international,US.IEMG,IEMG,Core emerging markets
+49,primary,etf,international,US.EWJ,EWJ,Japan equity
+50,primary,etf,fixed_income,US.TLT,TLT,Long Treasury duration
+51,primary,etf,fixed_income,US.IEF,IEF,Intermediate Treasury duration
+52,primary,etf,fixed_income,US.SHY,SHY,Short Treasury duration
+53,primary,etf,fixed_income,US.HYG,HYG,High-yield corporate credit
+54,primary,etf,fixed_income,US.LQD,LQD,Investment-grade corporate credit
+55,primary,etf,fixed_income,US.BND,BND,Total US bond market
+56,primary,etf,fixed_income,US.AGG,AGG,Core US aggregate bonds
+57,primary,etf,real_asset,US.GLD,GLD,Gold
+58,primary,etf,real_asset,US.SLV,SLV,Silver
+59,primary,etf,real_asset,US.USO,USO,Crude-oil futures exposure
+60,primary,etf,real_asset,US.VNQ,VNQ,US real-estate equities
+61,primary,stock,technology,US.AAPL,AAPL,Highly liquid large-cap technology
+62,primary,stock,technology,US.MSFT,MSFT,Highly liquid large-cap technology
+63,primary,stock,technology,US.NVDA,NVDA,Highly liquid large-cap semiconductors
+64,primary,stock,consumer,US.AMZN,AMZN,Highly liquid large-cap consumer and cloud
+65,primary,stock,communication,US.GOOGL,GOOGL,Highly liquid large-cap communication services
+66,primary,stock,communication,US.META,META,Highly liquid large-cap communication services
+67,primary,stock,technology,US.AVGO,AVGO,Large-cap semiconductors
+68,primary,stock,consumer,US.TSLA,TSLA,Highly liquid large-cap autos
+69,primary,stock,consumer_staples,US.WMT,WMT,Large-cap consumer staples
+70,primary,stock,health_care,US.LLY,LLY,Large-cap pharmaceuticals
+71,primary,stock,financials,US.JPM,JPM,Large-cap bank
+72,primary,stock,financials,US.V,V,Large-cap payments
+73,primary,stock,financials,US.MA,MA,Large-cap payments
+74,primary,stock,energy,US.XOM,XOM,Large-cap integrated energy
+75,primary,stock,consumer,US.COST,COST,Large-cap retail
+76,primary,stock,communication,US.NFLX,NFLX,Large-cap streaming media
+77,primary,stock,technology,US.ORCL,ORCL,Large-cap enterprise software
+78,primary,stock,health_care,US.JNJ,JNJ,Large-cap diversified health care
+79,primary,stock,consumer,US.HD,HD,Large-cap home improvement retail
+80,primary,stock,consumer_staples,US.PG,PG,Large-cap consumer staples
+81,primary,stock,health_care,US.ABBV,ABBV,Large-cap pharmaceuticals
+82,primary,stock,financials,US.BAC,BAC,Highly liquid large-cap bank
+83,primary,stock,consumer_staples,US.KO,KO,Large-cap beverages
+84,primary,stock,technology,US.CRM,CRM,Large-cap enterprise software
+85,primary,stock,technology,US.AMD,AMD,Highly liquid large-cap semiconductors
+86,reserve,etf,broad_global,US.ACWI,ACWI,Reserve global equity
+87,reserve,etf,broad_global,US.VXUS,VXUS,Reserve international equity
+88,reserve,etf,real_asset,US.PDBC,PDBC,Reserve broad commodities
+89,reserve,etf,currency,US.UUP,UUP,Reserve US-dollar exposure
+90,reserve,etf,industry,US.GDX,GDX,Reserve gold miners
+91,reserve,etf,industry,US.XOP,XOP,Reserve oil and gas exploration
+92,reserve,etf,international,US.FXI,FXI,Reserve China large-cap equity
+93,reserve,etf,international,US.EWZ,EWZ,Reserve Brazil equity
+94,reserve,stock,health_care,US.UNH,UNH,Reserve large-cap managed care
+95,reserve,stock,energy,US.CVX,CVX,Reserve large-cap integrated energy
+96,reserve,stock,technology,US.CSCO,CSCO,Reserve large-cap networking
+97,reserve,stock,technology,US.IBM,IBM,Reserve large-cap enterprise technology

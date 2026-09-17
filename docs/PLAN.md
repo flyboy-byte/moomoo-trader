@@ -13,7 +13,9 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 3.** Steps 0–2 (including 0b/1b) are done (2026-09-16/17).
+> **Right now: Step 4.** Steps 0–3 (including 0b/1b) are done (2026-09-16/17). Former
+> Step 8's universe preregistration was pulled into Step 3 because a per-symbol cost table cannot
+> be built before its symbols are fixed; the bulk OpenD fetch remains Step 9 and has not begun.
 
 ## The one number that matters
 
@@ -175,7 +177,7 @@ Full suite: **341 passed**.
 
 ---
 
-### Step 3 — Make the cost model credible for symbols it has never seen ☐
+### ~~Step 3 — Make the cost model credible for symbols it has never seen~~ ✅ DONE 2026-09-16
 **A design hole found while re-reading the plan, not previously listed.**
 
 `mm/costs.py` has measured-ish values for three symbols and a flat `DEFAULT_ROUND_TRIP_BPS = 5.0`
@@ -193,12 +195,28 @@ Restate the falsification test so it can actually fail — e.g. "single names un
 by more than the cost differential the model assigns them," which is a claim about the residual,
 not about the haircut.
 
-**Done when:** `mm/costs.py` carries a per-symbol table covering the frozen universe, with the
-estimator and its inputs documented in the module docstring, and the pre-registered expectation
-in `docs/evaluation_criteria.md` is stated in a form that could come out either way.
+**Done when:** the `mm/costs.py` runtime interface covers a per-symbol table for the frozen
+universe, with the estimator and its inputs documented, and the pre-registered expectation in
+`docs/evaluation_criteria.md` is stated in a form that could come out either way.
 
 **Blocks:** B0's universe decision is safe to keep, but the mega-cap slot allocation is only worth
 25 quota slots if this step makes the test real.
+
+**Result:** the ordering dependency was resolved by completing former Step 8's preregistration as
+part of this step. `docs/wide_scan_universe.csv` freezes 60 primary ETFs, 25 primary liquid
+large/mega-cap stocks, and 12 ordered reserves. All 97 have 250 public daily observations and pass
+the predeclared ≥$5 price / ≥$25m median-dollar-volume screen; DBC failed as a reserve and was
+replaced by PDBC before any five-minute history or strategy result was inspected.
+
+`docs/wide_scan_methodology.md` freezes a return-independent heuristic based on minimum-tick bps,
+median dollar volume, and a common execution/model-risk buffer. Its full inputs and components are
+in `docs/wide_scan_cost_inputs.csv`; `mm/wide_scan_cost_table.py` carries the generated runtime
+table. The original SPY/QQQ/IWM values remain exactly 1.5/1.5/2.5 bps. An attempted
+Corwin-Schultz daily high/low estimator was rejected before adoption because it implied implausible
+17–33 bps monthly-median spreads for those liquid anchors. The ETF-versus-stock claim is now about
+the residual gross-return difference after displaying the modeled cost differential separately,
+so the test can come out either way. No OpenD quota was used and no strategy return was read. Full
+suite: **345 passed**.
 
 ---
 
@@ -282,7 +300,7 @@ already does for corruption.
 
 ---
 
-### Step 8 — Pre-register the universe ☐
+### ~~Step 8 — Pre-register the universe~~ ✅ DONE 2026-09-16 (absorbed into Step 3)
 *(was B0 — decided, not yet written down as a list)* 60 liquid ETFs / 25 mega-caps / 12 held in
 reserve. Selection criteria (liquidity, median spread, price range, sector coverage) fixed before
 any return is looked at. Survivorship bias stated explicitly in the writeup: picking names liquid
@@ -293,6 +311,10 @@ occupies its slot for 30 days. Getting the list wrong costs a month.
 
 **Done when:** the explicit symbol list is committed to this repo, with the criteria that produced
 it, and reviewed by the user before Step 9 spends anything.
+
+**Result:** completed early because Step 3 required the list. See
+`docs/wide_scan_universe.csv` and `docs/wide_scan_methodology.md`. This commits the list for review;
+it does not authorize or begin Step 9's quota-consuming fetch.
 
 ---
 

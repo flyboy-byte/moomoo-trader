@@ -20,7 +20,7 @@ def test_unknown_symbol_is_charged_the_pessimistic_default():
     """Load-bearing for Goal B: an unlisted single name must NOT silently inherit
     SPY-like costs, or the wide scan will look profitable for the wrong reason."""
     assert costs.round_trip_bps("US.SOMETHING_NEW") == costs.DEFAULT_ROUND_TRIP_BPS
-    assert costs.DEFAULT_ROUND_TRIP_BPS > max(costs.SYMBOL_ROUND_TRIP_BPS.values())
+    assert costs.DEFAULT_ROUND_TRIP_BPS >= max(costs.SYMBOL_ROUND_TRIP_BPS.values())
 
 
 def test_cost_is_charged_on_notional():
