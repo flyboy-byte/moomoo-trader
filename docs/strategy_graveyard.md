@@ -1520,3 +1520,64 @@ unspent** (`daily_scan.py holdout` declined, as designed).
 4.7 years, both null. Long holds on this universe beat trading only by being buy-and-hold. The
 honest benchmark remains a passive position. Re-open only with a genuinely different information
 source, not a new rule on the same price bars.
+
+---
+
+## Crypto Pilot — 2026-09-17: dev looked promising, holdout: NULL
+
+**Question.** After parking the US equity universe (two nulls above), does the same
+preregistration discipline find anything in crypto? Rules frozen in
+`docs/evaluation_criteria.md` § "Crypto pilot (C)" before any price data was downloaded.
+Research data: Binance's public spot archive, 31 large-cap coins (tradable on Alpaca paper
+∩ present in the archive, minus stablecoins/PAXG). Costs: Alpaca's 25 bps taker fee ×2 legs
+plus each coin's measured spread (51.7–123 bps round trip). Code: `mm/crypto.py`,
+`scripts/crypto_scan.py`. Results: `docs/crypto/`.
+
+**Development window 2018-01-01 → 2022-12-31, pass = p < 0.025 with a positive mean.**
+
+| Strategy | Obs | Gross bps | Net bps | 95% CI | p | Verdict |
+|---|---|---|---|---|---|---|
+| C1-TREND (10/30/90-day trend ensemble, 22 coins eligible) | 22,744 coin-days | +10.17 | +6.73 | [−1.46, +14.86] | **0.051** | fails (just above the 0.025 bar) |
+| C2-XMOM (top-5 weekly momentum, long-only) vs equal-weight | 1,035 days | −0.54 | −4.13 | [−17.94, +9.11] | 0.72 | fails |
+
+**Secondary (per-coin lanes, 22 eligible, BH q=0.10): 3 survivors — AVAX (p 0.0008, +36.6
+bps), SOL (p 0.0032, +28.8 bps), ADA (p 0.0062, +13.9 bps). All 3 became finalists.**
+
+**Holdout 2023-01-01 → 2026-08-31 (sealed, run once, after `finalists.json` was committed):**
+
+| Lane | Dev net bps | Holdout net bps | Holdout p | Verdict |
+|---|---|---|---|---|
+| AVAX/USD | +36.6 | +3.8 | 0.23 | **not replicated** |
+| SOL/USD | +28.8 | +0.9 | 0.43 | **not replicated** |
+| ADA/USD | +13.9 | −4.3 | 0.82 | **not replicated** |
+
+Pooled C1-TREND on holdout: net −2.06 bps, p 0.75 (dev was +6.73, p 0.051) — also fails.
+Pooled C2-XMOM on holdout: net −6.60 bps, p 0.94 — also fails.
+
+**Reading.** This is the multiple-testing correction doing exactly what it's for: 3 of 22
+lanes cleared the FDR bar in development, and the sealed holdout — never touched until the
+finalists were committed — shows they were noise, not signal. The pooled primary test came
+close (p 0.051 against a 0.025 bar) but by the preregistered rule that's a fail, and the
+holdout result (negative) confirms it wasn't worth relaxing the threshold for.
+
+**Also recorded (diagnostic, decided nothing):**
+- Costs dominate: gross C1-TREND was +10.2 bps in dev, cut to +6.7 net — about a third of
+  the edge eaten by Alpaca's fee-plus-spread structure, as expected going in.
+- A maker-fee sensitivity run (15 bps vs 25 bps taker) moved C1-TREND net from +6.7 to
+  +7.6 bps — directionally as expected, not enough to change any verdict.
+- BTC hourly seasonality (2018–2022, gross): mean return by UTC hour ranges from −4.5 bps
+  (03:00) to +5.0 bps (21:00); by weekday, Wednesday −32.2 bps vs Thursday +30.6 bps. These
+  are descriptive only — no strategy was built or tested on them, and un-corrected
+  day-of-week splits on 5 years of data are exactly the kind of thing that looks meaningful
+  and isn't.
+- A data bug was found and fixed during this run: Binance kline timestamps came back with
+  an inconsistent fractional-second format (some rows `HH:MM:SS.000`, others `HH:MM:SS`),
+  which made pandas fail to parse the hourly files. Fixed in the reader (accepts mixed
+  formats) and the writer (always floors to whole seconds); all 34 on-disk files were
+  renormalized. Caught before it silently mis-parsed a date range.
+
+**What this closes.** Same conclusion as the equity work, now confirmed in a second, unrelated
+market with a completely different research pipeline: nothing found here survives its own
+preregistered holdout. Nothing about this rules out crypto broadly — 2 strategies and a 5-year
+window is a small slice — but it's more evidence that a rules-first process built to say "no"
+does, in fact, keep saying no rather than finding whatever it's pointed at.
