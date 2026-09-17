@@ -33,7 +33,7 @@ import pandas as pd
 from .indicators import add_all
 from .logger import get_logger
 from .premarket import premarket_fill_pct as _premarket_fill_pct
-from .backtest import profit_factor as _profit_factor  # canonical PF, never redefine
+from .backtest import summarize_trades
 
 log = get_logger("gap_fade")
 
@@ -280,8 +280,7 @@ def print_gap_fade_summary(
     shorts = [t for t in trades if t.direction == "short"]
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
-    total_pnl = sum(t.pnl for t in trades)
-    pf = _profit_factor(trades)   # canonical (mm/backtest.py), was inline
+    metrics = summarize_trades(trades, symbol)
 
     from collections import Counter
     reasons = Counter(t.exit_reason for t in trades)
@@ -291,12 +290,16 @@ def print_gap_fade_summary(
     ) / len(trades)
 
     freq = f"  ({len(trades)/days:.2f}/day)" if days else ""
-    pf_str = f"{pf:.3f}" if pf != float("inf") else "∞"
+    gross_pf = f"{metrics['gross_pf']:.3f}" if metrics["gross_pf"] != float("inf") else "∞"
+    net_pf = f"{metrics['net_pf']:.3f}" if metrics["net_pf"] != float("inf") else "∞"
     print(f"Gap Fade {symbol}")
     print(f"  Trades:        {len(trades)}{freq}  [{len(longs)} long / {len(shorts)} short]")
     print(f"  Win rate:      {100*len(wins)/len(trades):.1f}%  ({len(wins)}W / {len(losses)}L)")
-    print(f"  Total PnL:     ${total_pnl:+.2f}")
-    print(f"  Profit factor: {pf_str}")
+    print(f"  Gross PnL:     ${metrics['gross_pnl']:+.2f}")
+    print(f"  Net PnL:       ${metrics['net_pnl']:+.2f}")
+    print(f"  Gross PF:      {gross_pf}")
+    print(f"  Net PF:        {net_pf}")
+    print(f"  Avg bps/trade: {metrics['avg_bps']:+.1f} gross / {metrics['avg_bps_net']:+.1f} net")
     print(f"  Avg hold:      {avg_hold:.0f} min")
     print(f"  Avg gap size:  {avg_gap:.2f}%")
     print(f"  Exits:         {dict(reasons)}")

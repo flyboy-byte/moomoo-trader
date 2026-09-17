@@ -32,6 +32,8 @@ import mm.paper as paper
 import mm.risk as risk
 
 from .logger import get_logger
+from .backtest import profit_factor
+from .trades import pair_trades
 
 log = get_logger("replay")
 
@@ -320,22 +322,46 @@ def summarize(out_dir: Path, positions: dict, fill_mode: str) -> dict:
     mismatches = [e for e in events if e.get("event") == "error"
                   and "reconcile_mismatch" in str(e.get("message", ""))]
 
+    paired = [t for t in pair_trades(events) if t["closed"]]
+
     per_strat: dict[str, dict] = {}
-    for c in closes:
-        s = per_strat.setdefault(c.get("strategy", "?"), {
-            "trades": 0, "wins": 0, "pnl": 0.0, "gross_win": 0.0, "gross_loss": 0.0,
+    for t in paired:
+        s = per_strat.setdefault(t.get("strategy", "?"), {
+            "trades": 0, "wins": 0, "pnl": 0.0,
+            "gross_pnl": 0.0, "net_pnl": 0.0,
+            "gross_pf": float("inf"), "net_pf": float("inf"),
+            "avg_bps": None, "avg_bps_net": None,
+            "gross_pnls": [], "net_pnls": [], "bps": [], "bps_net": [],
             "exit_reasons": {},
         })
-        pnl = float(c.get("pnl", 0))
+        pnl = float(t["pnl"])
+        net = float(t["pnl_net"])
         s["trades"] += 1
-        s["pnl"] += pnl
-        if pnl > 0:
-            s["wins"] += 1
-            s["gross_win"] += pnl
-        else:
-            s["gross_loss"] += -pnl
+        s["wins"] += int(pnl > 0)
+        s["pnl"] += pnl  # compatibility alias for pre-cost replay callers
+        s["gross_pnl"] += pnl
+        s["net_pnl"] += net
+        s["gross_pnls"].append(pnl)
+        s["net_pnls"].append(net)
+        if t.get("bps") is not None:
+            s["bps"].append(float(t["bps"]))
+        if t.get("bps_net") is not None:
+            s["bps_net"].append(float(t["bps_net"]))
+
+    for c in closes:
+        s = per_strat.get(c.get("strategy", "?"))
+        if s is None:
+            continue
         r = c.get("reason", "?")
         s["exit_reasons"][r] = s["exit_reasons"].get(r, 0) + 1
+
+    for s in per_strat.values():
+        s["gross_pf"] = profit_factor(s.pop("gross_pnls"))
+        s["net_pf"] = profit_factor(s.pop("net_pnls"))
+        bps = s.pop("bps")
+        bps_net = s.pop("bps_net")
+        s["avg_bps"] = sum(bps) / len(bps) if bps else None
+        s["avg_bps_net"] = sum(bps_net) / len(bps_net) if bps_net else None
 
     still_open = [(k, v) for k, v in positions.items() if v is not None]
     slips = [e["slippage_bps"] for e in opens + closes
@@ -352,7 +378,10 @@ def summarize(out_dir: Path, positions: dict, fill_mode: str) -> dict:
         "reconcile_mismatches": len(mismatches),
         "avg_slippage_bps": round(sum(slips) / len(slips), 2) if slips else 0.0,
         "per_strategy": per_strat,
-        "total_pnl": round(sum(s["pnl"] for s in per_strat.values()), 4),
+        "total_pnl": round(sum(s["gross_pnl"] for s in per_strat.values()), 4),
+        "total_net_pnl": round(sum(s["net_pnl"] for s in per_strat.values()), 4),
+        "gross_pf": profit_factor([t["pnl"] for t in paired]),
+        "net_pf": profit_factor([t["pnl_net"] for t in paired]),
     }
 
 
@@ -361,12 +390,14 @@ def print_summary(s: dict) -> None:
     print(f"  opens={s['opens']}  closes={s['closes']}  "
           f"entry_unfilled={s['entry_unfilled']}  exit_unfilled={s['exit_unfilled']}  "
           f"reconcile_mismatches={s['reconcile_mismatches']}")
-    print(f"  avg slippage: {s['avg_slippage_bps']:+.2f} bps   total PnL: {s['total_pnl']:+.4f}")
+    print(f"  avg slippage: {s['avg_slippage_bps']:+.2f} bps")
+    print(f"  gross PnL/PF: {s['total_pnl']:+.4f} / {s['gross_pf']:.3f}   "
+          f"net PnL/PF: {s['total_net_pnl']:+.4f} / {s['net_pf']:.3f}")
     for strat, d in sorted(s["per_strategy"].items()):
-        pf = (d["gross_win"] / d["gross_loss"]) if d["gross_loss"] > 0 else float("inf")
         win = d["wins"] / d["trades"] * 100 if d["trades"] else 0.0
         print(f"  {strat:8s} trades={d['trades']:<4d} win={win:5.1f}%  "
-              f"pnl={d['pnl']:+9.4f}  PF={pf:5.3f}  exits={d['exit_reasons']}")
+              f"gross={d['gross_pnl']:+9.4f}/{d['gross_pf']:5.3f}  "
+              f"net={d['net_pnl']:+9.4f}/{d['net_pf']:5.3f}  exits={d['exit_reasons']}")
     if s["still_open"]:
         print(f"  still open at end: {', '.join(s['still_open'])}")
     print(f"  events: {s['out_dir']}/")

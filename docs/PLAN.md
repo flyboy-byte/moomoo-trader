@@ -13,7 +13,7 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 1** (needs your call). Steps 0 and 0b are done (2026-09-17).
+> **Right now: Step 3.** Steps 0–2 (including 0b/1b) are done (2026-09-16/17).
 
 ## The one number that matters
 
@@ -52,7 +52,7 @@ established the way the Goal A numbers are.
 **Verify current state in one command each:**
 ```bash
 git log --oneline -1
-python -m pytest tests/ -q                 # expect 333 passed (~3m)
+python -m pytest tests/ -q                 # expect 341 passed (~4m)
 python scripts/analyze_trades.py --all     # sections 1, 1b, 1c show net-of-cost
 ```
 
@@ -104,7 +104,7 @@ Actions: review ORB, and evaluate the symbol gate once Step 1 is decided.
 
 ---
 
-### Step 1 — Decide: do the pre-registered gates mean gross or net? ☐
+### ~~Step 1 — Decide: do the pre-registered gates mean gross or net?~~ ✅ DONE 2026-09-16 — net PF
 **Doc-only. Needs a human call — do not assume one.** *(was loose end §2)*
 
 Every gate in `docs/evaluation_criteria.md` says "PF < 1.0 at N trades" without saying which PF.
@@ -120,7 +120,11 @@ uses, and the per-strategy gate sections say so inline.
 
 **Blocks:** any gate evaluation. ORB and gap_fade are both near their gates.
 
-### Step 1b — Declare a frozen forward cohort ☐
+**Decision:** every PF threshold means net PF under the frozen `mm/costs.py` model. Gross remains
+visible for diagnosis. The dated amendment and inline gate wording are in
+`docs/evaluation_criteria.md`.
+
+### ~~Step 1b — Declare a frozen forward cohort~~ ✅ DONE 2026-09-16 — starts 2026-09-17
 **Added 2026-09-16 (Codex review). Needs a human call.** All history — live and backtest — has
 been looked at repeatedly while tuning, so none of it is a clean test (see Step 6b). The only
 clean test left is data that does not exist yet: fix one configuration and a start date, and
@@ -133,24 +137,28 @@ reading the result. After that, any live knob change ends the cohort and must be
 
 **Depends on:** Step 0b (know what is actually deployed) and Step 1 (which ruler it is read with).
 
+**Decision:** the first forward-only cohort starts with the 2026-09-17 market session on runtime
+code `f1ed556` and the verified configuration recorded in `docs/ARCHITECTURE.md`. The full question,
+reading rule, frozen settings, and reset conditions are in `docs/evaluation_criteria.md`.
+
 ---
 
-### Step 2 — Wire `mm/costs.py` into the engines ☐
+### ~~Step 2 — Wire `mm/costs.py` into the engines~~ ✅ DONE 2026-09-16
 *(was B2a's remaining half, loose end §1)* The reporters go through `mm/trades.py` and agree.
 The engines the wide scan actually runs through are still frictionless, so **B3 cannot produce a
 cost-aware result until this is done.** Four small chunks, each independently testable:
 
-- **2a ☐ `mm/backtest.py`** — the BB+KDJ engine and `print_summary()`. Every summary dict grows
+- **2a ✅ `mm/backtest.py`** — the BB+KDJ engine and `print_summary()`. Every summary dict grows
   `net_pnl` / `net_pf` / `avg_bps_net` alongside the gross fields; gross is kept, never replaced.
   *Done when:* a test asserts net < gross on a winning synthetic run and that both appear in
   `print_summary()` output.
-- **2b ☐ the four strategy engines** — `mm/orb_strategy.py`, `mm/vwap_pullback.py`,
+- **2b ✅ the four strategy engines** — `mm/orb_strategy.py`, `mm/vwap_pullback.py`,
   `mm/gap_fade.py`, `mm/ema_momentum.py`. Same shape as 2a. These already call the canonical
   `profit_factor`; costs go in at the same place.
   *Done when:* one parametrized test covers all four.
-- **2c ☐ `mm/replay.py::summarize()`** (line ~305) — the real-code-path engine. Same fields.
+- **2c ✅ `mm/replay.py::summarize()`** (line ~305) — the real-code-path engine. Same fields.
   *Done when:* `scripts/replay_paper.py --latest` prints both rulers.
-- **2d ☐ the guard** — a single test that walks every engine's summary output and fails if any
+- **2d ✅ the guard** — a single test that walks every engine's summary output and fails if any
   one of them reports a PnL or PF without its net counterpart. This is the same shape of guard as
   `test_only_mm_backtest_defines_profit_factor`, and for the same reason: the failure mode here is
   a *new* engine being added later that quietly reports gross.
@@ -158,6 +166,12 @@ cost-aware result until this is done.** Four small chunks, each independently te
 **Note on ordering:** this now comes before engine cross-validation (old B2), which the previous
 plan had backwards. Comparing two engines under the frictionless ruler and then changing the
 ruler means re-doing the comparison.
+
+**Result:** `mm/backtest.py::summarize_trades()` is the shared fast-engine ruler; BB+KDJ, ORB,
+VWAP Pullback, Gap Fade, EMA Momentum, and the deprecated VWAP engine print gross and net PnL/PF
+plus gross/net bps. Replay pairs its own JSONL events through `mm/trades.py` and reports the same
+fields. `tests/test_engine_cost_reporting.py` covers all engines and includes the repo-wide guard.
+Full suite: **341 passed**.
 
 ---
 

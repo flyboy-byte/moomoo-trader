@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import config as _config
+from . import costs
 from .strategy import run_signals, Signal, Trade
 from .logger import get_logger
 
@@ -78,27 +79,73 @@ def profit_factor(trades) -> float:
     return gross_win / gross_loss if gross_loss > 0 else float("inf")
 
 
-def print_summary(trades: list[Trade]) -> None:
+def summarize_trades(trades, symbol: str = "", qty: float = 1.0) -> dict:
+    """Return the common gross/net ruler for a backtest engine's trades.
+
+    Fast engines model one share per trade. Callers combining symbols may attach a
+    ``symbol`` attribute to each trade; otherwise the explicit symbol is used.
+    """
+    gross = [float(t.pnl) for t in trades]
+    net = [
+        costs.net_pnl(
+            float(t.pnl),
+            getattr(t, "symbol", symbol),
+            float(t.entry_price),
+            float(getattr(t, "qty", qty)),
+        )
+        for t in trades
+    ]
+    gross_bps = [
+        float(t.pnl) / (float(t.entry_price) * float(getattr(t, "qty", qty))) * 10_000
+        for t in trades
+        if float(t.entry_price) > 0 and float(getattr(t, "qty", qty)) > 0
+    ]
+    net_bps = [
+        costs.net_bps(
+            float(t.pnl),
+            getattr(t, "symbol", symbol),
+            float(t.entry_price),
+            float(getattr(t, "qty", qty)),
+        )
+        for t in trades
+    ]
+    net_bps = [v for v in net_bps if v is not None]
+    return {
+        "trades": len(trades),
+        "gross_pnl": sum(gross),
+        "net_pnl": sum(net),
+        "gross_pf": profit_factor(gross),
+        "net_pf": profit_factor(net),
+        "avg_bps": sum(gross_bps) / len(gross_bps) if gross_bps else None,
+        "avg_bps_net": sum(net_bps) / len(net_bps) if net_bps else None,
+    }
+
+
+def print_summary(trades: list[Trade], symbol: str = "") -> None:
     if not trades:
         log.info("No completed trades.")
         return
 
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
-    total_pnl = sum(t.pnl for t in trades)
+    metrics = summarize_trades(trades, symbol)
+    total_pnl = metrics["gross_pnl"]
     avg_pnl = total_pnl / len(trades)
     win_rate = len(wins) / len(trades) * 100
 
     log.info("--- Backtest Summary ---")
     log.info("Total trades:  %d", len(trades))
     log.info("Win rate:      %.1f%%  (%d W / %d L)", win_rate, len(wins), len(losses))
-    log.info("Total PnL:     %.4f", total_pnl)
-    log.info("Avg PnL/trade: %.4f", avg_pnl)
+    log.info("Gross PnL:     %.4f", metrics["gross_pnl"])
+    log.info("Net PnL:       %.4f", metrics["net_pnl"])
+    log.info("Gross PF:      %.3f", metrics["gross_pf"])
+    log.info("Net PF:        %.3f", metrics["net_pf"])
+    log.info("Avg gross PnL/trade: %.4f", avg_pnl)
     r_vals = [t.r_mult for t in trades if t.r_mult is not None]
     if r_vals:
         log.info("Avg R:         %+.3f  (PnL / initial ATR risk, size-independent)", sum(r_vals) / len(r_vals))
-    avg_bps = sum(t.bps for t in trades) / len(trades)
-    log.info("Avg bps/trade: %+.1f  (round-trip spread+slip hurdle ≈ 1-3 bps)", avg_bps)
+    log.info("Avg bps/trade: %+.1f gross / %+.1f net",
+             metrics["avg_bps"], metrics["avg_bps_net"])
     log.info("Best trade:    %.4f", max(t.pnl for t in trades))
     log.info("Worst trade:   %.4f", min(t.pnl for t in trades))
 
@@ -126,7 +173,10 @@ def backtest_file(
         df = df[df["time_key"] <= pd.Timestamp(end)].reset_index(drop=True)
     log.info("Loaded %d candles from %s", len(df), path)
     trades, _ = run_backtest(df)
-    print_summary(trades)
+    stem = Path(path).stem
+    parts = stem.split("_")
+    symbol = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 and parts[0] == "US" else ""
+    print_summary(trades, symbol=symbol)
     return trades
 
 

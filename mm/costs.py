@@ -1,14 +1,15 @@
 """Transaction cost model — the ruler that was missing.
 
-Every engine in this repo (backtest, replay, and the SIMULATE paper runner) reports
-frictionless fills. The 2026-08-29 audit showed why that matters: the live portfolio's
+Every engine in this repo (backtest, replay, and the SIMULATE paper runner) produces
+frictionless fills before this model is applied. The 2026-08-29 audit showed why that matters:
+the live portfolio's
 trade-count-weighted return was +1.31 bps across 106 trades, against this project's own
 stated round-trip cost estimate of 1-3 bps. In other words the entire measured "edge"
 was inside its own cost of trading, and no report said so.
 
-This module is the single place that answer lives. Reporting applies it now
-(scripts/analyze_trades.py); the Goal B wide scan applies the same model so wide-scan
-results and live results stay comparable. See docs/research-reset.md.
+This module is the single place that answer lives. Reporting, fast backtests, and replay all apply
+it now, so Goal B wide-scan results and live results stay comparable. See docs/research-reset.md
+and docs/PLAN.md Step 2.
 
 DELIBERATE DESIGN CHOICES
 -------------------------

@@ -224,7 +224,7 @@ def _run_file(path: Path, args: argparse.Namespace, vix_map: dict | None = None)
         print(f"File: {path.name}")
         print(f"  Candles: {len(df):,}  ({df['time_key'].iloc[0]} → {df['time_key'].iloc[-1]})")
         trades, annotated = run_orb_signals(df.copy())
-        print_orb_summary(trades, annotated)
+        print_orb_summary(trades, annotated, symbol=sym)
         if args.analyze_exits:
             analyze_exits(trades, annotated)
         if args.entry_timing:

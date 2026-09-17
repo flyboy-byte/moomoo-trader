@@ -72,6 +72,44 @@ and QQQ trade 1. Dollar PnL therefore over-weights IWM, so compare lanes by the 
 | bb_kdj / bb_kdj_loose | Continue: too few trades to say anything |
 | infrastructure | Watch SSH; if the pre-banner hang recurs, look at sshd/fail2ban logs before rebooting |
 
+### Gate decisions after net PF was adopted — 2026-09-16
+
+`docs/evaluation_criteria.md` now defines every PF threshold as net PF under `mm/costs.py`.
+Applying that ruler to the health-review table produces two reached gates:
+
+- **ORB review gate reached:** 57 trades, net PF 0.72. Entry execution does not explain the loss.
+  Across all 57 confirmed-fill trades since 2026-06-10, direction-adjusted entry slippage averaged
+  **−2.88 bps** (negative is favorable) with median −2.5 bps; 7/57 entries were worse than intended
+  by more than 5 bps. For the 12 trades since the 2026-08-14 cutoff change, mean was −2.33 bps,
+  median −2.2 bps, and 1/12 was worse by more than 5 bps. The preceding ORB evaluations had mean
+  candle age 330 seconds and maximum 356 seconds in that era, consistent with evaluating closed
+  five-minute bars. The separate win-rate suspension gate did not trip (44% overall versus <40%).
+  **Verdict:** execution is clean enough that the poor result belongs to strategy research, but the
+  12-trade post-change sample does not identify the cutoff as the cause. Keep the live setting fixed
+  for the new forward cohort; compare the cutoff counterfactual on the same candles during the
+  engine/replay work before proposing a knob change.
+- **QQQ positive symbol gate reached:** 52 trades, net PF 1.61 and net +5.7 bps/trade, with the
+  cross-strategy positive pattern already recorded. The prescribed action is to record the finding
+  and leave allocation unchanged. **Verdict:** QQQ is the current replication leader; do not
+  concentrate into it. Its PF interval still spans 1.0.
+
+No other gate action is due: SPY has 48/50 symbol trades, gap_fade 16/20, bb_kdj_loose 16/20,
+and bb_kdj 7/15. VWAP PB has enough combined trades but remains above its net-PF and win-rate
+failure lines.
+
+### Cost-aware research engines — BUILT 2026-09-16 (PLAN.md Step 2)
+
+All fast-engine summaries and the real-code-path replay now carry gross and net PnL/PF together.
+The shared fast-engine ruler is `mm/backtest.py::summarize_trades()`; replay reconstructs its own
+entry/exit events through canonical `mm/trades.py` before applying costs. A repo-wide guard fails if
+a future engine summary prints PF without naming its net ruler. The change also covered the
+deprecated VWAP engine so it cannot become a gross-only side door later.
+
+Two existing historical summaries demonstrate why this was necessary: VWAP Pullback on the local
+SPY archive changes from gross PF 1.133 to **net PF 0.944**, and combined Gap Fade changes from
+gross PF 1.137 to **net PF 1.011**. These are measurements of the existing archives, not new
+strategy verdicts. Full suite: 341 passed.
+
 ## Data Mining Results (Route 1 — scripts/mine_*.py)
 
 ### H1 — First-Bar Direction Predicts 10am-11am Returns — TESTED 2026-07-23, NULL

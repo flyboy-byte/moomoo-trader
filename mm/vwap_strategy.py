@@ -19,6 +19,7 @@ from . import config as _config
 from .indicators import add_all
 from .logger import get_logger
 from .vwap_signals import score_vwap
+from .backtest import summarize_trades
 
 log = get_logger("vwap_strategy")
 
@@ -132,17 +133,18 @@ def run_vwap_signals(
     return trades, df
 
 
-def print_vwap_summary(trades: list[VWAPTrade], df: pd.DataFrame | None = None) -> None:
+def print_vwap_summary(
+    trades: list[VWAPTrade],
+    df: pd.DataFrame | None = None,
+    symbol: str = "",
+) -> None:
     if not trades:
         print("No VWAP trades.")
         return
 
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
-    total_pnl = sum(t.pnl for t in trades)
-    gross_win = sum(t.pnl for t in wins)
-    gross_loss = abs(sum(t.pnl for t in losses))
-    pf = gross_win / gross_loss if gross_loss else float("inf")
+    metrics = summarize_trades(trades, symbol)
     avg_hold = sum(
         (t.exit_time - t.entry_time).total_seconds() / 60
         for t in trades
@@ -164,8 +166,11 @@ def print_vwap_summary(trades: list[VWAPTrade], df: pd.DataFrame | None = None) 
     print("VWAP Strategy Summary")
     print(f"  Trades:        {len(trades)}  ({trades_per_day:.1f}/day over {trading_days} days)")
     print(f"  Win rate:      {len(wins)/len(trades)*100:.1f}%  ({len(wins)}W / {len(losses)}L)")
-    print(f"  Total PnL:     ${total_pnl:+.2f}")
-    print(f"  Profit factor: {pf:.3f}")
+    print(f"  Gross PnL:     ${metrics['gross_pnl']:+.2f}")
+    print(f"  Net PnL:       ${metrics['net_pnl']:+.2f}")
+    print(f"  Gross PF:      {metrics['gross_pf']:.3f}")
+    print(f"  Net PF:        {metrics['net_pf']:.3f}")
+    print(f"  Avg bps/trade: {metrics['avg_bps']:+.1f} gross / {metrics['avg_bps_net']:+.1f} net")
     print(f"  Avg hold:      {avg_hold:.0f} min")
     print(f"  Exits:         {targets} target / {stops} stop / {time_stops} time")
     if trades:

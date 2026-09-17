@@ -244,7 +244,11 @@ def main() -> None:
         run_single(path, args, vix_map=vix_map)
         if not args.sweep and not args.sweep_fill and not args.sweep_vix:
             df = load_candles(path)
-            all_trades.extend(run_gap_fade(df.copy()))
+            sym = path.stem.split("_K_")[0].replace("_", ".", 1)
+            combined_trades = run_gap_fade(df.copy())
+            for trade in combined_trades:
+                trade.symbol = sym
+            all_trades.extend(combined_trades)
 
     if len(paths) > 1 and not args.sweep and not args.sweep_fill and not args.sweep_vix:
         print()

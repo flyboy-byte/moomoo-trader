@@ -19,6 +19,19 @@ Exceptions:
 The biggest risk to this project is not a bad strategy — it's re-tuning parameters faster
 than live data can validate them.
 
+## The gate ruler
+
+**As amended 2026-09-16, every PF threshold in this document means net PF after the frozen
+`mm/costs.py` round-trip cost model.** Gross PF stays beside it as a diagnostic, especially when
+deciding whether a weak signal or the cost assumption caused a failure, but gross PF cannot pass a
+gate that net PF fails. Win rate, fill slippage, trade counts, and operational triggers keep their
+literal meanings.
+
+This amendment applies prospectively to decisions made from 2026-09-16 onward. Earlier decisions
+remain historical decisions under the ruler available at the time; they are not rewritten. A
+future change to the cost model must be dated and must show the old and new gate result rather than
+silently rescoring history.
+
 ## Sizing a gate: check the ETA before picking N
 
 Added 2026-08-24, after the bb_kdj gate sat at 30 trades for 2+ months while the same document
@@ -47,8 +60,8 @@ Backtest expectation: SPY OOS PF=1.655, QQQ OOS PF=1.072.
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| PF < 1.0 or win% < 40% | 20 trades | Suspend (remove from STRATEGIES), post-mortem before any re-tune |
-| QQQ PF < 1.0 while SPY PF ≥ 1.2 | 15 trades/symbol | Drop QQQ from VWAP_PB_SYMBOLS (QQQ was marginal in backtest anyway) |
+| Net PF < 1.0 or win% < 40% | 20 trades | Suspend (remove from STRATEGIES), post-mortem before any re-tune |
+| QQQ net PF < 1.0 while SPY net PF ≥ 1.2 | 15 trades/symbol | Drop QQQ from VWAP_PB_SYMBOLS (QQQ was marginal in backtest anyway) |
 | Any entry logged before 10:00 ET | 1 trade | Bug — fix immediately |
 
 ## BB+KDJ (SPY/IWM at w=0, QQQ at w=3 — corrected 2026-08-24, header had it backwards)
@@ -62,7 +75,7 @@ unaffected by the bug (w=0 has no rolling window to leak).
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| PF < 1.0 | 15 trades | Switch all symbols to w=0 (accept low frequency) — do not suspend, the w=0 edge is the best-validated finding in the project |
+| Net PF < 1.0 | 15 trades | Switch all symbols to w=0 (accept low frequency) — do not suspend, the w=0 edge is the best-validated finding in the project |
 | Cross-age subset analysis: w=0-subset trades (kdj_cross_age=0) materially outperform w>0 trades | 3 months of data | Switch to w=0 |
 | Zero entries fired | 4 weeks | Investigate signal pipeline (compare vs simulate_paper.py on same dates) — silence is a bug symptom, not patience |
 
@@ -76,7 +89,7 @@ strategy, but most execution-sensitive (breakout fills are competitive).
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| PF < 1.0 | 30 trades | Check slippage/fill quality FIRST (intended_price vs fill in JSONL, candle_age_s). Only touch strategy parameters if execution is clean |
+| Net PF < 1.0 | 30 trades | Check slippage/fill quality FIRST (intended_price vs fill in JSONL, candle_age_s). Only touch strategy parameters if execution is clean |
 | Avg fill worse than intended by > 5 bps | 15 trades | Execution problem — reduce polling latency or accept edge erosion; not a strategy knob issue |
 | Win% < 40% with clean execution | 30 trades | Suspend and post-mortem |
 
@@ -88,8 +101,8 @@ gate is worth, so it is judged *relative to* bb_kdj, not on absolute PF.
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| loose PF < bb_kdj PF by ≥ 0.3 | 20 loose trades | The bonus gate is earning its complexity — document and keep both; no knob change |
-| loose PF > bb_kdj PF by ≥ 0.3 | 20 loose trades | The bonus gate is costing money — post-mortem, consider lowering MIN_SIGNAL_SCORE on production bb_kdj |
+| loose net PF < bb_kdj net PF by ≥ 0.3 | 20 loose trades | The bonus gate is earning its complexity — document and keep both; no knob change |
+| loose net PF > bb_kdj net PF by ≥ 0.3 | 20 loose trades | The bonus gate is costing money — post-mortem, consider lowering MIN_SIGNAL_SCORE on production bb_kdj |
 | \|difference\| < 0.3 | 20 loose trades | Gate is neutral. Retire bb_kdj_loose (it is measurement scaffolding, not a strategy) |
 
 ## Gap Fade (live 2026-07-12)
@@ -99,8 +112,8 @@ Added retroactively 2026-08-24 — see amendment log. Fires at most once per sym
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| PF < 1.0 | 20 trades | Suspend (remove from STRATEGIES), post-mortem before any re-tune |
-| Per-symbol PF < 0.5 while combined PF ≥ 1.0 | 10 trades/symbol | Drop that symbol from gap_fade (mirrors the ORB-shorts precedent) |
+| Net PF < 1.0 | 20 trades | Suspend (remove from STRATEGIES), post-mortem before any re-tune |
+| Per-symbol net PF < 0.5 while combined net PF ≥ 1.0 | 10 trades/symbol | Drop that symbol from gap_fade (mirrors the ORB-shorts precedent) |
 | Zero entries fired | 6 weeks | Investigate the 9:35 trigger path — silence is a bug symptom |
 
 ## Symbol-level (cross-strategy)
@@ -113,8 +126,8 @@ decision still requires more data than the observation was made on.
 
 | Gate | Sample | Action |
 |------|--------|--------|
-| A symbol is net negative in ≥ 4 of 5 strategies AND combined symbol PF < 0.8 | 50 trades on that symbol | Post-mortem before any action: check spread/slippage and per-strategy stop distances first. Only then consider dropping the symbol from SYMBOLS |
-| A symbol is net positive in ≥ 4 of 5 strategies AND combined symbol PF > 1.5 | 50 trades on that symbol | Do **not** concentrate into it — record the finding and leave allocation alone (single-symbol concentration is how this project would blow up its own sample size) |
+| A symbol is net negative in ≥ 4 of 5 strategies AND combined symbol net PF < 0.8 | 50 trades on that symbol | Post-mortem before any action: check spread/slippage and per-strategy stop distances first. Only then consider dropping the symbol from SYMBOLS |
+| A symbol is net positive in ≥ 4 of 5 strategies AND combined symbol net PF > 1.5 | 50 trades on that symbol | Do **not** concentrate into it — record the finding and leave allocation alone (single-symbol concentration is how this project would blow up its own sample size) |
 
 ## Portfolio-level
 
@@ -139,6 +152,27 @@ confusion (amended 2026-06-18, see log).
   just don't change a strategy's parameters off a sample smaller than its gate's threshold.
 
 ## Amendment log
+
+- 2026-09-16 (gate ruler): **All PF gates now mean net PF under the frozen `mm/costs.py` model.**
+  The original gates were written before the project had a cost model and therefore used
+  frictionless PF implicitly. The 2026-08-29 measurement rebuild showed that this distinction can
+  reverse a verdict: the first 102 trades were gross PF 1.189 and net PF 0.992. Net is now the
+  decision ruler because it represents the result after the project's explicit trading-cost
+  assumption. Gross remains visible for diagnosis. This is a dated semantic amendment, not a
+  threshold change, and it does not retroactively rewrite decisions already made.
+
+- 2026-09-16 (frozen forward cohort): The first clean forward cohort begins with the first market
+  session after this declaration, **2026-09-17**, using runtime code `f1ed556` and the VPS settings
+  recorded in `docs/ARCHITECTURE.md` and verified in the 2026-09-16 health review. The research
+  question is: **does the fixed five-strategy configuration produce positive net expectancy after
+  modeled costs, and which strategy/symbol lanes replicate?** Read results with net PF, net bps per
+  trade, and day-clustered uncertainty once PLAN.md Step 4 exists. The existing strategy gates are
+  operational minimums, not declarations of statistical proof. Any strategy knob, active-symbol,
+  regime-policy, or cost-model change ends this cohort at the prior session and requires a new dated
+  cohort entry. Bug fixes that change decisions or fills also end it; telemetry/report-only changes
+  do not. Frozen settings include `STRATEGIES=bb_kdj,bb_kdj_loose,orb,vwap_pb,gap_fade`,
+  `SYMBOLS=US.IWM,US.SPY,US.QQQ`, the KDJ/ORB/VWAP/gap overrides in `docs/ARCHITECTURE.md`, and
+  `REGIME_GATE_ENABLED=true` with skip labels `trending_up,trending_down`.
 
 - 2026-08-24 (gate ETAs): Computed actual weeks-to-trip for every open gate using live accrual
   rate. Two were broken: **bb_kdj's PF<1.0 gate at 30 trades needs ~13 months** at the live rate

@@ -91,12 +91,14 @@ def _run_all_modes(csvs: list[Path], strategies: list[str], args) -> None:
         print_summary(summaries[mode])
 
     print(f"\n=== ALL-MODES DIFF ===")
-    header = f"  {'mode':<12}{'opens':>7}{'closes':>8}{'entry_unfilled':>16}{'exit_unfilled':>15}{'total_pnl':>12}"
+    header = (f"  {'mode':<12}{'opens':>7}{'closes':>8}{'entry_unfilled':>16}"
+              f"{'exit_unfilled':>15}{'gross_pnl':>12}{'net_pnl':>12}")
     print(header)
     for mode in modes:
         s = summaries[mode]
         print(f"  {mode:<12}{s['opens']:>7}{s['closes']:>8}{s['entry_unfilled']:>16}"
-              f"{s['exit_unfilled']:>15}{s['total_pnl']:>+12.4f}")
+              f"{s['exit_unfilled']:>15}{s['total_pnl']:>+12.4f}"
+              f"{s['total_net_pnl']:>+12.4f}")
 
 
 if __name__ == "__main__":

@@ -52,8 +52,9 @@ Package layout:
   mm/indicators.py     — bollinger_bands(), atr(), kdj(), rsi(), adx(), vwap(), ema(), add_all()
   mm/signals.py        — score_df(), snapshot() — BB+KDJ signal scoring
   mm/strategy.py       — compute_signals(), run_signals(), Trade, Signal
-  mm/backtest.py       — run_backtest(), walk_forward(), print_summary(), profit_factor() (CANONICAL PF —
-                         never reimplement it, see tests/test_metric_consistency.py)
+  mm/backtest.py       — run_backtest(), walk_forward(), print_summary(), summarize_trades() (canonical
+                         gross/net engine ruler), profit_factor() (CANONICAL PF — never reimplement it,
+                         see tests/test_metric_consistency.py)
   mm/costs.py          — transaction cost model: round_trip_bps(), net_pnl(), net_bps() (added 2026-08-29,
                          docs/research-reset.md Goal A1). Self-contained constants, no cfg import — costs are
                          not a strategy knob and must not become tunable-until-profitable.
@@ -75,7 +76,8 @@ Package layout:
   mm/evals.py          — per-strategy eval functions (_eval_bb_kdj, _eval_bb_kdj_loose, _eval_vwap, _eval_vwap_pb, _eval_orb), _entry_attempted
   mm/risk.py           — trading_allowed(), calc_qty(), DailyTracker, _qty(), _position_cap(), _slot_dollars
   mm/paper.py          — loop + _latest_closed_candles + _eval_symbol_all_strategies + run_multi + back-compat re-exports
-  mm/replay.py         — replay(), FakeBroker, symbol_from_csv() — offline candle replay through the real runner + fake broker
+  mm/replay.py         — replay(), FakeBroker, symbol_from_csv() — offline candle replay through the real runner + fake broker;
+                         summary pairs JSONL through mm/trades.py and reports gross + net PnL/PF
   mm/orb_strategy.py   — ORB backtest engine, _build_opening_ranges() (supports per-symbol orb_minutes)
   mm/vwap_pullback.py  — VWAP Pullback (flush-and-reclaim) backtest engine
   mm/vwap_strategy.py  — VWAP crossover strategy (deprecated, PF≈1.0)

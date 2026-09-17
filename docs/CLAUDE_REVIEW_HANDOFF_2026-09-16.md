@@ -56,20 +56,21 @@ Do not describe the strategies as validated profitable systems yet.
 
 ## What remains uncertain
 
-1. The cost model reaches the reporting path but not every fast backtest engine. A candidate scan can
-   therefore still rank frictionless results differently from net results.
-2. The live sample mixes configuration eras and historical tuning decisions. Months of uptime are
+1. The live sample mixes configuration eras and historical tuning decisions. Months of uptime are
    not equivalent to months of testing one frozen hypothesis.
-3. The proposed 2024+ untouched test window has already been examined during earlier tuning. It can
+2. The proposed 2024+ untouched test window has already been examined during earlier tuning. It can
    be used for development/robustness work, but should not be called a clean untouched confirmation
    set.
-4. More symbols will increase observations, but correlated same-day ETF trades are not independent
+3. More symbols will increase observations, but correlated same-day ETF trades are not independent
    evidence. Any wide scan needs day-clustered uncertainty and a pre-registered selection rule.
-5. The latest VPS state was not obtained in the 2026-09-16 review because the environment could not
-   establish the configured SSH connection. Do not infer current VPS results from the local archive.
-6. The AI regime gate is an interesting engineering experiment, but its value must be judged by a
+4. The AI regime gate is an interesting engineering experiment, but its value must be judged by a
    counterfactual comparison against the same opportunities without the gate and against a simple
    deterministic baseline.
+
+Update after the original handoff: the VPS logs were subsequently pulled and reviewed, Steps 0/0b
+were completed, net PF was adopted as the gate ruler, a forward cohort beginning 2026-09-17 was
+declared, and PLAN.md Step 2 wired costs into all fast engines and replay. See the top of
+`docs/strategy_graveyard.md` and the active plan for the current state.
 
 ## Recommended forward path
 
@@ -91,11 +92,10 @@ This is the missing output from the current “pull logs, fix bugs, keep running
 
 ### Next engineering milestone: finish the measurement ruler
 
-Complete the ordered work in `docs/PLAN.md` through the measurement/replay checkpoint:
+Continue the ordered work in `docs/PLAN.md` through the measurement/replay checkpoint. Cost-aware
+engine and replay summaries are complete; remaining work begins with the wider-universe cost model,
+then clustered uncertainty and engine cross-validation:
 
-- add net-of-cost fields to `mm/backtest.py` and the four strategy engines;
-- add net summaries to replay;
-- add a guard preventing a new engine from reporting gross-only results;
 - make per-symbol cost assumptions explicit before a wide scan;
 - use block/day-clustered bootstrap intervals for pooled cross-symbol reports;
 - cross-validate fast engines against replay with a written tolerance;
@@ -178,4 +178,3 @@ looking report.
 - `docs/strategy_graveyard.md` — findings, bugs, parked questions, and methodology
 - `docs/ARCHITECTURE.md` — deployed strategies and runtime data flow
 - `docs/expansions/FRAMEWORK.md` — status of mining, regime, and volatility routes
-

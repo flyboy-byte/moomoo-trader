@@ -31,7 +31,7 @@ import pandas as pd
 
 from .indicators import add_all
 from .logger import get_logger
-from .backtest import profit_factor as _profit_factor  # canonical PF, never redefine
+from .backtest import summarize_trades
 
 log = get_logger("vwap_pullback")
 
@@ -156,12 +156,7 @@ def print_vwap_pb_summary(trades: list[VWAPPBTrade], symbol: str = "", days: int
 
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
-    total_pnl = sum(t.pnl for t in trades)
-    # Canonical PF (mm/backtest.py). Was an inline `999.0` no-loss sentinel — the
-    # exact divergence the 2026-06-18 consolidation was meant to end, which survived
-    # here because that pass fixed scripts/backtest_vwap_pb.py and not this engine.
-    # 999.0 and inf are not interchangeable in any average across runs.
-    pf = _profit_factor(trades)
+    metrics = summarize_trades(trades, symbol)
 
     from collections import Counter
     reasons = Counter(t.exit_reason for t in trades)
@@ -170,8 +165,11 @@ def print_vwap_pb_summary(trades: list[VWAPPBTrade], symbol: str = "", days: int
     print(f"VWAP Pullback {symbol}")
     print(f"  Trades:        {len(trades)}{freq}")
     print(f"  Win rate:      {100*len(wins)/len(trades):.1f}%  ({len(wins)}W / {len(losses)}L)")
-    print(f"  Total PnL:     ${total_pnl:+.2f}")
-    print(f"  Profit factor: {pf:.3f}")
+    print(f"  Gross PnL:     ${metrics['gross_pnl']:+.2f}")
+    print(f"  Net PnL:       ${metrics['net_pnl']:+.2f}")
+    print(f"  Gross PF:      {metrics['gross_pf']:.3f}")
+    print(f"  Net PF:        {metrics['net_pf']:.3f}")
+    print(f"  Avg bps/trade: {metrics['avg_bps']:+.1f} gross / {metrics['avg_bps_net']:+.1f} net")
     avg_hold = sum(
         (pd.Timestamp(t.exit_time) - pd.Timestamp(t.entry_time)).total_seconds() / 60
         for t in trades
