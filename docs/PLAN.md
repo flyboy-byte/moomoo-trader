@@ -481,7 +481,7 @@ wide scan in progress. Don't sell it as a profitable system.
 **Done when:** README renders cleanly on GitHub (checked in a browser), and every claim in it
 matches `docs/` as of that date.
 
-### H4 — GitHub Pages site ☐
+### ~~H4 — GitHub Pages site~~ ✅ DONE 2026-09-17 — https://flyboy-byte.github.io/moomoo-trader/ (source `site/`, published to `gh-pages` like riscv-pico; redeploy: `git subtree split --prefix site master` → push to `gh-pages`). Wide-scan results page still to add after Step 11.
 *(user request, 2026-09-17)* A small public page for the project, e.g. an overview, the
 methodology (the gross→net finding, the preregistration and holdout discipline, the Step 5
 engine cross-validation), and possibly a static snapshot of wide-scan results once Step 11 exists.
