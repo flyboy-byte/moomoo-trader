@@ -250,8 +250,8 @@ the conclusion remains no demonstrated edge. Full suite: **350 passed**.
 **2026-09-17 — preregistered run FAILED; paused here, per the rule.** See
 `docs/strategy_graveyard.md` § "Engine Cross-Validation — 2026-09-17". There are two causes. (1) The
 replay's `instant` mode fills at the marketable limit, which costs about 40 bps per round trip;
-live fills don't pay that. (2) **Live gap_fade ignores `GAP_LARGE_SHORT_FILTER_ENABLED`**, a live
-bug that is not fixed because fixing it ends the forward cohort (user's call). A diagnostic
+live fills don't pay that. (2) **Live gap_fade ignored `GAP_LARGE_SHORT_FILTER_ENABLED`**, a live
+bug, fixed and deployed 2026-09-17 (`f39df61`); the cohort was re-based onto that commit. A diagnostic
 `fill_mode=close` rerun is recorded there. Step 5 stays open until the user decides how to proceed.
 
 *(was B2)* `mm/replay.py` and the fast engines are different code paths and are **already known to

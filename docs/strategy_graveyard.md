@@ -37,8 +37,10 @@ on the VPS (activated 2026-07-29), but `mm/evals.py::_eval_gap_fade` imports onl
 `GAP_MIN_PCT, GAP_MAX_PCT, GAP_TARGET_FILL_PCT, GAP_STOP_BUFFER, GAP_SHORTS_ENABLED`. The filter
 exists only in the research engine, so the setting does nothing live. Live impact is UNKNOWN for
 the five gap-up shorts from 08-04 to 08-21, because gap size was not logged then. The two logged
-since (08-27: 0.79%, 0.30%) were under 1% and unaffected. **Not fixed.** Fixing it changes live
-decisions, which ends the 2026-09-17 forward cohort, so that is the user's call.
+since (08-27: 0.79%, 0.30%) were under 1% and unaffected. **FIXED 2026-09-17** (`f39df61`, user-approved).
+The live path now skips these (`gap_large_short`), or shadow-logs them when the filter is disabled. Replay
+tests on QQQ 2026-03-23 cover it. Deployed before the 09-17 open; the cohort was re-based
+(evaluation_criteria.md).
 
 Trade counts otherwise agree closely (bb_kdj exact; orb and vwap_pb within one trade each), so
 the signal logic of the two engines matches.

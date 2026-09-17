@@ -175,6 +175,16 @@ Use symbol medians and PLAN Step 4's day-blocked interval rather than pooled tra
 
 ## Amendment log
 
+- 2026-09-17 (forward cohort re-based before its first session): The Step 5 cross-validation
+  found that live `_eval_gap_fade` never applied `GAP_LARGE_SHORT_FILTER_ENABLED=true` (the VPS
+  setting since 2026-07-29), so gap-up shorts over 1% traded live. The user approved fixing it
+  (commit `f39df61`), which was deployed and the runner restarted at 03:06 UTC, before the
+  2026-09-17 open. Under the cohort rule this bug fix changes decisions and would end the cohort.
+  The cohort had **zero sessions** under `f1ed556`, so it is re-based rather than split: it still
+  starts with the **2026-09-17** session, now on runtime code **`f39df61`**. The settings are
+  unchanged (`docs/frozen_config_2026-09-17.env`). The user also confirmed on 2026-09-17 that they
+  approve the 2026-09-16 decisions (net-PF ruler, forward cohort, frozen wide-scan universe).
+
 - 2026-09-17 (engine cross-validation alignment, written and committed before any aligned result
   was seen): The first attempt was abandoned partway through, and its partial output is void. It also ran
   on the *local* `.env`, which had drifted from the VPS (ORB scorer blocking below 0.50, no
