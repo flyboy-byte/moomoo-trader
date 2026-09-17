@@ -173,8 +173,64 @@ requires their gross-return deficit to exceed the cost differential assigned by 
 gross results are comparable and only the haircut creates the gap, label it a cost-model result.
 Use symbol medians and PLAN Step 4's day-blocked interval rather than pooled trade count alone.
 
+## Wide-scan configuration, split, and selection rule — frozen 2026-09-17 (PLAN.md Step 6)
+
+Written before any wide-scan five-minute history was fetched. It extends the 2026-09-16 universe
+and cost preregistration above. Changing anything here after Step 9 begins needs a new dated
+entry, and the holdout (6b) is then considered spent.
+
+**6a — Parameters.** One symbol-agnostic set for all 85 primary symbols:
+`docs/wide_scan_params_2026-09-17.env`. It keeps the live base values, drops every per-symbol
+override and allowlist, sets `KDJ_WINDOW_BARS=0`, allows ORB shorts everywhere, and turns off the
+context gates (regime, ORB scorer, VIX), for which no history exists. Scope is the four strategies
+with a fast engine that Step 5 verified: `bb_kdj`, `orb`, `vwap_pb`, `gap_fade`. **No parameter
+sweeps.** One set, run once. A sweep is development work and would need its own preregistration.
+Fills are at the signal close (the Step 5 comparison of record). Costs are the frozen per-symbol
+table.
+
+**6b — Split.** Two windows, both frozen now:
+
+| Window | Dates | Role |
+|---|---|---|
+| **Development (D)** | 2022-01-03 → 2026-08-31 | Selection only. Overlaps every past tuning period on SPY/QQQ/IWM, so it is treated as in-sample for the parameter set, even on symbols never seen before. |
+| **Holdout (H)** | 2019-01-02 → 2021-12-31 | Confirmation only. **Never seen by any past 5-minute research:** every archive this project has used starts 2022-01-03 (INFERRED from local archive coverage). It includes the 2020 crash, which is a deliberate regime stress test. |
+
+The window ends on 2026-08-31, so the scan never overlaps the 2026-09-17 forward cohort. **H is
+sealed:** Step 11 computes D only, and H is computed only for finalists, after Step 11 has committed
+the finalist list. Because symbols were chosen for 2026 liquidity, some did not exist or traded
+thinly in 2019. A lane with fewer than 20 H trades is reported as **not testable**, not as failed.
+
+**6c — Questions, tests, and selection.**
+
+*Primary question (4 tests): does each strategy have positive net expectancy across liquid US
+instruments?* For each strategy, pool its D trades across all 85 symbols. The statistic is mean
+net bps per trade. The one-sided p-value is 1 − `prob_positive` with **day blocks** (Step 4),
+10,000 resamples, and the fixed seed. A strategy passes D at **p < 0.0125** (0.05 / 4). A strategy
+that passes D is **replicated** if, on H, it has p < 0.0125, mean net bps > 0, and mean net bps
+still > 0 after an extra **3.5 bps** per round trip. The 3.5 bps is the live median entry slippage
+(Step 5 caveat); it is a stress test, not a change to the cost table.
+
+*Secondary question (340 tests): which individual symbol × strategy lanes stand out?*
+- Eligible if the lane has **≥ 40 D trades**. Ineligible lanes count as p = 1.
+- Apply Benjamini–Hochberg at **q = 0.10** across all 340 lanes, using the same statistic.
+- **Finalists:** BH survivors ranked by the lower bound of the day-blocked 95% CI on mean net bps,
+  **capped at 10**. No reading-based additions or swaps.
+- A finalist is **replicated** on H if it has ≥ 20 H trades, one-sided p < 0.05 / (number of
+  finalists), mean net bps > 0, and stays > 0 under the +3.5 bps stress.
+
+*Reporting that decides nothing but must appear:* every lane's D result, good or bad; long/short
+splits; per-symbol buy-and-hold over the same window (Step 10); the ETF-vs-single-name residual
+comparison from the 2026-09-16 entry; the median across symbols as well as pooled figures.
+
+*What a null means:* if nothing passes, record it as a finding. Do not relax a threshold, add
+a sweep, or pick a "best" lane by eye. A replicated result authorizes only a Step 12 replay check
+and a written proposal. It never authorizes a live change by itself: live changes still go
+through the knob freeze and the forward cohort.
+
 ## Amendment log
 
+- 2026-09-17 (wide-scan Step 6 freeze): Added the section above. The user asked for Step 6 to be
+  drafted and done (2026-09-17). The recommended values were adopted as written.
 - 2026-09-17 (Step 5 fill model — POST-HOC, written after seeing the preregistered FAIL): The
   preregistered `fill_mode=instant` was a specification error. It fills at the marketable limit
   (0.1% / 0.3% through the close), which neither the fast engines nor live SIMULATE pay, so the

@@ -13,7 +13,7 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 6** (freeze the scan configuration). Step 5 closed 2026-09-17 after a preregistered FAIL, a live bug fix, and a documented post-hoc fill-model correction. Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
+> **Right now: Step 7** (check what a re-fetch does to an existing archive; costs one quota slot). Steps 5 and 6 closed 2026-09-17. Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
 > Step 8's universe preregistration was pulled into Step 3 because a per-symbol cost table cannot
 > be built before its symbols are fixed; the bulk OpenD fetch remains Step 9 and has not begun.
 
@@ -273,14 +273,14 @@ they clear the tolerance or the disagreement is explained and the plan pauses he
 
 ---
 
-### Step 6 — Freeze the scan configuration, in writing, before any fetch ☐
+### ~~Step 6 — Freeze the scan configuration, in writing, before any fetch~~ ✅ DONE 2026-09-17
 **Partly new.** Three separate things get frozen, all before a single new symbol is pulled:
 
-- **6a ☐ Parameters.** The live strategies carry per-symbol overrides (`ORB_VIX_MAX_OVERRIDES`,
+- **6a ✅ Parameters.** The live strategies carry per-symbol overrides (`ORB_VIX_MAX_OVERRIDES`,
   IWM's 30-minute OR, and so on) tuned on SPY/QQQ/IWM. Running SPY with tuned parameters and AAPL
   with defaults produces a comparison of tuning, not of symbols. **One symbol-agnostic parameter
   set for the whole scan**, written down here, with the tuned live values explicitly out of scope.
-- **6b ☐ IS/OOS split.** Concrete dates, chosen now, never revisited. ~~Suggest IS 2019–2023,
+- **6b ✅ IS/OOS split.** Concrete dates, chosen now, never revisited. ~~Suggest IS 2019–2023,
   OOS 2024–present, which keeps a genuinely untouched recent window.~~ **Corrected 2026-09-16:**
   2024+ is *not* untouched. It was the OOS window for most past research, and live parameters were
   set from it — the ORB VIX cutoffs were chosen from 2024+ results
@@ -288,7 +288,7 @@ they clear the tolerance or the disagreement is explained and the plan pauses he
   live settings, 2024+ is development data. For symbols never pulled before, a historical OOS
   window is still meaningful. **The clean confirmation for the live settings is Step 1b's forward
   cohort**, not any historical window.
-- **6c ☐ Selection rule and finalist count.** 100 symbols × 5 strategies × sweeps is an
+- **6c ✅ Selection rule and finalist count.** 100 symbols × 5 strategies × sweeps is an
   overfitting machine and the plan currently answers it with culture rather than a rule. Fix a
   number of finalists (suggest ≤ 10) and a multiple-testing-aware threshold *before* seeing
   results. The best of 500 combinations looks excellent by luck alone; that is arithmetic, not
@@ -296,6 +296,17 @@ they clear the tolerance or the disagreement is explained and the plan pauses he
 
 **Done when:** all three are written into `docs/evaluation_criteria.md` under a dated
 pre-registration heading.
+
+**Result 2026-09-17:** `docs/evaluation_criteria.md` § "Wide-scan configuration, split, and selection
+rule". Parameters are in `docs/wide_scan_params_2026-09-17.env`: live base values, no per-symbol
+overrides, w=0, shorts everywhere, context gates off, no sweeps. **Split: development 2022-01-03 →
+2026-08-31, holdout 2019-01-02 → 2021-12-31.** The holdout is the only historical window no past
+research touched; Step 11 must keep it sealed until finalists are committed. Selection has a primary
+per-strategy pooled test (Bonferroni over 4) and secondary per-lane tests (BH q=0.10 over 340, at most
+10 finalists), both with a +3.5 bps slippage stress on the holdout.
+
+**Consequence for Step 9:** the fetch range is 2019-01-02 → 2026-08-31 for every symbol, including
+SPY/QQQ/IWM, whose local archives start in 2022.
 
 ---
 
@@ -378,6 +389,11 @@ anyway. Estimated ~56 min single-threaded at the measured 1.56 s per symbol-year
 
 Applies: Step 2's costs, Step 3's per-symbol cost table, Step 4's block CIs, Step 6's frozen
 parameters, split, and selection rule.
+
+**Holdout discipline (from Step 6):** run and print the development window only. Commit the
+finalist list and the four pooled-strategy D verdicts **before** any code computes 2019–2021
+results. Then run the holdout for exactly those. The scan script should refuse to compute the
+holdout unless a committed finalist file exists.
 
 **Done when:** results exist for the full universe with net PF, block-bootstrap CIs, and the
 symbol's own benchmark, and the finalist list is produced by Step 6c's rule rather than by reading.
