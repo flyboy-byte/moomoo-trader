@@ -5,6 +5,50 @@ documented. This file keeps sessions context-efficient by recording the "why" be
 
 ---
 
+## Archive price-basis seams — CONFIRMED & FIXED 2026-09-17 (PLAN.md Step 7)
+
+**Test (no quota spent):** SPY/QQQ/IWM were already in the 30-day history set because of the VPS
+daily cron, so re-pulling them was free (`get_history_kl_quota` read 3 used / 97 free before and
+after). All three were re-pulled for 2022-01-03 → 2026-06-25 on the VPS and compared bar by bar
+with the local archives.
+
+**Result: the seam is real, and dividends are enough to cause it; no split is needed.** Every
+re-pulled bar differs from the archived one by a constant factor: SPY ×0.997431, QQQ ×0.998902,
+IWM ×0.995027. These are the dividend adjustments applied since the archive was pulled. The local
+archives already contained seams where pulls from different dates were merged:
+
+| Archive | Seam | Step |
+|---|---|---|
+| SPY | 2026-06-16 | 25.8 bps |
+| IWM | 2026-06-11 | 23.7 bps |
+| SPY / QQQ / IWM | 2026-06-03 (one day off-basis, restored 06-04) | 0.3 / 0.9 / 2.1 bps |
+
+All seams are after 2026-06-09, so the Step 5 window is unaffected. A split would produce the same
+kind of seam, only 100× larger.
+
+**Fix:** `mm/data.py::update_combined_csv()` now compares the new pull with the archive on the
+earliest overlapping day (≥ 20 bars) before merging.
+- **Constant ratio ≠ 1:** it copies the archive to `*.pre-rebase-<ts>.csv`, rescales every earlier
+  row's OHLC onto the new basis, then merges.
+- **Non-constant ratio:** it refuses, leaves the archive untouched, and writes the pull to
+  `*.basis-mismatch-<ts>.csv`.
+- **No overlap across a session boundary:** it refuses, because the basis cannot be checked.
+
+Checked against the real archives in 18 windows between 2022 and 2026: the factor was identical
+every time and nothing was falsely refused. Volume is not rescaled. Whether Moomoo's QFQ rescales
+volume on a *split* is UNKNOWN. Operational consequence: if the VPS cron misses more than ~10 days,
+its next merge will refuse until someone looks. Existing seams are left in place; Step 9's full
+2019+ re-pull of SPY/QQQ/IWM overwrites the whole overlap on one basis.
+
+**Correction to the 2026-08-24 "Stale cfg" entry below.** It says the injected test rows were
+removed. **They were not:** all four (IWM RTH 04:05 / 09:35=999.0 / 09:40, and IWM EXT 04:05) were
+still present on 2026-09-17, and the file's mtime was 2026-08-24 15:59. They were removed on
+2026-09-17, with backups `*.pre-fixture-cleanup-*.csv`. `tests/test_archive_integrity.py` now
+checks the real archives for code-less rows and >15% intraday jumps, so the claim is tested rather
+than just asserted. `tests/test_data.py` now uses `monkeypatch` instead of permanently reassigning
+`cfg.logs_dir`. The IWM archive's SHA-256 changed from the `8d3f2fb0` cited in the Step 5
+preregistration, but only 2026-06-16 rows were removed, which is outside that window.
+
 ## Engine Cross-Validation — 2026-09-17 (PLAN.md Step 5): **FAIL**
 
 Preregistered run (evaluation_criteria.md, 2026-09-16 and 2026-09-17 amendments):
@@ -484,7 +528,7 @@ announcing itself in the assertion and was read as noise.
 
 **Fix:** `mm/data.py` now uses `from . import config as _config` + `cfg = _config.cfg` re-fetched
 inside `fetch_candles`, `save_candles`, `update_combined_csv`, `fetch_and_save`. Archive rows
-removed. Full suite went 252 passed / 3 failed → **255 passed / 0 failed**, and a checksum on the
+~~removed~~ — **not actually removed; see the 2026-09-17 correction above.** Full suite went 252 passed / 3 failed → **255 passed / 0 failed**, and a checksum on the
 archive confirms the suite no longer writes to it.
 
 **Lesson (added to Bug-Hunting Methodology below):** a test that "fails only in the full run" is a

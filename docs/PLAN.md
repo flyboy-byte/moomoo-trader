@@ -13,7 +13,7 @@
 > (frozen forward cohort), Step 6b corrected (2024+ is not unseen data). See "Amendments" at the
 > bottom.
 >
-> **Right now: Step 7** (check what a re-fetch does to an existing archive; costs one quota slot). Steps 5 and 6 closed 2026-09-17. Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
+> **Right now: Step 9** (bulk fetch: throttling, quota ledger, resumability). Steps 5–7 closed 2026-09-17. Steps 0–4 (including 0b/1b) are done (2026-09-16/17). Former
 > Step 8's universe preregistration was pulled into Step 3 because a per-symbol cost table cannot
 > be built before its symbols are fixed; the bulk OpenD fetch remains Step 9 and has not begun.
 
@@ -310,7 +310,7 @@ SPY/QQQ/IWM, whose local archives start in 2022.
 
 ---
 
-### Step 7 — Verify what a re-fetch does to an existing archive ☐
+### ~~Step 7 — Verify what a re-fetch does to an existing archive~~ ✅ DONE 2026-09-17 (seam confirmed, fixed, 0 quota spent)
 **New — a data-corruption risk nobody has looked at.**
 
 `mm/data.py` fetches with `autype=AuType.QFQ` (forward-adjusted). QFQ prices are expressed
@@ -329,6 +329,15 @@ quota slot of 97.
 **Done when:** the behaviour is documented, and — if the seam is real — `update_combined_csv()`
 gains an overlap-row price-mismatch check that quarantines rather than merges, matching what it
 already does for corruption.
+
+**Result 2026-09-17:** the seam is real and **dividends alone cause it**. The live SPY/IWM archives
+already had ~25 bps seams, and a free re-pull (SPY/QQQ/IWM were already in the quota set) proved it
+bar by bar. `update_combined_csv()` now rebases the archive onto the new basis when the overlap
+shows a clean constant ratio (with a backup), and refuses otherwise. Along the way it turned out the
+2026-08-24 test-fixture rows were never actually removed from the IWM archive; they are now, and
+`tests/test_archive_integrity.py` guards it. Details: `docs/strategy_graveyard.md` § "Archive
+price-basis seams". **For Step 9:** new symbols are pulled once over the full range, so they have a
+single basis. SPY/QQQ/IWM's 2019+ pull goes through the rebase path.
 
 ---
 

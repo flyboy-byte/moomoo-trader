@@ -1,4 +1,5 @@
 import os
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -93,6 +94,51 @@ def save_candles(df: pd.DataFrame, symbol: str, ktype: str, extended_time: bool 
     return path
 
 
+# QFQ (forward-adjusted) prices are expressed relative to the latest price, so every
+# dividend or split re-scales all earlier bars. A pull made after such an event returns
+# different numbers for bars already in the archive. Merging it naively splices two
+# price bases into one file (found 2026-09-17, PLAN.md Step 7: SPY had a 25.8 bps seam
+# at 2026-06-16 and IWM a 23.7 bps seam at 2026-06-11). Instead the archive is moved
+# onto the new basis, with a backup, whenever the overlap shows a clean constant ratio.
+_BASIS_TOL = 0.5e-4        # 0.5 bps: larger ratio drift than this is an adjustment event
+_BASIS_MIN_REF_BARS = 20   # need this many overlapping bars on one day to trust a ratio
+_PRICE_COLS = ("open", "high", "low", "close")
+
+
+class ArchiveBasisError(RuntimeError):
+    """New pull and archive disagree in a way that cannot be rebased safely."""
+
+
+def _rebase_factor(df_old: pd.DataFrame, df_new: pd.DataFrame) -> float | None:
+    """Return old→new price factor from the earliest overlapping day, or None.
+
+    None means "no rebase needed or possible": the overlap is too small to trust
+    (legacy keep-last merge applies). Raises ArchiveBasisError if the reference
+    day's ratios are not constant, i.e. something other than an adjustment.
+    """
+    ov = df_old[["time_key", "close"]].merge(
+        df_new[["time_key", "close"]], on="time_key", suffixes=("_old", "_new"))
+    ov = ov[(ov["close_old"] > 0) & (ov["close_new"] > 0)]
+    if ov.empty:
+        old_end, new_start = df_old["time_key"].max(), df_new["time_key"].min()
+        # Adjustments take effect between sessions, so a same-day continuation is safe.
+        if old_end < new_start and old_end.date() != new_start.date():
+            raise ArchiveBasisError(
+                "new pull does not overlap the archive — cannot check the price basis")
+        return None
+    first_day = ov["time_key"].dt.date.min()
+    ref = ov[ov["time_key"].dt.date == first_day]
+    if len(ref) < _BASIS_MIN_REF_BARS:
+        return None
+    ratios = ref["close_new"] / ref["close_old"]
+    r = float(ratios.median())
+    if float((ratios / r - 1).abs().max()) > _BASIS_TOL:
+        raise ArchiveBasisError(
+            f"overlap ratios on {first_day} are not constant "
+            f"({ratios.min():.6f}..{ratios.max():.6f}) — not a clean adjustment")
+    return None if abs(r - 1) <= _BASIS_TOL else r
+
+
 def update_combined_csv(
     df_new: pd.DataFrame,
     symbol: str,
@@ -115,7 +161,6 @@ def update_combined_csv(
         try:
             df_old = pd.read_csv(path)
             df_old["time_key"] = pd.to_datetime(df_old["time_key"])
-            combined = pd.concat([df_old, df_new], ignore_index=True)
         except Exception as e:
             # A crash mid-write (VPS restart, OOM) can leave this file truncated/corrupt.
             # Bug fix 2026-08-25 (found by external audit): this used to log and silently
@@ -136,6 +181,30 @@ def update_combined_csv(
                 path, e, quarantine,
             )
             raise
+
+        try:
+            factor = _rebase_factor(df_old, df_new)
+        except ArchiveBasisError:
+            # Leave the archive untouched; keep the pull for a human to look at.
+            sidecar = path.with_name(
+                f"{path.stem}.basis-mismatch-{clock.now().strftime('%Y%m%dT%H%M%S')}{path.suffix}"
+            )
+            df_new.to_csv(sidecar, index=False)
+            log.error("Price basis check failed for %s — archive NOT merged; new pull saved "
+                      "to %s", path, sidecar)
+            raise
+        if factor is not None:
+            backup = path.with_name(
+                f"{path.stem}.pre-rebase-{clock.now().strftime('%Y%m%dT%H%M%S')}{path.suffix}"
+            )
+            shutil.copy2(path, backup)
+            before = df_old["time_key"] < df_new["time_key"].min()
+            for col in _PRICE_COLS:
+                if col in df_old.columns:
+                    df_old.loc[before, col] = df_old.loc[before, col] * factor
+            log.warning("Price basis changed for %s (adjustment event): rebased %d earlier "
+                        "rows by x%.6f; backup at %s", path, int(before.sum()), factor, backup)
+        combined = pd.concat([df_old, df_new], ignore_index=True)
     else:
         combined = df_new
 
