@@ -301,7 +301,7 @@
     </div>
     <p class="table-note">
       Net figures apply the round-trip cost model in <code>mm/costs.py</code>
-      (SPY/QQQ 1.5&nbsp;bps, IWM 2.5&nbsp;bps, anything else 5.0&nbsp;bps). Gross is the
+      (SPY/QQQ 1.5&nbsp;bps, IWM 2.5&nbsp;bps; other symbols from the frozen wide-scan table, 12&nbsp;bps if unlisted). Gross is the
       frictionless simulator fill. A dimmed row with&nbsp;<span class="zero-edge">⚠</span>
       has a net-PF confidence interval containing 1.0 — that sample is consistent with
       <b>zero edge</b>, whatever the point estimate looks like.
@@ -463,7 +463,9 @@
 {% block scripts %}
 <script>
   // Inject server state into JS
-  var _isToday = {{ 'true' if is_today else 'false' }};
+  // Assign, don't redeclare: dashboard.js already declares `let _isToday`, and a
+  // `var` redeclaration was a SyntaxError that silently aborted this whole block.
+  _isToday = {{ 'true' if is_today else 'false' }};
   var _cohortStart = "{{ cohort_start }}";
 </script>
 {% endblock %}
