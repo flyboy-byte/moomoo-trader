@@ -376,6 +376,24 @@ Target 2019 → present (depth verified ≥ 2019-01-02).
 **Done when:** the universe is on disk, the ledger accounts for every slot spent, and a
 re-invocation is a no-op rather than a second spend.
 
+**2026-09-17 — tooling done, paid run not started.** `mm/bulk_fetch.py` + `scripts/fetch_universe.py`
+(a new script rather than an extension of `fetch_daily_archive.py`, but reusing its
+`fetch_candles` / `update_combined_csv`):
+- **9a:** a 1.1 s throttle between page requests.
+- **9b:** `logs/wide_scan/quota_ledger.jsonl`. Each paid pull must move OpenD's own quota counter
+  by exactly one slot (zero for symbols already held), or the run halts.
+- **9c:** finished symbols are never re-requested; the run refuses to start (or continue) below a
+  3-slot margin. `fetch_candles(strict=True)` now raises instead of returning a truncated history.
+- **Reserves:** swapped in (same asset class, list order) only when a symbol is genuinely
+  unavailable, never on transient errors.
+- **Tests:** 11 in `tests/test_bulk_fetch.py`.
+
+**VPS dry run:** 3 used / 97 free, 85 to fetch, **82 new slots**, 15 left after, and OpenD
+recognises all 97 codes. **Free live test:** `--limit 1` fetched SPY (already held), 149,688 bars
+2019-01-02 → 2026-08-31, **0 slots spent**, 2 m 47 s, 24 MB. The full run is ~4 h and ~2 GB (49 GB
+free). Output goes to `logs/wide_scan/` on the VPS, one full pull per symbol (single price basis).
+The local SPY/QQQ/IWM archives are not touched. **Waiting on user go-ahead to spend the 82 slots.**
+
 ---
 
 ### Step 10 — Close the benchmark ☐
