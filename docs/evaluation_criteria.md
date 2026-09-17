@@ -175,6 +175,19 @@ Use symbol medians and PLAN Step 4's day-blocked interval rather than pooled tra
 
 ## Amendment log
 
+- 2026-09-16 (engine cross-validation preregistration, written before the run): Compare the fast
+  engines with `mm.replay` on SPY/QQQ/IWM RTH five-minute candles from **2026-01-02 through
+  2026-06-09 inclusive**, using the frozen local CSV snapshots (SHA-256 prefixes:
+  SPY `89c69e51`, QQQ `09bbf41d`, IWM `8d3f2fb0`) and replay `fill_mode=instant`. The primary
+  scope is the four active strategies that have independent fast engines: `bb_kdj`, `orb`,
+  `vwap_pb`, and `gap_fade`. `bb_kdj_loose` is excluded because it has no independent fast-engine
+  entry point; that missing path must be resolved before it can join a wide scan. Use the current
+  frozen configuration and the same per-symbol net-cost table on both sides. The aggregate gate is
+  **trade-count difference ≤2% and absolute net-PF difference ≤0.05 for every in-scope strategy**.
+  Per-symbol rows and entry/exit identity are diagnostics, not extra pass/fail gates. A failure
+  pauses the plan at Step 5 until the cause is explained; do not relax the tolerance after seeing
+  results.
+
 - 2026-09-16 (gate ruler): **All PF gates now mean net PF under the frozen `mm/costs.py` model.**
   The original gates were written before the project had a cost model and therefore used
   frictionless PF implicitly. The 2026-08-29 measurement rebuild showed that this distinction can
