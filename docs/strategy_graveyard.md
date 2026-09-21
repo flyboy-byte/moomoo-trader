@@ -1581,3 +1581,12 @@ market with a completely different research pipeline: nothing found here survive
 preregistered holdout. Nothing about this rules out crypto broadly — 2 strategies and a 5-year
 window is a small slice — but it's more evidence that a rules-first process built to say "no"
 does, in fact, keep saying no rather than finding whatever it's pointed at.
+
+---
+
+## Weekly synthesis check (H2) — 2026-09-21: PASS
+
+The Monday synthesis had failed W30–W34 and W37 on truncated JSON. W38 was the first run on the
+fixed code (deployed to the VPS 2026-09-16) and returned a full summary: no error, 958 tokens.
+This supports the max_tokens truncation theory. One run is not proof, so W39 onward should
+confirm it.

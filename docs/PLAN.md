@@ -474,7 +474,7 @@ Step 5's tolerance, or the disagreement is explained.
 *(loose end §6, user-flagged)* `replay_2026_ytd/`, `replay_2026ytd/`, `replay_out/` in the repo root
 are three variants of the same thing. Best done *before* Step 11 writes a fourth.
 
-### H2 — Verify the weekly synthesis actually runs ☐
+### ~~H2 — Verify the weekly synthesis actually runs~~ ✅ DONE 2026-09-21 — W38 posted a real summary (first run on fixed code)
 The Monday 9:00 ET synthesis failed 5/5 weeks (W30–W34) on a truncated `max_tokens`, fail-open
 swallowed it, and Discord got "No summary available." every week. Fixed 2026-08-29, and the fix now
 records `stop_reason` — **but the diagnosis is inference, not proof.** Check the next Monday run.
@@ -703,3 +703,8 @@ read-only check passed). Rules: `docs/evaluation_criteria.md` § "Crypto pilot (
 - ☑ C2 — engine + tests (5), D run — pooled fails at p 0.051; 3 coin lanes (AVAX/SOL/ADA) survive BH
 - ☑ C3 — H run — **NULL: none of the 3 finalists replicate** (see graveyard § "Crypto Pilot")
 - ☑ C4 — write-up (graveyard § "Crypto Pilot"). Nothing replicated, so no Alpaca paper runner is proposed.
+
+H2 result 2026-09-21 (15:28 UTC): `synthesis_2026-W38.json` has a real `summary`, `error` None,
+`stop_reason` None, 958 tokens. It is the first run on the fixed code, and it succeeded, which
+supports the truncation theory (the old 512-token cap cut off the JSON). Still inference, not
+proof: one run. Watch W39+ for a regression.
