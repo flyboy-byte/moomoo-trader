@@ -407,7 +407,7 @@ The local SPY/QQQ/IWM archives are not touched. **Waiting on user go-ahead to sp
 
 ---
 
-### Step 10 — Close the benchmark ☐
+### ~~Step 10 — Close the benchmark~~ ✅ DONE 2026-09-21 — VPS nightly daily archive present (through 09-18); `analyze_trades.py` labels "daily bars", no partial-benchmark warning
 *(was loose end §3, A3)* The SPY buy-and-hold benchmark currently covers only to 2026-06-25 while
 trades run to 08-24, because the local archive ends there; the script says so instead of quoting a
 wrong number. Step 9 backfills it.
@@ -708,3 +708,15 @@ H2 result 2026-09-21 (15:28 UTC): `synthesis_2026-W38.json` has a real `summary`
 `stop_reason` None, 958 tokens. It is the first run on the fixed code, and it succeeded, which
 supports the truncation theory (the old 512-token cap cut off the JSON). Still inference, not
 proof: one run. Watch W39+ for a regression.
+
+## State as of 2026-09-21 (open items)
+
+- **Decision pending (user):** what follows three preregistered nulls (wide scan, Route 3, crypto
+  pilot). Options: write up and coast; EDGAR + Eulerpool post-earnings test; a daily collector for
+  Eulerpool point-in-time estimates; prediction markets.
+- **Forward cohort** (since 2026-09-17): 3 sessions, 7 trades, net PF 0.096. Far too few to read.
+- **Holdouts still unspent:** US 2019–2021 (wide scan and Route 3). The crypto holdout is spent.
+- **History quota:** 82 slots renew around 2026-10-17.
+- **VPS** is at `3234a3d`. It is behind only on docs and research code; the live runner is unchanged.
+- **Not yet updated:** the GitHub Pages site and the README's status table for the crypto null.
+- **Stale boxes:** Step 9's 9a/9b/9c checkboxes are unticked but the step is done.
