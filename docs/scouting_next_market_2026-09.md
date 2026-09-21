@@ -117,3 +117,9 @@ only. Rules must be written and committed first, as with every other scan.
 **Data-quality note:** the vendor's `profile.description` for AAPL ends with a stray LLM
 artifact ("Please give me a rating on my translation."). It is a small sign the text fields are
 machine-translated and unreviewed. Numbers should still be spot-checked before use.
+
+**Key-handling decision (2026-09-21, user):** the Eulerpool free-tier key was pasted into chat
+twice. The user chose **not to rotate it**. Recorded so it is not re-raised. Only the variable
+name is in the repo (`.env.example`); the value lives in the gitignored `.env`. Do not add
+Eulerpool's optional MCP server (it would route queries through a third party with the key as a
+bearer token); use REST calls from `.env` instead.
