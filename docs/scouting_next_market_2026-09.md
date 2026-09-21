@@ -94,3 +94,26 @@ highest intellectual reuse and zero trading risk, and it is a different project.
 before any archive is downloaded, then a pilot inside `moomoo` in its own `logs/crypto/` folder.
 Rename or re-scope the repo only if the pilot is worth continuing (discussed with the user
 2026-09-17).
+
+## Addendum 2026-09-21 — Eulerpool (fundamentals / earnings API), checked live
+
+The user received a marketing email; the free tier (100k calls/month) key is in `.env` as
+`EULERPOOL_API_KEY`. Probed AAPL with about 12 read-only calls. **Verdict: useful as a
+supplement, not sufficient alone for a post-earnings-drift backtest.**
+
+| Need | What the API gives | Tag |
+|---|---|---|
+| Earnings surprise history (actual vs estimate) | `calendar/earnings-surprises/{sym}`: 116 quarters for AAPL back to 1997. But `date` is the **fiscal quarter end** (e.g. 2026-06-30), not the announcement date, so trading on it would be lookahead. | VERIFIED |
+| Announcement dates | `earnings-by-symbol` / `equity-extended/earnings-calendar`: ~94 rows from 2024-05 only, with `epsActual` null even for past dates. | VERIFIED |
+| Point-in-time estimates | `equity/pit/estimates/{ticker}` exists (source: finnhub), but `as_of_date` spans **2026-08-05 → 2026-09-18 only**. Useless for a backtest, but could be collected going forward. | VERIFIED |
+| Filing timestamps | `financials-reported`: `filedDate` for 10-Ks (10 rows checked). | VERIFIED |
+| Whether historical `epsEstimate` is the pre-announcement consensus | Not stated anywhere; needs a spot-check against known quarters. | UNKNOWN |
+
+**Possible path (not started):** SEC EDGAR 8-K Item 2.02 filings carry the exact release
+timestamp for free back to ~2004. Joining those to Eulerpool's surprise magnitude by fiscal
+quarter would give a clean test, after spot-checking the estimates. The 25 single stocks
+only. Rules must be written and committed first, as with every other scan.
+
+**Data-quality note:** the vendor's `profile.description` for AAPL ends with a stray LLM
+artifact ("Please give me a rating on my translation."). It is a small sign the text fields are
+machine-translated and unreviewed. Numbers should still be spot-checked before use.
