@@ -24,6 +24,8 @@ git push origin master
 echo ""
 echo "=== Deploying to $VPS ==="
 
+# Since 2026-10-17 production is system units under user `moomoo`, running from /opt/moomoo.
+# The sudo steps below need the vps-sudo window open first (run `vps-sudo` in your own terminal).
 ssh "$VPS" bash <<'REMOTE'
 set -euo pipefail
 cd ~/moomoo
@@ -34,14 +36,18 @@ git pull
 echo "--- syntax check ---"
 python3 -m compileall -q mm/ scripts/
 
+echo "--- sync to /opt/moomoo (runtime copy, read-only to the service user) ---"
+sudo rsync -a --delete --exclude __pycache__ ~/moomoo/mm ~/moomoo/scripts ~/moomoo/site ~/moomoo/docs /opt/moomoo/
+sudo cp ~/moomoo/requirements.txt ~/moomoo/pyproject.toml /opt/moomoo/
+sudo chown -R ubuntu:moomoo /opt/moomoo
+sudo chmod -R u=rwX,g=rX,o= /opt/moomoo
+
 echo "--- restarting services ---"
-systemctl --user restart moomoo-paper.service
-systemctl --user restart moomoo-dashboard.service
+sudo systemctl restart moomoo-paper moomoo-dashboard
+sleep 3
 
 echo "--- status ---"
-systemctl --user status moomoo-paper.service --no-pager -l | head -6
-echo ""
-systemctl --user status moomoo-dashboard.service --no-pager -l | head -6
+systemctl is-active moomoo-paper moomoo-dashboard
 REMOTE
 
 echo ""

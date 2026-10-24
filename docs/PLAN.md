@@ -69,7 +69,7 @@ Five minutes, no code. The VPS runs the pre-2026-08-29 dashboard and is still pu
 gross-only numbers to a page that now has a net-of-costs design.
 
 ```bash
-ssh <vps> 'cd ~/moomoo && git pull && systemctl --user restart moomoo-dashboard'
+(superseded 2026-10-17: see WORKFLOW.md for the deploy flow)
 ```
 
 The **paper runner does not need restarting** — no runtime code changed on 2026-08-29.

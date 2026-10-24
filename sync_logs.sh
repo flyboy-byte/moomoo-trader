@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Pull production logs from VPS to local logs/.
 # Run from local machine: ./sync_logs.sh
+# VPS logs live in /var/lib/moomoo/root/logs (group moomoo-logs, readable without sudo; since 2026-10-17).
 # Safe: --update skips files newer on local (never overwrites local research outputs).
 set -euo pipefail
 
@@ -16,10 +17,10 @@ rsync -avz --update \
   --exclude="sweep_*.log" \
   --exclude="*_K_5M_combined.csv" \
   --exclude="*_K_5M_EXT_combined.csv" \
-  "$VPS:~/moomoo/logs/" ./logs/
+  "$VPS:/var/lib/moomoo/root/logs/" ./logs/
 # The VPS's own rolling candle archive (scripts/fetch_daily_archive.py) is excluded above —
 # it's small/operational and would otherwise land next to (or be confused with) the much
 # larger local multi-year combined CSVs of the same base name. Pull it manually if ever needed:
-#   rsync "$VPS:~/moomoo/logs/US_IWM_K_5M_EXT_combined.csv" ./logs/US_IWM_K_5M_EXT_vps.csv
+#   rsync "$VPS:/var/lib/moomoo/root/logs/US_IWM_K_5M_EXT_combined.csv" ./logs/US_IWM_K_5M_EXT_vps.csv
 
 echo "Sync complete."

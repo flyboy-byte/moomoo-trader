@@ -5,6 +5,12 @@
 Two environments: **local** (dev + paper trading on laptop) and **VPS** (always-on live runner).
 Code changes always flow: local → GitHub → VPS. Never edit code directly on VPS.
 
+**VPS layout (since 2026-10-17):** OpenD, the paper runner and the dashboard are *system* units
+(`moomoo-opend`, `moomoo-paper`, `moomoo-dashboard`) running as the sandboxed user `moomoo`. Code runs from the
+read-only copy `/opt/moomoo`; `~/moomoo` on the VPS is only the git clone. Config, logs and kill switches live in
+`/var/lib/moomoo/root/`. The six cron jobs are now `moomoo-job-*` systemd timers. `sudo` over SSH needs the
+`vps-sudo` window open first. Full detail: `~/projects/extraction/docs/flyboybyte-vps-architecture.md`.
+
 ---
 
 ## Local — Trading Session
@@ -37,15 +43,10 @@ git commit -m "..."
 git push
 ```
 
-Then deploy to VPS:
+Then deploy to VPS (run `vps-sudo` in your own terminal first; `deploy.sh` runs locally and does the
+push, `git pull`, rsync into `/opt/moomoo` and service restart over SSH):
 ```bash
-ssh $VPS_HOST 'cd ~/moomoo && ./deploy.sh'
-```
-
-Or SSH in and run it yourself:
-```bash
-ssh $VPS_HOST
-cd ~/moomoo && ./deploy.sh
+./deploy.sh
 ```
 
 **Rules:**
@@ -57,11 +58,9 @@ cd ~/moomoo && ./deploy.sh
 
 ## Local — Config Changes
 
-When `.env` changes locally, sync to VPS:
-```bash
-scp /home/logan/projects/moomoo/.env $VPS_HOST:~/moomoo/.env
-ssh $VPS_HOST 'systemctl --user restart moomoo-paper.service'
-```
+The VPS `.env` (`/var/lib/moomoo/root/.env`, owner `moomoo`, mode 600) is no longer readable or writable by the
+`ubuntu` login, so it can't be `scp`'d. Edit it through the dashboard config editor, or by hand with
+`sudo -u moomoo`, then `sudo systemctl restart moomoo-paper`.
 
 ---
 
@@ -85,62 +84,27 @@ python scripts/fetch_candles.py --symbol US.IWM --start 2025-01-01 --end 2026-06
 
 ---
 
-## VPS — First-Time OpenD Setup (one-time)
+## VPS — OpenD Login
 
-SSH in and edit the OpenD config with your Moomoo credentials:
-```bash
-ssh $VPS_HOST
-nano ~/opend/OpenD.xml
-```
+OpenD logs in unattended from `/opt/moomoo-opend/OpenD.xml` (root:moomoo 640; edit with sudo). It re-logs in after
+the scheduled 04:00 UTC reboot. Check with `sudo journalctl -u moomoo-opend -f` (look for `qotlogined: true`).
+Start order is OpenD, then paper, then dashboard. Don't restart OpenD casually or during market hours.
 
-Set these fields:
-```xml
-<login_account>your_email_or_phone</login_account>
-<login_pwd_md5>your_login_password_md5</login_pwd_md5>
-```
+### SMS / captcha verification (when Moomoo requires it)
 
-Generate MD5: `echo -n 'yourpassword' | md5sum`
-
-Start OpenD and verify it authenticates:
-```bash
-systemctl --user start moomoo-opend.service
-journalctl --user -u moomoo-opend.service -f   # watch for qotlogined: true
-```
-
-Once connected, start the paper runner:
-```bash
-systemctl --user start moomoo-paper.service
-journalctl --user -u moomoo-paper.service -f
-```
-
----
-
-## VPS — OpenD SMS Verification (when Moomoo requires it)
-
-Happens when OpenD restarts after repeated failed logins or Moomoo flags the IP.
-Telnet into OpenD and complete verification via SMS:
-
+Happens after repeated failed logins or when Moomoo flags the IP:
 ```bash
 ssh $VPS_HOST
 telnet 127.0.0.1 22222
 ```
-
-In the telnet session:
 ```
 relogin
-```
-
-Moomoo sends an SMS to your phone. Enter the code:
-```
 input_phone_verify_code -code=XXXXXX
 ```
-
-You should see `Login successful` with your account quota. Paper runner reconnects automatically within 60s.
-
-**If phone verify says "not available during current period"** — try `req_pic_verify_code` instead.
-It downloads a CAPTCHA image to `/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png`.
-Copy it locally: `scp $VPS_HOST:/home/ubuntu/.com.moomoo.OpenD/*/PicVerifyCode.png ~/Desktop/captcha.png`
-Then: `input_pic_verify_code -code=XXXXXX`
+You should see `Login successful`; the paper runner reconnects within 60s. If phone verify says "not available
+during current period", use `req_pic_verify_code` instead. It writes `PicVerifyCode.png` under
+`/var/lib/moomoo/.com.moomoo.OpenD/*/` (readable only with sudo); copy it out, view it, then
+`input_pic_verify_code -code=XXXXXX`.
 
 ---
 
@@ -149,34 +113,33 @@ Then: `input_pic_verify_code -code=XXXXXX`
 ```bash
 ssh $VPS_HOST
 
-# Check status
-systemctl --user status moomoo-opend.service moomoo-paper.service
+# Status (no sudo needed)
+systemctl is-active moomoo-opend moomoo-paper moomoo-dashboard
+systemctl list-timers 'moomoo-job-*'
 
-# Watch live logs
-journalctl --user -u moomoo-paper.service -f
+# Live logs (sudo for journal; log files below are readable without it)
+sudo journalctl -u moomoo-paper -f
+tail -f /var/lib/moomoo/root/logs/paper_US_IWM_$(date +%Y-%m-%d).jsonl
 
-# Check today's JSONL
-tail -f ~/moomoo/logs/paper_US_IWM_$(date +%Y-%m-%d).jsonl
+# Deploy: run ./deploy.sh from the LOCAL machine (not on the VPS)
 
-# Deploy code update from GitHub
-cd ~/moomoo && ./deploy.sh
+# Restart
+sudo systemctl restart moomoo-paper
 
-# Restart services
-systemctl --user restart moomoo-opend.service
-systemctl --user restart moomoo-paper.service
-
-# Kill switch
-touch ~/moomoo/STOP_TRADING.txt    # pause trading
-rm ~/moomoo/STOP_TRADING.txt       # resume trading
+# Kill switch (the dashboard also toggles these)
+sudo -u moomoo touch /var/lib/moomoo/root/STOP_TRADING.txt   # pause trading
+sudo -u moomoo rm /var/lib/moomoo/root/STOP_TRADING.txt      # resume trading
 ```
+
+The dashboard's "restart runner" button does not work in this layout (needs a polkit rule the owner has not
+approved); restart over SSH instead.
 
 ---
 
 ## VPS — Sync Logs to Local
 
-Pull today's logs from VPS to local for analysis:
 ```bash
-rsync -av $VPS_HOST:~/moomoo/logs/ /home/logan/projects/moomoo/logs/
+./sync_logs.sh      # rsync from /var/lib/moomoo/root/logs/, no sudo needed
 ```
 
 Then run local analysis tools against the synced data.
@@ -194,10 +157,10 @@ Controlled by `STRATEGY_MODE` in `.env`:
 
 Switch and restart:
 ```bash
-# Edit .env: STRATEGY_MODE=strict
+# Local: edit .env: STRATEGY_MODE=strict, then
 systemctl --user restart moomoo-paper.service
-# Sync to VPS if needed
-scp .env $VPS_HOST:~/moomoo/.env && ssh $VPS_HOST 'systemctl --user restart moomoo-paper.service'
+# VPS: edit /var/lib/moomoo/root/.env via the dashboard config editor, then
+ssh $VPS_HOST 'sudo systemctl restart moomoo-paper'
 ```
 
 ---
@@ -206,9 +169,10 @@ scp .env $VPS_HOST:~/moomoo/.env && ssh $VPS_HOST 'systemctl --user restart moom
 
 | File | Local | VPS |
 |------|-------|-----|
-| Code | `~/projects/moomoo/` | `~/moomoo/` |
-| Config | `~/projects/moomoo/.env` | `~/moomoo/.env` |
-| OpenD binary | `~/apps/moomoo-opend/` (AppImage) | `~/opend/` (headless) |
-| OpenD config | n/a (GUI) | `~/opend/OpenD.xml` |
-| Logs (JSONL) | `~/projects/moomoo/logs/` | `~/moomoo/logs/` |
-| systemd services | `~/.config/systemd/user/` | `~/.config/systemd/user/` |
+| Code | `~/projects/moomoo/` | `/opt/moomoo/` (runtime, read-only); `~/moomoo/` is the git clone |
+| Config | `~/projects/moomoo/.env` | `/var/lib/moomoo/root/.env` (moomoo-only) |
+| OpenD binary | `~/apps/moomoo-opend/` (AppImage) | `/opt/moomoo-opend/` (headless) |
+| OpenD config | n/a (GUI) | `/opt/moomoo-opend/OpenD.xml` |
+| Logs (JSONL) | `~/projects/moomoo/logs/` | `/var/lib/moomoo/root/logs/` (group `moomoo-logs`) |
+| Kill switches | project root | `/var/lib/moomoo/root/STOP_*.txt` |
+| systemd units | `~/.config/systemd/user/` | system units `moomoo-*` + `moomoo-job-*.timer` |

@@ -93,7 +93,7 @@ Package layout:
 Scripts (all run from project root with venv active):
   python scripts/health_check.py
   python scripts/fetch_candles.py [--symbol US.SPY] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--ktype K_5M] [--extended-time]
-  python scripts/fetch_daily_archive.py [--symbols ...] [--lookback-days 10]  # VPS cron: builds own rolling RTH+EXT archive
+  python scripts/fetch_daily_archive.py [--symbols ...] [--lookback-days 10]  # VPS timer (moomoo-job-premarket): builds own rolling RTH+EXT archive
   python scripts/research_premarket_gap.py --symbol US.IWM [--start ...] [--end ...] [--details]
   python scripts/run_backtest.py --latest
   python scripts/walk_forward.py --latest [--window 30]
@@ -117,7 +117,7 @@ Scripts (all run from project root with venv active):
   python scripts/backtest_orb.py [csvs...] [--latest] [--all] [--sweep]
   python scripts/backtest_gap_fade.py [csvs...] [--latest] [--all]             # Gap Fade backtest (research only)
   python scripts/flatten_simulate.py                                            # flatten Moomoo simulate account to zero positions
-  python scripts/fetch_vix_morning.py                                           # VPS cron: fetch VIX daily data each morning
+  python scripts/fetch_vix_morning.py                                           # VPS timer (moomoo-job-vix): fetch VIX daily data each morning
   python scripts/web_dashboard.py [--host HOST] [--port PORT]                  # Flask dashboard (VPS :8080, behind nginx)
   python scripts/eod_summary.py [--date YYYY-MM-DD] [--dry-run]               # end-of-day summary post to Discord
   python scripts/diagnose_logs.py [--date YYYY-MM-DD] [--all] [--symbol US.SPY]
@@ -125,7 +125,20 @@ Scripts (all run from project root with venv active):
   ./start.sh                                                                   # start OpenD + paper runner
   ./stop.sh                                                                    # stop paper runner
   ./sync_logs.sh                                                               # rsync VPS logs → local logs/
-  ./scripts/install_cron.sh                                                    # idempotent VPS cron installer
+  ./scripts/install_cron.sh                                                    # LEGACY: VPS jobs are systemd timers since 2026-10-17
+
+Tests / lint (venv active; pytest.ini sets testpaths=tests):
+  python -m pytest tests/ -q --tb=short                  # full suite
+  python -m pytest tests/test_trades_module.py -q        # one file
+  python -m pytest tests/test_trades_module.py::test_name -q   # one test
+  ruff check .                                           # informational only — ~150 pre-existing findings;
+                                                         # never run `ruff check . --fix` repo-wide (it strips
+                                                         # re-export-only imports, e.g. in mm/paper.py)
+
+Dev vs VPS: code changes happen locally only; commit + push, then run ./deploy.sh from the LOCAL machine (needs the vps-sudo window).
+Since 2026-10-17 the VPS runs system units as user `moomoo` from /opt/moomoo; .env, logs/ and STOP_*.txt live in /var/lib/moomoo/root/
+(see WORKFLOW.md). ./sync_logs.sh needs no sudo.
+AGENTS.md is the VPS-runner agent brief (monitor, don't edit code) — read it before doing anything on the VPS.
 
 Safety rules (never violate):
 - TRD_ENV=SIMULATE always. Never change to REAL.
