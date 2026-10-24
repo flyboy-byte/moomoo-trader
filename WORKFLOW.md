@@ -176,3 +176,13 @@ ssh $VPS_HOST 'sudo systemctl restart moomoo-paper'
 | Logs (JSONL) | `~/projects/moomoo/logs/` | `/var/lib/moomoo/root/logs/` (group `moomoo-logs`) |
 | Kill switches | project root | `/var/lib/moomoo/root/STOP_*.txt` |
 | systemd units | `~/.config/systemd/user/` | system units `moomoo-*` + `moomoo-job-*.timer` |
+
+---
+
+## VPS — Rollback and backups (privsep, 2026-10-17)
+
+`sudo /usr/local/sbin/privsep-rollback-moomoo.sh` stops and removes the system units and timers, moves `logs/` back
+to `~/moomoo/logs`, restores the old crontab and re-enables the old `--user` units. Pre-move root-only backups are in
+`/var/backups/privsep/moomoo-{code,opend,state}-20261017-191721.tgz`. Change record: `~/security/hardening-log.md` on
+the VPS. Making the dashboard's "restart runner" button work would need a polkit rule for the `moomoo` user, which the
+owner has not approved.
