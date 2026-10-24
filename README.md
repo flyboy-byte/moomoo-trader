@@ -91,8 +91,8 @@ first time.
 ## Where this ended up (2026-10-23)
 
 The question was whether simple intraday strategies on liquid US ETFs have an edge after realistic costs. The answer,
-under rules frozen before each run, is **no demonstrable edge**: the wide scan (96,129 trades), the daily-horizon scan
-and the crypto pilot are all nulls, and the live paper trades net out near zero. The lasting value is the method: one
+under rules frozen before each run, is **no demonstrable edge**: the wide scan (96,129 trades) and the daily-horizon scan are
+both nulls, and the live paper trades net out near zero. The lasting value is the method: one
 canonical cost-aware ruler, day-blocked confidence intervals, multiple-testing correction, a sealed holdout, and a
 recorded history of every bug that made the early numbers look better than they were
 ([graveyard](docs/strategy_graveyard.md)). The project is treated as a finished research result. The paper runner is
@@ -115,7 +115,6 @@ What has been run and checked, versus what merely exists.
 | 🚧 | **LLM regime gate** | Claude classifies the morning regime and blocks two mean-reversion lanes on trending days. It is live and gating, but its value has **not** been shown against a no-gate baseline. |
 | ✅ | **Wide scan (85 symbols): a null** | 96,129 trades, 2022–2026, under rules frozen in advance. No strategy and none of 340 symbol×strategy lanes shows an edge net of costs; three strategies are significantly negative. The 2019–2021 holdout stays sealed and unspent. [Results](docs/strategy_graveyard.md). |
 | ✅ | **Daily-horizon scan (Route 3): also a null** | Overnight holds, 200-day trend, vol scaling, momentum, weekly reversal, on the same 85 symbols. Overnight earns +3 bps gross a night and loses it to costs; nothing passes. Holdout still unspent. [Results](docs/strategy_graveyard.md). |
-| ✅ | **Crypto pilot: dev looked promising, holdout null** | 31 coins, rules frozen first. Three per-coin finalists (AVAX, SOL, ADA) passed development, then none replicated on the sealed 2023–2026 holdout (net +3.8, +0.9, −4.3 bps). The holdout is spent. [Results](docs/strategy_graveyard.md). |
 | 🚧 | **Forward cohort** | A frozen live configuration from 2026-09-17. As of 2026-10-23: 45 trades, net PF 0.62 (95% CI 0.26–1.25), −0.65% net on capital vs SPY buy-and-hold −0.10%. Consistent with zero edge; too few trades to say more. |
 | ❌ | **A profitable strategy** | Not demonstrated. See above. |
 | ❌ | **Live (real-money) trading** | Deliberately not built. `live_trade_runner.py.DISABLED` is never executed. |

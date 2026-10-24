@@ -12,8 +12,8 @@ facts.
 
 **Network note:** during this pass, most direct API probes from this machine failed at the
 connection level (curl `000`, including outside the sandbox), and SSH to the VPS timed out before
-the banner. Only `data.binance.vision` answered. Every API-availability claim below other than
-Binance's archive is therefore REPORTED and needs a live re-check before any build.
+the banner. Every API-availability claim below is therefore REPORTED and needs a live re-check
+before any build.
 
 ## What carries over
 
@@ -25,17 +25,6 @@ Binance's archive is therefore REPORTED and needs a live re-check before any bui
 | `mm/data.py`, `mm/bulk_fetch.py`, OpenD, the live runner, the dashboard | No, moomoo-specific. A new market needs its own fetcher and (if wanted) its own paper runner |
 
 ## Candidates
-
-### 1. Crypto (spot, maybe perpetual futures)
-
-| | |
-|---|---|
-| **Data** | Binance's public archive `data.binance.vision`, no account needed: BTCUSDT 5-min monthly files exist from **2017-08** to **2026-08** (VERIFIED, HTTP 200 on both). Perpetual funding-rate files are also in the archive (REPORTED; the probe failed with the network issue). |
-| **Costs** | Binance spot at the base tier is ~10 bps per side (INFERRED from widely published schedule; not re-checked). Alpaca crypto is 15 bps maker / 25 bps taker at entry tier ([REPORTED](https://docs.alpaca.markets/docs/crypto-trading)). **Round trip ≈ 20–50 bps**, 10–30× the US ETF cost table. |
-| **Paper trading** | Alpaca's paper API likely covers crypto (REPORTED, unconfirmed). Binance.com is unavailable to US residents (INFERRED); archive data is fine for research either way. |
-| **Crowding** | Less efficient than US ETFs historically, but heavily botted now (INFERRED). |
-| **Fit** | Best fit for the existing engine: same bar shape, deep free history, many symbols, no quota. |
-| **Main risk** | Costs. Intraday edges here would need to clear 20–50 bps, which kills most 5-min ideas before they start. Daily/weekly horizons (trend and momentum are the documented crypto effects) or funding-rate carry fit the cost structure better. |
 
 ### 2. Prediction markets (Kalshi; Polymarket US)
 
@@ -75,7 +64,6 @@ highest intellectual reuse and zero trading risk, and it is a different project.
 
 | | Data (free, deep) | Cost hurdle | Engine reuse | Crowding | Novelty vs the nulls |
 |---|---|---|---|---|---|
-| Crypto | ✅ 2017→ (verified) | ❌ 20–50 bps | ✅ high | 🚧 medium | 🚧 medium |
 | Prediction markets | 🚧 2021→ (reported) | ❌ up to ~3.5%/side | ❌ low | ✅ low | ✅ high |
 | Small US stocks | 🚧 quota-limited | 🚧 higher than ETFs | ✅ highest | 🚧 medium | ❌ low |
 | Micro futures | ❌ paid | ✅ low | ✅ high | ❌ high | ❌ low |
@@ -83,43 +71,6 @@ highest intellectual reuse and zero trading risk, and it is a different project.
 
 ## Claude's read (INFERRED, for the user to accept or not)
 
-- **Crypto is the natural pilot.** The data is verified, free and deep, and the engine drops in.
-  Aim it at **daily-horizon** rules, where 20–50 bps round trips are affordable, not at 5-min
-  bars. `mm/daily_scan.py` plus a 24/7 session definition is most of the work.
 - **Prediction markets are the most interesting** and the least crowded, but they are a
   modelling project more than an engine port.
 - Small US stocks mainly repeat what already failed.
-
-**Next step if crypto is chosen:** a preregistration (universe, costs, windows, rules) committed
-before any archive is downloaded, then a pilot inside `moomoo` in its own `logs/crypto/` folder.
-Rename or re-scope the repo only if the pilot is worth continuing (discussed with the user
-2026-09-17).
-
-## Addendum 2026-09-21 — Eulerpool (fundamentals / earnings API), checked live
-
-The user received a marketing email; the free tier (100k calls/month) key is in `.env` as
-`EULERPOOL_API_KEY`. Probed AAPL with about 12 read-only calls. **Verdict: useful as a
-supplement, not sufficient alone for a post-earnings-drift backtest.**
-
-| Need | What the API gives | Tag |
-|---|---|---|
-| Earnings surprise history (actual vs estimate) | `calendar/earnings-surprises/{sym}`: 116 quarters for AAPL back to 1997. But `date` is the **fiscal quarter end** (e.g. 2026-06-30), not the announcement date, so trading on it would be lookahead. | VERIFIED |
-| Announcement dates | `earnings-by-symbol` / `equity-extended/earnings-calendar`: ~94 rows from 2024-05 only, with `epsActual` null even for past dates. | VERIFIED |
-| Point-in-time estimates | `equity/pit/estimates/{ticker}` exists (source: finnhub), but `as_of_date` spans **2026-08-05 → 2026-09-18 only**. Useless for a backtest, but could be collected going forward. | VERIFIED |
-| Filing timestamps | `financials-reported`: `filedDate` for 10-Ks (10 rows checked). | VERIFIED |
-| Whether historical `epsEstimate` is the pre-announcement consensus | Not stated anywhere; needs a spot-check against known quarters. | UNKNOWN |
-
-**Possible path (not started):** SEC EDGAR 8-K Item 2.02 filings carry the exact release
-timestamp for free back to ~2004. Joining those to Eulerpool's surprise magnitude by fiscal
-quarter would give a clean test, after spot-checking the estimates. The 25 single stocks
-only. Rules must be written and committed first, as with every other scan.
-
-**Data-quality note:** the vendor's `profile.description` for AAPL ends with a stray LLM
-artifact ("Please give me a rating on my translation."). It is a small sign the text fields are
-machine-translated and unreviewed. Numbers should still be spot-checked before use.
-
-**Key-handling decision (2026-09-21, user):** the Eulerpool free-tier key was pasted into chat
-twice. The user chose **not to rotate it**. Recorded so it is not re-raised. Only the variable
-name is in the repo (`.env.example`); the value lives in the gitignored `.env`. Do not add
-Eulerpool's optional MCP server (it would route queries through a third party with the key as a
-bearer token); use REST calls from `.env` instead.

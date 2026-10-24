@@ -693,32 +693,14 @@ Candidates are compared in `docs/scouting_next_market_2026-09.md`; **none has be
 If one is, pilot it inside this repo first. Rename or re-scope the repo only if the pilot is worth
 continuing.
 
-## Crypto pilot (started 2026-09-17, user-approved)
-
-Research data comes from the Binance archive; any trading goes through Alpaca **paper** (keys in `.env`,
-read-only check passed). Rules: `docs/evaluation_criteria.md` § "Crypto pilot (C)". Survey:
-`docs/crypto_strategy_survey_2026-09.md`.
-- ☑ C0 — universe, costs, split and rules frozen (`docs/crypto/universe_2026-09-17.json`)
-- ☑ C1 — download Binance daily (and BTC/ETH + SOL hourly) klines → `logs/crypto/` (31 coins)
-- ☑ C2 — engine + tests (5), D run — pooled fails at p 0.051; 3 coin lanes (AVAX/SOL/ADA) survive BH
-- ☑ C3 — H run — **NULL: none of the 3 finalists replicate** (see graveyard § "Crypto Pilot")
-- ☑ C4 — write-up (graveyard § "Crypto Pilot"). Nothing replicated, so no Alpaca paper runner is proposed.
-
-H2 result 2026-09-21 (15:28 UTC): `synthesis_2026-W38.json` has a real `summary`, `error` None,
-`stop_reason` None, 958 tokens. It is the first run on the fixed code, and it succeeded, which
-supports the truncation theory (the old 512-token cap cut off the JSON). Still inference, not
-proof: one run. Watch W39+ for a regression.
-
 ## State as of 2026-09-21 (open items)
 
-- ~~**Decision pending (user):** what follows three preregistered nulls (wide scan, Route 3, crypto
-  pilot). Options: write up and coast; EDGAR + Eulerpool post-earnings test; a daily collector for
+- ~~**Decision pending (user):** what follows the preregistered nulls (wide scan, Route 3). Options: write up and coast; EDGAR + Eulerpool post-earnings test; a daily collector for
   Eulerpool point-in-time estimates; prediction markets.~~ **DECIDED 2026-10-23: write up and coast** (see below).
 - **Forward cohort** (since 2026-09-17): 3 sessions, 7 trades, net PF 0.096. Far too few to read.
-- **Holdouts still unspent:** US 2019–2021 (wide scan and Route 3). The crypto holdout is spent.
+- **Holdouts still unspent:** US 2019–2021 (wide scan and Route 3).
 - **History quota:** 82 slots renew around 2026-10-17.
 - **VPS** is at `3234a3d`. It is behind only on docs and research code; the live runner is unchanged.
-- **Not yet updated:** the GitHub Pages site and the README's status table for the crypto null.
 - ~~**Stale boxes:** Step 9's 9a/9b/9c checkboxes~~ — ticked 2026-10-23.
 
 ## Project closed as a finished research result — 2026-10-23
@@ -726,8 +708,7 @@ proof: one run. Watch W39+ for a regression.
 **Decision (user, 2026-10-23): write up and coast.** No new research routes (EDGAR/Eulerpool, the Eulerpool
 collector and prediction markets are not pursued). No tuning of the six live strategies and no edits to them.
 
-- **Result:** no demonstrable edge net of costs. Wide scan (96,129 trades): null. Route 3: null. Crypto pilot: null on
-  holdout. Forward cohort 2026-09-17 → 2026-10-23: 45 trades, net PF 0.62 (95% CI 0.26–1.25), −0.65% net vs SPY −0.10%.
+- **Result:** no demonstrable edge net of costs. Wide scan (96,129 trades): null. Route 3: null. Forward cohort 2026-09-17 → 2026-10-23: 45 trades, net PF 0.62 (95% CI 0.26–1.25), −0.65% net vs SPY −0.10%.
 - **Kept:** the measurement method (`mm/costs.py`, `mm/stats.py`, `mm/trades.py`, pre-registered gates), the replay
   harness, and the bug record in the graveyard. README and site now say so.
 - **Still running, on purpose:** the paper runner and OpenD on the VPS (forward cohort + execution validation) and the
