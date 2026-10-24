@@ -365,12 +365,12 @@ it does not authorize or begin Step 9's quota-consuming fetch.
 *(was B1)* Extend `scripts/fetch_daily_archive.py` — do not rebuild it, `update_combined_csv`
 already dedupes and quarantines correctly. Needs, and each is small enough to test on its own:
 
-- **9a ☐ Throttling.** Futu documents ~30 requests / 30s. The measured unthrottled rate
+- **9a ☑ Throttling.** Futu documents ~30 requests / 30s. The measured unthrottled rate
   (0.07 s/page) would trip it immediately.
-- **9b ☐ A quota ledger.** A persisted record of which symbol consumed a slot and when.
+- **9b ☑ A quota ledger.** A persisted record of which symbol consumed a slot and when.
   Without it, a resume or a retry silently burns non-renewable slots — and the plan already calls
   the quota one-shot per 30 days.
-- **9c ☐ Resumability + a pre-flight refusal** that will not start if the run would exceed
+- **9c ☑ Resumability + a pre-flight refusal** that will not start if the run would exceed
   remaining slots.
 
 Target 2019 → present (depth verified ≥ 2019-01-02).
@@ -711,12 +711,28 @@ proof: one run. Watch W39+ for a regression.
 
 ## State as of 2026-09-21 (open items)
 
-- **Decision pending (user):** what follows three preregistered nulls (wide scan, Route 3, crypto
+- ~~**Decision pending (user):** what follows three preregistered nulls (wide scan, Route 3, crypto
   pilot). Options: write up and coast; EDGAR + Eulerpool post-earnings test; a daily collector for
-  Eulerpool point-in-time estimates; prediction markets.
+  Eulerpool point-in-time estimates; prediction markets.~~ **DECIDED 2026-10-23: write up and coast** (see below).
 - **Forward cohort** (since 2026-09-17): 3 sessions, 7 trades, net PF 0.096. Far too few to read.
 - **Holdouts still unspent:** US 2019–2021 (wide scan and Route 3). The crypto holdout is spent.
 - **History quota:** 82 slots renew around 2026-10-17.
 - **VPS** is at `3234a3d`. It is behind only on docs and research code; the live runner is unchanged.
 - **Not yet updated:** the GitHub Pages site and the README's status table for the crypto null.
-- **Stale boxes:** Step 9's 9a/9b/9c checkboxes are unticked but the step is done.
+- ~~**Stale boxes:** Step 9's 9a/9b/9c checkboxes~~ — ticked 2026-10-23.
+
+## Project closed as a finished research result — 2026-10-23
+
+**Decision (user, 2026-10-23): write up and coast.** No new research routes (EDGAR/Eulerpool, the Eulerpool
+collector and prediction markets are not pursued). No tuning of the six live strategies and no edits to them.
+
+- **Result:** no demonstrable edge net of costs. Wide scan (96,129 trades): null. Route 3: null. Crypto pilot: null on
+  holdout. Forward cohort 2026-09-17 → 2026-10-23: 45 trades, net PF 0.62 (95% CI 0.26–1.25), −0.65% net vs SPY −0.10%.
+- **Kept:** the measurement method (`mm/costs.py`, `mm/stats.py`, `mm/trades.py`, pre-registered gates), the replay
+  harness, and the bug record in the graveyard. README and site now say so.
+- **Still running, on purpose:** the paper runner and OpenD on the VPS (forward cohort + execution validation) and the
+  lightweight data timers. The user said not to take the trader down.
+- **Not done / open:** the 2019–2021 holdout stays sealed (spend it only on a hypothesis written first). Whether to
+  eventually stop OpenD and the paper runner is the user's call; back up `logs/` locally before any shutdown.
+- **Deploy note:** the VPS clone is behind `origin/master` (docs and research code only). Pushing and deploying this docs
+  commit is optional and needs the `vps-sudo` window.
