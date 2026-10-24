@@ -1,60 +1,57 @@
 <h1 align="center">moomoo-trader</h1>
 
 <p align="center">
-  <strong>A paper-only intraday strategy lab that measures itself honestly.</strong><br>
-  Five strategies trade Moomoo's simulated account on 5-minute bars, while a research pipeline<br>
-  keeps asking the only question that matters: does any of it survive transaction costs?
+  <strong>I built a trading lab to find out whether simple intraday strategies beat transaction costs.<br>
+  Five months and 96,129 trades later, they don't. This repo is the evidence.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/trading-paper%20only%20(SIMULATE)-orange" alt="paper only">
-  <img src="https://img.shields.io/badge/broker-Moomoo%20OpenD-f5a623" alt="Moomoo OpenD">
-  <img src="https://img.shields.io/badge/bars-5--minute-informational" alt="5-minute bars">
+  <img src="https://img.shields.io/badge/result-no%20demonstrable%20edge-lightgrey" alt="no demonstrable edge">
+  <img src="https://img.shields.io/badge/tests-396%20passing-brightgreen" alt="396 tests passing">
   <img src="https://img.shields.io/badge/python-3.12%2B-3776ab" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT">
 </p>
 
 <p align="center">
   <a href="https://flyboy-byte.github.io/moomoo-trader/"><b>Website</b></a> •
-  <a href="#the-interesting-part">The finding</a> •
-  <a href="#whats-actually-verified">Status</a> •
-  <a href="#how-it-works">How it works</a> •
-  <a href="#how-the-research-is-kept-honest">Method</a> •
-  <a href="#quick-start">Quick start</a> •
-  <a href="docs/PLAN.md">PLAN.md</a>
+  <a href="#the-result">The result</a> •
+  <a href="#how-i-knew-it-was-a-null">Method</a> •
+  <a href="#the-bugs-that-fooled-me">The bugs</a> •
+  <a href="#the-live-experiment">Live experiment</a> •
+  <a href="#run-it-yourself">Run it</a>
 </p>
 
 ---
 
 > [!NOTE]
-> **A personal research project, not a trading product or advice.** It runs on a small VPS
-> against Moomoo's paper account and has never placed a real order. The code and docs were written
-> with [Claude Code](https://claude.com/claude-code), with periodic independent reviews by Codex. I
+> **A personal research project, not a trading product or advice.** It has only ever traded Moomoo's
+> simulated account and has never placed a real order. The code and docs were written with
+> [Claude Code](https://claude.com/claude-code), with periodic independent reviews by Codex. I
 > directed the work, ran it, and made the calls.
 
-> [!CAUTION]
-> **There is no demonstrated edge here.** Net of modeled trading costs, the live paper results are
-> negative, and every strategy's confidence interval still includes "no edge at all." Read the
-> results below as a measurement, not a pitch.
+## The question
 
-## The interesting part
+Can a retail trader, using well-known intraday rules on the most liquid US ETFs, make money
+**after** realistic trading costs?
 
-For months the dashboard reported a profit. Then the same live trades were re-measured with a
-transaction-cost model:
+I started in May 2026 with five textbook strategies (Bollinger-band mean reversion, opening-range
+breakout, VWAP pullback, gap fade) running on Moomoo's paper account, and a dashboard that
+reported a small profit. Most of the project since then has been trying to find out whether that
+profit was real.
 
-| Same 102 live paper trades | Total P&L | Profit factor | 95% CI (PF) | P(mean > 0) |
-|---|---:|---:|---|---:|
-| **Gross** (frictionless fills) | +$12.92 | 1.19 | 0.66 – 2.17 | 0.72 |
-| **Net** of modeled costs (1.5–2.5 bps) | **−$0.57** | **0.99** | 0.55 – 1.78 | 0.48 |
+## The result
 
-**The apparent profit disappeared under the modeled costs.** Since then every report, gate, and
-backtest in the repo shows gross and net side by side, and the decision gates are read net. The
-trades logged since that re-measurement have been worse, not better; see the
-[latest health review](docs/strategy_graveyard.md).
+**No. Nothing I tested has a demonstrable edge once costs are counted.** Three separate,
+preregistered tests all came back null:
 
-**Then the question went wide.** The same four strategies ran across 85 liquid ETFs and large
-caps from 2022 to 2026, with parameters, costs, and the selection rule all frozen in advance. The
-answer is the same at 96,129 trades:
+| Test | What it covered | Outcome |
+|---|---|---|
+| **Live paper trading** | 102 trades on SPY, QQQ and IWM | Gross **+$12.92** (PF 1.19) became net **−$0.57** (PF 0.99) once costs were modeled. The profit *was* the costs. |
+| **Wide scan** | 96,129 trades, 85 liquid ETFs and large caps, 2022–2026 | All four strategies lose after costs; three are significantly negative. None of 340 symbol×strategy lanes survived multiple-testing correction. |
+| **Daily-horizon scan** | Overnight holds, 200-day trend, vol scaling, momentum, weekly reversal, same 85 symbols | Overnight holding earns about +3 bps gross a night and gives all of it back to costs. Nothing passes. |
+
+The wide scan in detail:
 
 | Strategy | Trades | Gross bps / trade | Net bps / trade (95% CI) |
 |---|---:|---:|---|
@@ -63,99 +60,160 @@ answer is the same at 96,129 trades:
 | Gap fade | 23,647 | +0.23 | −3.92 (−5.22 to −2.63) |
 | BB+KDJ | 2,112 | +2.24 | −1.88 (−6.16 to +2.44) |
 
-Only ORB shows an edge before costs, and it is smaller than even SPY's 1.5 bps round trip.
-Meanwhile the median symbol simply held rose 56 %.
+Only ORB shows an edge before costs, and it is smaller than SPY's 1.5 bps round trip. For
+comparison, the median symbol simply held rose 56 % over the same window.
 
-The project's value is the machinery that found this, and keeps finding things: an order layer
-that booked fills that never happened, a price archive with silent splice seams, test fixtures
-leaking into research data, a live filter that was configured on but never wired in. All of these
-are written up in the [graveyard](docs/strategy_graveyard.md), including the ones I got wrong the
-first time.
-
----
-
-## What it looks like
+That is not surprising: this is one of the most competed trades there is. What's worth sharing is
+that the project is built so a null is believable.
 
 <p align="center">
-  <img src="docs/images/dashboard-scorecard.png" alt="Web dashboard scorecard: five strategies with gross PF, net PF, a day-blocked 95% confidence interval, net bps, gross and net P&L. Four strategies are net negative; every row is flagged as consistent with zero edge." width="92%">
+  <img src="docs/images/dashboard-scorecard.png" alt="Web dashboard scorecard: strategies with gross PF, net PF, a day-blocked 95% confidence interval, net bps, gross and net P&L. Four strategies are net negative; every row is flagged as consistent with zero edge." width="92%">
 </p>
 
-<p align="center">
-  <img src="docs/images/dashboard-chart.png" alt="Cumulative net P&L by strategy since June: vwap_pb slightly positive, orb and gap_fade drifting negative." width="92%">
-</p>
+<p align="center"><sub>The live dashboard. The ⚠ marks a net-PF interval that contains 1.0.</sub></p>
 
-<p align="center"><sub>The live web dashboard (Flask, behind nginx). The ⚠ marks a net-PF interval that contains 1.0.</sub></p>
+## How I knew it was a null
 
----
+The failure mode this project is built against is quietly retuning until a backtest looks good.
+So the rules came first:
 
-## Where this ended up (2026-10-23)
-
-The question was whether simple intraday strategies on liquid US ETFs have an edge after realistic costs. The answer,
-under rules frozen before each run, is **no demonstrable edge**: the wide scan (96,129 trades) and the daily-horizon scan are
-both nulls, and the live paper trades net out near zero. The lasting value is the method: one
-canonical cost-aware ruler, day-blocked confidence intervals, multiple-testing correction, a sealed holdout, and a
-recorded history of every bug that made the early numbers look better than they were
-([graveyard](docs/strategy_graveyard.md)). The project is treated as a finished research result. The paper runner is
-left running for the forward cohort and no further strategy work is planned.
-
----
-
-## What's actually verified
-
-What has been run and checked, versus what merely exists.
-
-| | Area | Notes |
+| Rule | Why it matters | Where it lives |
 |---|---|---|
-| ✅ | **Paper runner, 24/5 on a VPS** | Five strategies × SPY/QQQ/IWM. Confirmed fills, broker reconciliation, persisted positions, kill switches. Running since June. |
-| ✅ | **One canonical ruler** | `mm/trades.py` pairs every trade and `mm/costs.py` prices it. The dashboard, EOD report, and analysis script are tested to agree. |
-| ✅ | **Replay of the real code path** | `mm/replay.py` drives the live runner bar by bar against a fake broker. |
-| ✅ | **Fast engines match the real runner** | Four fast backtest engines reproduce the replay **exactly** (trade counts and net PF) on Jan–Jun 2026. The preregistered first attempt *failed* and is recorded as such; the cause was a replay fill model and a live bug, both fixed. |
-| ✅ | **Archive integrity** | Forward-adjusted price files are rebased, never spliced, when a dividend or split changes history. The real archives are checked for fixture rows and impossible jumps. |
-| ✅ | **Test suite** | pytest covers risk, signals, engines, replay, costs, statistics, archives, and bulk-fetch quota safety. A session guard fails the run if any test touches the real `logs/`. |
-| 🚧 | **LLM regime gate** | Claude classifies the morning regime and blocks two mean-reversion lanes on trending days. It is live and gating, but its value has **not** been shown against a no-gate baseline. |
-| ✅ | **Wide scan (85 symbols): a null** | 96,129 trades, 2022–2026, under rules frozen in advance. No strategy and none of 340 symbol×strategy lanes shows an edge net of costs; three strategies are significantly negative. The 2019–2021 holdout stays sealed and unspent. [Results](docs/strategy_graveyard.md). |
-| ✅ | **Daily-horizon scan (Route 3): also a null** | Overnight holds, 200-day trend, vol scaling, momentum, weekly reversal, on the same 85 symbols. Overnight earns +3 bps gross a night and loses it to costs; nothing passes. Holdout still unspent. [Results](docs/strategy_graveyard.md). |
-| 🚧 | **Forward cohort** | A frozen live configuration from 2026-09-17. As of 2026-10-23: 45 trades, net PF 0.62 (95% CI 0.26–1.25), −0.65% net on capital vs SPY buy-and-hold −0.10%. Consistent with zero edge; too few trades to say more. |
-| ❌ | **A profitable strategy** | Not demonstrated. See above. |
-| ❌ | **Live (real-money) trading** | Deliberately not built. `live_trade_runner.py.DISABLED` is never executed. |
+| **Gates are written before the data.** Sample-size thresholds and actions per strategy; changing one needs a dated amendment. | Stops me rationalizing a result after seeing it. | [`docs/evaluation_criteria.md`](docs/evaluation_criteria.md) |
+| **Net is the ruler.** Every profit-factor threshold means net PF under a frozen cost model that is deliberately not a tunable knob. | Costs are what erased the profit. | [`mm/costs.py`](mm/costs.py) |
+| **Uncertainty is bootstrapped by trading day**, not by trade. | Same-day trades across symbols aren't independent; per-trade intervals look much tighter than they are. | [`mm/stats.py`](mm/stats.py) |
+| **Two engines must agree** before the fast one is trusted for a scan. | The first attempt *failed* this check, and that failure is recorded. | [`scripts/cross_validate_engines.py`](scripts/cross_validate_engines.py) |
+| **A sealed holdout** (2019–2021). | The scan script refuses to compute it until the finalist list is committed. | [`scripts/wide_scan.py`](scripts/wide_scan.py) |
+| **Nothing is deleted.** Every dead idea, bug and wrong claim stays on record with its data. | Dead ends don't get re-explored. | [`docs/strategy_graveyard.md`](docs/strategy_graveyard.md) |
 
----
-
-## How it works
-
+```mermaid
+flowchart LR
+    A[Idea] --> B[Write the gate<br/>and cost model]
+    B --> C[Freeze it, commit it]
+    C --> D[Run on development data]
+    D --> E{Passes the<br/>gate net of costs?}
+    E -- no --> F[Record the null<br/>in the graveyard]
+    E -- yes --> G[Finalists committed]
+    G --> H[Spend the sealed<br/>holdout once]
+    H --> I{Replicates?}
+    I -- no --> F
+    I -- yes --> J[Forward paper trading]
 ```
-                 ┌────────────────────────────────────────────────┐
-  OpenD ────────>│  Paper runner  (mm/paper.py, polls every 60 s) │
-  127.0.0.1      │                                                │
-  :11111         │   5-min candles per symbol                     │
-                 │     │                                          │
-                 │     ├─ bb_kdj        <── LLM regime gate       │
-                 │     ├─ bb_kdj_loose  <── (morning, Claude)     │
-                 │     ├─ orb           <── VIX cap, 12:30 cutoff │
-                 │     ├─ vwap_pb                                 │
-                 │     └─ gap_fade      <── VIX cap, large-gap    │
-                 │                          short filter          │
-                 │   risk checks → SIMULATE order → confirm fill  │
-                 │   positions on disk · JSONL event log          │
-                 └───────────────────────┬────────────────────────┘
-                                         │
-           ┌─────────────────────────────┼──────────────────────────┐
-           ▼                             ▼                          ▼
-   Discord alerts             mm/trades.py + mm/costs.py      Web dashboard
-   (entries, exits, EOD)      one pairing, one cost model     (gross + net)
-                                         │
-                                         ▼
-               analyze_trades.py · replay · fast engines · wide scan
-```
+
+A gate that never says "no" isn't a gate, so nothing was rescued by relaxing a threshold.
+
+## The bugs that fooled me
+
+The most useful thing this project produced is probably the record of how its own numbers were
+wrong. A few of them, all written up in the [graveyard](docs/strategy_graveyard.md):
 
 <details>
-<summary><b>The five live strategies</b></summary>
+<summary><b>The reporting layer showed a profit that wasn't there</b></summary>
 
 <br>
 
-All run on SPY, QQQ, and IWM with 5-minute closed bars. Per-symbol overrides and the exact live
-values are in [`docs/frozen_config_2026-09-17.env`](docs/frozen_config_2026-09-17.env); full specs
-are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The dashboard paired trades its own way, in per-share P&L, with no costs. Re-pairing the same
+trades through one canonical module and applying a cost model turned +$12.92 into −$0.57. Then the
+same metric (profit factor) turned out to have been re-implemented in several places, and the
+copies had drifted. It happened repeatedly before I wrote a test that fails if anyone defines a
+second one.
+
+</details>
+
+<details>
+<summary><b>Look-ahead and stale state</b></summary>
+
+<br>
+
+- A KDJ golden cross from yesterday's close leaked into the first bars of the next session.
+- Config objects bound at import time went stale after a test reload, and one stale value
+  silently poisoned the live research archive.
+- A bootstrap confidence interval returned `nan` on mostly-winning samples, with no error.
+
+</details>
+
+<details>
+<summary><b>Things that were switched on but did nothing</b></summary>
+
+<br>
+
+- A live "skip large gap-up shorts" filter was configured and enabled for seven weeks, and was
+  never wired in.
+- A keyword clash made the AI scorer raise on every block; the runner swallowed the error, so
+  trades were blocked by a crash rather than by a decision.
+- The weekly AI synthesis failed silently five weeks in a row on a truncated token limit.
+
+</details>
+
+<details>
+<summary><b>The data itself</b></summary>
+
+<br>
+
+- A price of 999.0 sat in four years of IWM bars. A note said it had been removed, and it hadn't.
+- Dividends silently rescale adjusted prices, so merged downloads had spliced two price bases
+  about 25 bps apart. Archives are now rebased, never spliced.
+- Test runs leaked output into the real research logs.
+
+</details>
+
+## What's worth keeping
+
+Not the strategies. The reusable parts are the method and the tooling:
+
+- **One cost-aware ruler.** `mm/trades.py` pairs every trade and `mm/costs.py` prices it; the
+  dashboard, the EOD report and the analysis script are tested to agree.
+- **Replay of the real code path.** `mm/replay.py` drives the live runner bar by bar against a fake
+  broker, so backtests exercise the same code that trades.
+- **Preregistration as code.** Frozen configs, day-blocked bootstrap, Benjamini–Hochberg
+  correction, and a holdout the scripts refuse to open early.
+- **A bug record honest enough to learn from.**
+
+## The live experiment
+
+The paper runner stays on as a forward test of the frozen configuration. As of 2026-10-23 (36 days
+since the 2026-09-17 freeze):
+
+| | |
+|---|---|
+| Trades | 45 |
+| Net profit factor | **0.62** (95% CI 0.26 – 1.25) |
+| Net return on capital | −0.65 % |
+| SPY buy-and-hold, same window | −0.10 % |
+
+The interval includes 1.0, so this is consistent with zero edge, and it is too few trades to say
+more. I'm not planning further strategy work. The runner stays up for execution validation and
+the record.
+
+## How it works
+
+```mermaid
+flowchart TD
+    O[OpenD<br/>Moomoo gateway] --> R[Paper runner<br/>polls every 60 s]
+    R --> S1[bb_kdj]
+    R --> S2[bb_kdj_loose]
+    R --> S3[orb]
+    R --> S4[vwap_pb]
+    R --> S5[gap_fade]
+    G[Morning regime gate<br/>Claude + VIX caps] -.-> S1
+    G -.-> S3
+    G -.-> S5
+    S1 & S2 & S3 & S4 & S5 --> K[Risk checks<br/>SIMULATE order<br/>fill confirmation]
+    K --> L[(JSONL event log<br/>+ positions on disk)]
+    L --> T[mm/trades.py + mm/costs.py]
+    T --> D[Dashboard]
+    T --> A[analyze_trades · replay<br/>fast engines · wide scan]
+    K --> N[Discord alerts]
+```
+
+<details>
+<summary><b>The five strategies</b></summary>
+
+<br>
+
+All run on SPY, QQQ and IWM with 5-minute closed bars. Live values are in
+[`docs/frozen_config_2026-09-17.env`](docs/frozen_config_2026-09-17.env); full specs are in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 | Strategy | Idea | Entry | Exit |
 |---|---|---|---|
@@ -167,29 +225,9 @@ are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 </details>
 
----
+## Run it yourself
 
-## How the research is kept honest
-
-The failure mode this project is built against is quietly retuning until a backtest looks good.
-
-| Rule | Where it lives |
-|---|---|
-| **Gates are written before the data.** Each strategy has sample-size gates and actions, and changing one needs a dated amendment. | [`docs/evaluation_criteria.md`](docs/evaluation_criteria.md) |
-| **Net is the ruler.** Every PF threshold means net PF under a frozen, deliberately non-tunable cost model. | [`mm/costs.py`](mm/costs.py) |
-| **Uncertainty is bootstrapped by trading day**, because same-day trades across symbols are not independent. | [`mm/stats.py`](mm/stats.py) |
-| **Two engines must agree** before the fast one is trusted for a scan, with a tolerance fixed in advance. | [`scripts/cross_validate_engines.py`](scripts/cross_validate_engines.py) |
-| **A sealed holdout.** 2019–2021 was never touched by any research; the scan script refuses to compute it until the finalist list is committed. | [`scripts/wide_scan.py`](scripts/wide_scan.py) |
-| **Nothing is deleted.** Every dead idea, bug, and wrong claim stays on record with its data. | [`docs/strategy_graveyard.md`](docs/strategy_graveyard.md) |
-
-> [!IMPORTANT]
-> **A null result is an acceptable outcome.** Retail intraday mean reversion on the most liquid US
-> ETFs is one of the most competed trades there is. If the wide scan finds nothing, that is
-> recorded as a finding, not rescued by relaxing a threshold.
-
----
-
-## Quick start
+This is a research record more than a product, but it does run.
 
 > [!WARNING]
 > Needs a [Moomoo](https://www.moomoo.com) account and
@@ -205,87 +243,26 @@ pip install -r requirements.txt
 cp .env.example .env                    # TRD_ENV=SIMULATE stays
 python scripts/health_check.py          # is OpenD reachable?
 python scripts/fetch_candles.py --symbol US.SPY --start 2026-01-02
-python scripts/replay_paper.py logs/US_SPY_K_5M_2*.csv  # real runner, fake broker
-./start.sh                              # paper runner
-python scripts/web_dashboard.py         # http://localhost:8080
+python scripts/replay_paper.py --latest # the real runner against a fake broker
+python scripts/analyze_trades.py --all  # gross vs net, CIs, benchmark
+python -m pytest tests/ -q              # some tests skip without local candle data
 ```
 
-`.env.example` documents every setting with safe defaults. The settings the VPS actually runs are
-in [`docs/frozen_config_2026-09-17.env`](docs/frozen_config_2026-09-17.env).
-
-<details>
-<summary><b>Research commands</b></summary>
-
-<br>
-
-```bash
-python scripts/analyze_trades.py --all          # per-strategy gross/net, CIs, benchmark
-python scripts/cross_validate_engines.py --fast-only   # fast engines, frozen config
-python scripts/replay_paper.py --latest --fill close   # replay at signal-close fills
-python scripts/fetch_universe.py --dry-run      # quota + plan for the wide-scan pull
-python scripts/wide_scan.py dev --workers 10    # development window (after the pull)
-python scripts/wide_scan.py holdout             # refuses until finalists are committed
-./scripts/verify.sh                             # tests + log sync + diagnostics
-```
-
-</details>
-
----
-
-## Safety
-
-- `TRD_ENV=SIMULATE`: every order goes to Moomoo's paper account.
-- `LIVE_TRADING_ENABLED=false` is checked in code before every order attempt.
-- `touch STOP_TRADING.txt` pauses the runner without killing it.
-- Positions persist to disk and are reconciled against the broker, so a restart mid-session is safe.
-- No secrets in the repo: configuration lives in a gitignored `.env`.
-
----
+`./start.sh` starts the paper runner and `python scripts/web_dashboard.py` serves the dashboard on
+`http://localhost:8080`. Safety is enforced in code: `TRD_ENV=SIMULATE`,
+`LIVE_TRADING_ENABLED=false` is checked before every order, and `touch STOP_TRADING.txt` pauses
+the runner. There is no live-order path.
 
 ## Where things are
 
 | Doc | For |
 |---|---|
-| [`docs/PLAN.md`](docs/PLAN.md) | The single active plan: ordered steps, each with a "done when" |
-| [`docs/strategy_graveyard.md`](docs/strategy_graveyard.md) | Every finding, bug, and dead end, with data |
+| [`docs/strategy_graveyard.md`](docs/strategy_graveyard.md) | Every finding, bug and dead end, with data |
 | [`docs/evaluation_criteria.md`](docs/evaluation_criteria.md) | Preregistered gates, the cohort, and the wide-scan rules |
+| [`docs/PLAN.md`](docs/PLAN.md) | The plan and how the project was closed out |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Data flow, strategy specs, config reference, kill switches |
 | [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) | File-by-file map |
-| [`docs/research-reset.md`](docs/research-reset.md) | The evidence behind the gross→net finding |
-
-<details>
-<summary><b>Repo layout</b></summary>
-
-<br>
-
-```
-mm/                   core package
-  config.py           .env → typed config singleton
-  paper.py            the live loop        evals.py      per-strategy live logic
-  execution.py        orders + fills       risk.py       sizing, limits, kill switch
-  events.py           JSONL log, positions clock.py      time seam for tests/replay
-  trades.py           canonical pairing    costs.py      frozen cost model
-  stats.py            day-block bootstrap  scan.py       wide-scan rules and engines
-  backtest.py         BB+KDJ engine, canonical profit_factor()
-  orb_strategy.py · vwap_pullback.py · gap_fade.py · ema_momentum.py   fast engines
-  replay.py           real runner + fake broker
-  data.py             candle fetch, basis-safe archive merge
-  bulk_fetch.py       quota-safe universe pull
-  morning_regime.py   LLM regime classifier    vol_engine.py   volatility shadow log
-scripts/              CLI entry points (backtests, replay, analysis, dashboard, cron)
-tests/                pytest suite + a guard that the real logs/ is never touched
-docs/                 plan, graveyard, criteria, architecture, frozen configs
-```
-
-</details>
-
-## Tests
-
-```bash
-python -m pytest tests/ -q
-```
-
-Some tests read the local candle archives in `logs/` and skip when they aren't there.
+| [`WORKFLOW.md`](WORKFLOW.md) | Local and VPS operations |
 
 ## License
 
